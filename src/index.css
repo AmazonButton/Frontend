@@ -1,0 +1,522 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --color-primary: #2563eb;
+    --color-background: #f8fafc;
+    --color-foreground: #0f172a;
+    --color-card: #ffffff;
+    --color-card-foreground: #0f172a;
+    --color-border: #e2e8f0;
+    --color-accent: #0284c7;
+    --glare-color: rgba(255, 255, 255, 0.45);
+  }
+
+  .dark {
+    --color-primary: #3b82f6;
+    --color-background: #0c0f17;
+    --color-foreground: #f8fafc;
+    --color-card: #131722;
+    --color-card-foreground: #f8fafc;
+    --color-border: #1e2433;
+    --color-accent: #38bdf8;
+    --glare-color: rgba(255, 255, 255, 0.04);
+  }
+
+  body {
+    @apply bg-[#F8FAFC] dark:bg-[#0C0F17] text-[#0F172A] dark:text-[#F8FAFC] font-sans antialiased transition-colors duration-200;
+  }
+}
+
+/* Modern High-End Precision Engineering Grid */
+.bg-tech-grid {
+  background-size: 44px 44px;
+  background-image: 
+    linear-gradient(to right, rgba(148, 163, 184, 0.08) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(148, 163, 184, 0.08) 1px, transparent 1px);
+}
+
+.dark .bg-tech-grid {
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.035) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.035) 1px, transparent 1px);
+}
+
+/* Subtle Radial Vignette Mask for Background Grid */
+.mask-radial-vignette {
+  mask-image: radial-gradient(ellipse 80% 65% at 50% 12%, black 25%, transparent 85%);
+  -webkit-mask-image: radial-gradient(ellipse 80% 65% at 50% 12%, black 25%, transparent 85%);
+}
+
+/* Slow Ambient Breathing Animation for Background Auras */
+@keyframes ambientBreathe {
+  0%, 100% {
+    transform: scale(1) translate(0, 0);
+    opacity: 0.7;
+  }
+  50% {
+    transform: scale(1.08) translate(15px, -10px);
+    opacity: 1;
+  }
+}
+
+.animate-ambient-breathe {
+  animation: ambientBreathe 12s ease-in-out infinite;
+}
+
+/* Atmospheric Ambient Background (Synchronized Blue-White for Light & Red-Black for Dark) */
+.telemetry-grid {
+  position: relative;
+  background-color: transparent;
+}
+
+/* Shimmering Animated Gradient Text */
+@keyframes gradientShimmer {
+  0% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
+}
+
+.animate-gradient-shimmer {
+  background-size: 200% auto;
+  animation: gradientShimmer 5s ease infinite;
+}
+
+/* Gentle Organic 3D Levitation */
+@keyframes floatGentle {
+  0%, 100% {
+    transform: translateY(0px) rotate(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotate(0.6deg);
+  }
+}
+
+.animate-float-gentle {
+  animation: floatGentle 5s ease-in-out infinite;
+}
+
+/* Breathing Glow Pulse */
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 0.55;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.95;
+    transform: scale(1.05);
+  }
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 3.5s ease-in-out infinite;
+}
+
+/* Dynamic Border Beam */
+@keyframes borderBeam {
+  0% {
+    offset-distance: 0%;
+  }
+  100% {
+    offset-distance: 100%;
+  }
+}
+
+/* 3D Smart Button Cap Idle State (Light = Blue & White, Dark = Cyber Red & Obsidian Black) */
+.btn-cap-idle {
+  background: radial-gradient(circle at 35% 35%, #3b82f6 0%, #1d4ed8 55%, #0f172a 100%);
+}
+.dark .btn-cap-idle {
+  background: radial-gradient(circle at 35% 35%, #ef4444 0%, #b91c1c 55%, #08080a 100%);
+}
+
+/* Subtle micro-dot matrix with smooth vignette */
+.dot-matrix-bg {
+  background-image: radial-gradient(rgba(148, 163, 184, 0.12) 1px, transparent 1px);
+  background-size: 28px 28px;
+  mask-image: radial-gradient(ellipse at 50% 50%, black 30%, transparent 80%);
+  -webkit-mask-image: radial-gradient(ellipse at 50% 50%, black 30%, transparent 80%);
+}
+
+.dark .dot-matrix-bg {
+  background-image: radial-gradient(rgba(239, 68, 68, 0.09) 1px, transparent 1px);
+}
+
+/* Glassmorphism Panels */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.82);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(226, 232, 240, 0.9);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.05);
+}
+
+.dark .glass-panel {
+  background: rgba(14, 14, 18, 0.85);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(239, 68, 68, 0.2);
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6);
+}
+
+/* Cyber Card Polish */
+.cyber-card {
+  position: relative;
+  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.cyber-card:hover {
+  border-color: rgba(37, 99, 235, 0.35);
+  box-shadow: 0 12px 32px -8px rgba(37, 99, 235, 0.15);
+  transform: translateY(-2px);
+}
+
+.dark .cyber-card:hover {
+  border-color: rgba(239, 68, 68, 0.5);
+  box-shadow: 0 12px 32px -8px rgba(239, 68, 68, 0.25);
+}
+
+/* Custom Clean Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 9999px;
+}
+.dark ::-webkit-scrollbar-thumb {
+  background: #334155;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: #475569;
+}
+
+/* Subtle button press effect */
+.btn-press {
+  transition: transform 0.12s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.12s ease;
+}
+.btn-press:active {
+  transform: scale(0.97);
+}
+
+/* Deep Dark Theme Obsidian & Cyber Red Overrides for Legacy Dark Panels */
+.dark .dark\:bg-\[\#0F172A\] {
+  background-color: #101014 !important;
+}
+.dark .dark\:border-white\/10 {
+  border-color: rgba(239, 68, 68, 0.18) !important;
+}
+.dark .dark\:border-white\/5 {
+  border-color: rgba(239, 68, 68, 0.1) !important;
+}
+.dark .dark\:bg-slate-900 {
+  background-color: #0c0c10 !important;
+}
+.dark .dark\:bg-slate-800 {
+  background-color: #16161c !important;
+}
+.dark .dark\:hover\:bg-slate-800:hover {
+  background-color: #221a20 !important;
+}
+
+/* Hardware Button Bezel Simulation */
+.hardware-bezel {
+  box-shadow: 
+    inset 0 2px 4px rgba(255, 255, 255, 0.15),
+    inset 0 -3px 6px rgba(0, 0, 0, 0.6),
+    0 12px 28px -5px rgba(0, 0, 0, 0.5);
+}
+
+/* Ring Pulse Animation */
+@keyframes ringPulse {
+  0% { transform: scale(1); opacity: 0.8; }
+  100% { transform: scale(1.6); opacity: 0; }
+}
+
+.animate-ring-pulse {
+  animation: ringPulse 2s cubic-bezier(0, 0, 0.2, 1) infinite;
+}
+
+/* Glow gradient shine effect */
+.btn-gradient-glow {
+  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 50%, #06b6d4 100%);
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.btn-gradient-glow:hover {
+  box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.4), 0 0 15px 0 rgba(6, 182, 212, 0.2);
+  filter: brightness(1.05);
+}
+
+/* ========================================================================= */
+/* 3D GRAPHICS & ANIMATION ENGINE                                            */
+/* ========================================================================= */
+.perspective-1000 {
+  perspective: 1000px;
+}
+.perspective-1200 {
+  perspective: 1200px;
+}
+.preserve-3d {
+  transform-style: preserve-3d;
+}
+.backface-hidden {
+  backface-visibility: hidden;
+  -webkit-backface-visibility: hidden;
+}
+
+/* 3D Floating Float Keyframes */
+@keyframes float3d {
+  0% {
+    transform: translateY(0px) rotateX(0deg) rotateY(0deg);
+  }
+  50% {
+    transform: translateY(-8px) rotateX(2deg) rotateY(-2deg);
+  }
+  100% {
+    transform: translateY(0px) rotateX(0deg) rotateY(0deg);
+  }
+}
+
+.animate-float-3d {
+  animation: float3d 5s ease-in-out infinite;
+}
+
+/* 3D Orbital Glow */
+@keyframes orbit3d {
+  0% {
+    transform: rotateZ(0deg) scale(1);
+    opacity: 0.6;
+  }
+  50% {
+    transform: rotateZ(180deg) scale(1.05);
+    opacity: 0.9;
+  }
+  100% {
+    transform: rotateZ(360deg) scale(1);
+    opacity: 0.6;
+  }
+}
+
+.animate-orbit-3d {
+  animation: orbit3d 12s linear infinite;
+}
+
+/* 3D Glass Layer Shadow */
+.shadow-3d-card {
+  box-shadow: 
+    0 15px 35px -5px rgba(0, 0, 0, 0.1),
+    0 0 0 1px rgba(255, 255, 255, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.6);
+}
+
+.dark .shadow-3d-card {
+  box-shadow: 
+    0 20px 45px -10px rgba(0, 0, 0, 0.5),
+    0 0 0 1px rgba(255, 255, 255, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+/* ========================================================================= */
+/* 36. ANIMATED BACKGROUND — PREMIUM 3D ATMOSPHERE                           */
+/* ========================================================================= */
+
+/* Layer 1: Soft Atmosphere Drift (25s - 35s smooth cycle) */
+@keyframes atmosphereSlowDrift {
+  0% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+  33% {
+    transform: translate3d(2%, 1.5%, 0) scale(1.02);
+  }
+  66% {
+    transform: translate3d(-1.5%, -1%, 0) scale(0.99);
+  }
+  100% {
+    transform: translate3d(0, 0, 0) scale(1);
+  }
+}
+
+.animate-atmosphere-drift {
+  animation: atmosphereSlowDrift 32s ease-in-out infinite alternate;
+  will-change: transform;
+}
+
+/* Layer 2: Floating Light Orbs (drifting, floating, low opacity) */
+@keyframes orbFloatA {
+  0% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.08;
+  }
+  50% {
+    transform: translate3d(40px, -30px, 0);
+    opacity: 0.13;
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.08;
+  }
+}
+
+@keyframes orbFloatB {
+  0% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.06;
+  }
+  50% {
+    transform: translate3d(-35px, 35px, 0);
+    opacity: 0.11;
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.06;
+  }
+}
+
+@keyframes orbFloatC {
+  0% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.05;
+  }
+  50% {
+    transform: translate3d(25px, 20px, 0);
+    opacity: 0.09;
+  }
+  100% {
+    transform: translate3d(0, 0, 0);
+    opacity: 0.05;
+  }
+}
+
+.animate-orb-a {
+  animation: orbFloatA 26s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-orb-b {
+  animation: orbFloatB 34s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+.animate-orb-c {
+  animation: orbFloatC 28s ease-in-out infinite;
+  will-change: transform, opacity;
+}
+
+/* Layer 3: 3D Perspective Grid Background (vanishing into depth, opacity 0.04 - 0.08) */
+.grid-perspective-container {
+  perspective: 600px;
+  perspective-origin: 50% 30%;
+  overflow: hidden;
+}
+
+.grid-3d-plane {
+  transform: rotateX(62deg) translateZ(0);
+  transform-origin: 50% 100%;
+  background-size: 40px 40px;
+  background-image: 
+    linear-gradient(to right, rgba(6, 182, 212, 0.15) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(6, 182, 212, 0.15) 1px, transparent 1px);
+  mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.2) 40%, transparent 80%);
+  -webkit-mask-image: linear-gradient(to top, rgba(0, 0, 0, 0.8) 0%, rgba(0, 0, 0, 0.2) 40%, transparent 80%);
+  animation: grid3dForward 22s linear infinite;
+  will-change: background-position;
+}
+
+@keyframes grid3dForward {
+  0% {
+    background-position: 0 0;
+  }
+  100% {
+    background-position: 0 40px;
+  }
+}
+
+/* Circular Light Halo (Section 36.7) */
+@keyframes circularHaloSlow {
+  0% {
+    transform: rotate(0deg);
+  }
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+.animate-halo-slow {
+  animation: circularHaloSlow 40s linear infinite;
+  will-change: transform;
+}
+
+/* Network Signal Dash Flow (Section 36.3) */
+@keyframes signalFlowDash {
+  to {
+    stroke-dashoffset: -100;
+  }
+}
+
+.animate-signal-flow {
+  stroke-dasharray: 6 12;
+  animation: signalFlowDash 4s linear infinite;
+}
+
+/* 36.16 Accessibility: prefers-reduced-motion strict enforcement */
+@media (prefers-reduced-motion: reduce) {
+  .animate-atmosphere-drift,
+  .animate-orb-a,
+  .animate-orb-b,
+  .animate-orb-c,
+  .grid-3d-plane,
+  .animate-halo-slow,
+  .animate-signal-flow,
+  .animate-float-3d,
+  .animate-orbit-3d,
+  .animate-ring-pulse {
+    animation: none !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}
+
+/* Superdesign Tactile Hardware Button Feedback */
+@keyframes tactilePulseRing {
+  0% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.75);
+  }
+  70% {
+    box-shadow: 0 0 0 16px rgba(245, 158, 11, 0);
+  }
+  100% {
+    box-shadow: 0 0 0 0 rgba(245, 158, 11, 0);
+  }
+}
+
+.tactile-active-glow {
+  animation: tactilePulseRing 1.4s cubic-bezier(0.24, 0, 0.38, 1) infinite;
+}
+
+/* Glassmorphism utility */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.dark .glass-panel {
+  background: rgba(17, 20, 28, 0.82);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
