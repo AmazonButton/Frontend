@@ -10,17 +10,24 @@ interface Atmosphere3DBackgroundProps {
 }
 
 export const Atmosphere3DBackground: React.FC<Atmosphere3DBackgroundProps> = ({
+  variant = 'hero',
   className = '',
 }) => {
+  if (variant === 'dashboard') {
+    return (
+      <div
+        aria-hidden="true"
+        className={`fixed inset-0 pointer-events-none z-0 overflow-hidden bg-[#FBFBFC] dark:bg-zinc-950 ${className}`}
+      />
+    );
+  }
+
   return (
     <div
       aria-hidden="true"
-      className={`fixed inset-0 pointer-events-none z-0 overflow-hidden transition-colors duration-500 bg-[#F8FAFC] dark:bg-[#08080A] ${className}`}
+      className={`fixed inset-0 pointer-events-none z-0 overflow-hidden transition-colors duration-500 bg-[#FBFBFC] dark:bg-[#08080A] ${className}`}
     >
-      {/* 1. Precision Tech Architectural Grid (Subtle Linear/Vercel Engineering Grid with Radial Vignette) */}
-      <div className="absolute inset-0 bg-tech-grid mask-radial-vignette pointer-events-none" />
-
-      {/* 2. Signature Top Horizon Lighting Beam (Vibrant Electric Indigo in Light / Cyber Crimson in Dark) */}
+      {/* 2. Signature Top Horizon Lighting Beam */}
       <div className="absolute -top-[140px] left-1/2 -translate-x-1/2 w-[1000px] h-[500px] rounded-full bg-gradient-to-b from-blue-500/18 via-cyan-500/8 to-transparent dark:from-red-600/22 dark:via-rose-600/8 dark:to-transparent blur-[100px] pointer-events-none" />
 
       {/* 3. Secondary Ambient Breathing Auras for Rich Dimensional Depth */}

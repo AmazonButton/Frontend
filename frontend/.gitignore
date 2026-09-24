@@ -6,3 +6,6 @@ dist-ssr/
 .env.*
 !.env.example
 *.log
+repomix-output.xml
+repomix*.xml
+

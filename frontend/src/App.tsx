@@ -2,6 +2,7 @@ import React from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { Navbar } from './layouts/Navbar';
 import { Sidebar } from './layouts/Sidebar';
+import { Footer } from './layouts/Footer';
 import { LandingPage } from './pages/LandingPage';
 import { LoginPage } from './pages/auth/LoginPage';
 import { RegisterPage } from './pages/auth/RegisterPage';
@@ -53,9 +54,9 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
 // Store Shell Layout (with Sidebar)
 const StoreLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   return (
-    <div className="flex">
+    <div className="flex min-h-[calc(100vh-4rem)] w-full bg-[#FBFBFC] dark:bg-zinc-950 relative z-10">
       <Sidebar />
-      <main className="flex-1 p-4 sm:p-6 lg:p-8 max-w-7xl">{children}</main>
+      <main className="flex-1 min-w-0 w-full p-4 sm:p-5 lg:p-6 overflow-x-hidden">{children}</main>
     </div>
   );
 };
@@ -76,6 +77,10 @@ export const App: React.FC = () => {
     }
     return 'hero';
   };
+
+  const isDashboard = location.pathname.startsWith('/store') || location.pathname.startsWith('/admin');
+  const isAuth = ['/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/403'].includes(location.pathname);
+  const showFooter = !isDashboard && !isAuth;
 
   return (
     <div className="min-h-screen bg-surface-bg dark:bg-cyber-bg text-navy-900 dark:text-slate-100 flex flex-col transition-colors duration-200 relative overflow-x-hidden">
@@ -177,6 +182,7 @@ export const App: React.FC = () => {
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </div>
+      {showFooter && <Footer />}
     </div>
   );
 };
