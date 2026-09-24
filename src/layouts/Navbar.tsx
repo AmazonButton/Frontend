@@ -1,10 +1,12 @@
 import React, { useState } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
+import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useSound } from '../context/OrderSoundContext';
-import { LogOut, Shield, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, User as UserIcon, Volume2, VolumeX, Bluetooth } from 'lucide-react';
+import { LogOut, Shield, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X } from 'lucide-react';
 import { WhiteDeviceAirPodsModal } from '../components/devices/WhiteDeviceAirPodsModal';
+import { HeaderNavigation } from '../components/common/HeaderNavigation';
 
 export const Navbar: React.FC = () => {
   const { user, logout } = useAuth();
@@ -14,6 +16,7 @@ export const Navbar: React.FC = () => {
   const location = useLocation();
 
   const [showAirPodsModal, setShowAirPodsModal] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -51,21 +54,16 @@ export const Navbar: React.FC = () => {
         <div className="flex items-center gap-6 shrink-0">
           {/* Brand Logo & Name */}
           <Link to="/" className="flex items-center gap-2.5 group">
-            <div className="w-9 h-9 rounded-xl overflow-hidden shadow-sm border border-slate-200 dark:border-zinc-800 group-hover:scale-105 group-hover:shadow-md transition-all bg-zinc-950 flex items-center justify-center shrink-0">
+            <div className="w-8 h-8 rounded-xl overflow-hidden border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-1 flex items-center justify-center shrink-0">
               <img
-                src={theme === 'dark' ? '/assets/logo-red.png' : '/assets/logo.png'}
-                alt="Smart Order"
-                className="w-full h-full object-cover transition-all"
+                src="/assets/logo.png"
+                alt="Smart Order Button"
+                className="w-full h-full object-contain"
               />
             </div>
-            <div className="flex items-center gap-2">
-              <span className="text-base font-extrabold tracking-tight text-slate-900 dark:text-white group-hover:text-blue-600 dark:group-hover:text-red-400 transition-colors">
-                SMART ORDER
-              </span>
-              <span className="text-[10px] font-mono font-bold px-1.5 py-0.5 rounded-md bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700">
-                v2.0
-              </span>
-            </div>
+            <span className="text-base font-bold tracking-tight text-slate-900 dark:text-white">
+              Smart Order Button
+            </span>
           </Link>
 
           {/* Primary Nav Links based on login role */}
@@ -125,70 +123,73 @@ export const Navbar: React.FC = () => {
         </div>
 
         {/* ================================================================= */}
+        {/* CENTER: Minimalist Navigation with Smooth Shared Layout Pill      */}
+        {/* ================================================================= */}
+        {!user && (
+          <div className="hidden md:flex items-center justify-center">
+            <HeaderNavigation />
+          </div>
+        )}
+
+        {/* ================================================================= */}
         {/* RIGHT: Utilities, Status & User Account                           */}
         {/* ================================================================= */}
         <div className="flex items-center gap-2 sm:gap-3">
 
-          {/* Bluetooth Nút Trắng (AirPods-style sleek pill) */}
-          <button
-            type="button"
-            onClick={() => setShowAirPodsModal(true)}
-            className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-zinc-200 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800/80 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-full transition-all group"
-            title="Ghép nối Nút Bấm Trắng qua Bluetooth (AirPods Mode)"
-          >
-            <Bluetooth className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400 group-hover:scale-110 transition-transform" />
-            <span className="font-medium">Nút Trắng Bluetooth</span>
-          </button>
+          {/* Internal Utilities (Only for logged in users) */}
+          {user && (
+            <>
+              {/* Bluetooth Nút Trắng (AirPods-style sleek pill) */}
+              <button
+                type="button"
+                onClick={() => setShowAirPodsModal(true)}
+                className="flex items-center gap-2 px-3.5 py-1.5 text-xs font-semibold text-slate-700 dark:text-zinc-200 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800/80 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-full transition-all group"
+                title="Ghép nối Nút Bấm Trắng qua Bluetooth (AirPods Mode)"
+              >
+                <Bluetooth className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400 group-hover:scale-110 transition-transform" />
+                <span className="font-medium">Nút Trắng Bluetooth</span>
+              </button>
 
-          {/* Quick Wi-Fi Setup shortcut */}
-          <Link
-            to="/quick-setup"
-            className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800/60 transition-colors"
-            title="Cài đặt Wi-Fi cho nút bấm"
-          >
-            <Wifi className="w-3.5 h-3.5 text-slate-500" />
-            <span>Cài Wi-Fi</span>
-          </Link>
-
-
-          {/* Sound Notification Toggle & Test */}
-          <button
-            onClick={() => {
-              if (!isSoundEnabled) {
-                toggleSound();
-              } else {
-                testSound();
-              }
-            }}
-            onContextMenu={(e) => {
-              e.preventDefault();
-              toggleSound();
-            }}
-            className={`p-2 rounded-lg transition-all relative group ${isSoundEnabled
-                ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
-                : 'text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800'
-              }`}
-            title={
-              isSoundEnabled
-                ? '🔔 Chuông đơn hàng: Đang BẬT (Bấm chuột trái để nghe thử, Chuột phải để Tắt)'
-                : '🔕 Chuông đơn hàng: Đang TẮT (Bấm để Bật)'
-            }
-            aria-label="Sound Notification"
-          >
-            {isSoundEnabled ? (
-              <Volume2 className="w-4 h-4 transition-transform group-hover:scale-110" />
-            ) : (
-              <VolumeX className="w-4 h-4 text-slate-400" />
-            )}
-            {isSoundEnabled && (
-              <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
-            )}
-          </button>
+              {/* Sound Notification Toggle & Test */}
+              <button
+                onClick={() => {
+                  if (!isSoundEnabled) {
+                    toggleSound();
+                  } else {
+                    testSound();
+                  }
+                }}
+                onContextMenu={(e) => {
+                  e.preventDefault();
+                  toggleSound();
+                }}
+                className={`p-2 rounded-lg transition-all relative group ${isSoundEnabled
+                    ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
+                    : 'text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800'
+                  }`}
+                title={
+                  isSoundEnabled
+                    ? '🔔 Chuông đơn hàng: Đang BẬT (Bấm chuột trái để nghe thử, Chuột phải để Tắt)'
+                    : '🔕 Chuông đơn hàng: Đang TẮT (Bấm để Bật)'
+                }
+                aria-label="Sound Notification"
+              >
+                {isSoundEnabled ? (
+                  <Volume2 className="w-4 h-4 transition-transform group-hover:scale-110" />
+                ) : (
+                  <VolumeX className="w-4 h-4 text-slate-400" />
+                )}
+                {isSoundEnabled && (
+                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
+                )}
+              </button>
+            </>
+          )}
 
           {/* Dark/Light Mode Toggle */}
           <button
             onClick={toggleTheme}
-            className="p-2 rounded-lg text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+            className="p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
             title={theme === 'dark' ? 'Chuyển sang Giao diện Sáng' : 'Chuyển sang Giao diện Tối'}
             aria-label="Toggle theme"
           >
@@ -203,7 +204,7 @@ export const Navbar: React.FC = () => {
           {user ? (
             <div className="flex items-center gap-2.5 pl-2 sm:pl-3 border-l border-slate-200 dark:border-zinc-800">
               {/* User Avatar with Initials */}
-              <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 dark:from-red-600 dark:to-rose-600 text-white flex items-center justify-center font-mono font-bold text-xs shadow-sm shrink-0">
+              <div className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-mono font-bold text-xs shadow-sm shrink-0">
                 {getInitials(user.fullName)}
               </div>
 
@@ -242,25 +243,61 @@ export const Navbar: React.FC = () => {
               </button>
             </div>
           ) : (
-            <div className="flex items-center gap-2 pl-2 border-l border-slate-200 dark:border-zinc-800">
+            <div className="flex items-center gap-2 sm:gap-3">
               <Link
                 to="/login"
-                className="px-3 py-1.5 text-xs font-semibold text-slate-700 dark:text-zinc-300 hover:text-blue-600 dark:hover:text-white rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+                className="hidden sm:inline-block text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white px-2.5 py-1.5 transition-colors"
               >
                 Đăng nhập
               </Link>
               <Link
-                to="/register"
-                className="px-3.5 py-1.5 text-xs font-bold text-white bg-blue-600 hover:bg-blue-700 dark:bg-red-600 dark:hover:bg-red-700 rounded-lg shadow-sm transition-colors"
+                to="/quick-setup"
+                className="px-3.5 sm:px-4 py-2 text-xs font-semibold text-white bg-slate-900 hover:bg-slate-800 dark:bg-white dark:text-slate-900 dark:hover:bg-zinc-200 rounded-xl shadow-sm transition-all active:scale-[0.98]"
               >
-                Đăng ký
+                Cài Wi-Fi Nút Bấm
               </Link>
+
+              {/* Mobile menu toggle (Guest only) */}
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="md:hidden p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-400 dark:hover:text-white dark:hover:bg-zinc-800 transition-colors"
+                aria-label="Toggle Navigation Menu"
+              >
+                {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+              </button>
             </div>
           )}
 
         </div>
 
       </div>
+
+      {/* Mobile Navigation Dropdown (Guest only) */}
+      <AnimatePresence>
+        {mobileMenuOpen && !user && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: 'auto' }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.25, ease: 'easeInOut' }}
+            className="md:hidden border-t border-slate-200/80 dark:border-zinc-800 bg-white/95 dark:bg-[#09090B]/95 backdrop-blur-md px-4 py-4 overflow-hidden"
+          >
+            <div className="flex flex-col space-y-1">
+              <HeaderNavigation isMobile={true} onMobileSelect={() => setMobileMenuOpen(false)} />
+              <div className="pt-3 mt-2 border-t border-slate-100 dark:border-zinc-800 flex flex-col gap-2">
+                <Link
+                  to="/login"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className="w-full text-center py-2 text-xs font-semibold text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl transition-colors"
+                >
+                  Đăng nhập
+                </Link>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Apple AirPods-Style Bluetooth Modal */}
       <WhiteDeviceAirPodsModal

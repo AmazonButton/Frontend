@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { subscribeToStore, getSocket } from '../../services/socket';
@@ -45,14 +46,46 @@ import {
   Zap,
   Calendar,
   Bluetooth,
+  MoreHorizontal,
+  ChevronDown,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { QrCameraScanner } from '../../components/common/QrCameraScanner';
 import { WhiteDeviceAirPodsModal } from '../../components/devices/WhiteDeviceAirPodsModal';
 
+const tableContainerVariants: Variants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: {
+      staggerChildren: 0.05,
+    },
+  },
+};
+
+const tableRowVariants: Variants = {
+  hidden: { opacity: 0, y: 10 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.2, ease: 'easeOut' },
+  },
+};
+
 export const StoreDevicesPage: React.FC = () => {
   const { user } = useAuth();
   const [showAirPodsModal, setShowAirPodsModal] = useState(false);
+  const [openMenuId, setOpenMenuId] = useState<string | null>(null);
+  const [showToolsDropdown, setShowToolsDropdown] = useState(false);
+
+  useEffect(() => {
+    const handleClosePopups = () => {
+      setOpenMenuId(null);
+      setShowToolsDropdown(false);
+    };
+    window.addEventListener('click', handleClosePopups);
+    return () => window.removeEventListener('click', handleClosePopups);
+  }, []);
   const [devices, setDevices] = useState<Device[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [fleetStats, setFleetStats] = useState<FleetStats>({
@@ -661,180 +694,245 @@ export const StoreDevicesPage: React.FC = () => {
   });
 
   return (
-    <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
-      {/* Top Header & Quick Actions */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-6 bg-white dark:bg-[#0F172A] border border-slate-200/80 dark:border-white/10 rounded-3xl shadow-sm">
-        <div className="flex items-center space-x-3.5">
-          <div className="w-12 h-12 rounded-2xl bg-cyan-50 dark:bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 flex items-center justify-center border border-cyan-500/20 shadow-inner">
-            <Cpu className="w-6 h-6" />
+    <div className="w-full space-y-3.5 text-zinc-900 dark:text-zinc-100">
+      {/* ── Command Header ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-zinc-200 dark:border-zinc-800">
+        <div>
+          <div className="flex items-center gap-2">
+            <h1 className="text-base font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+              Quản Trị Hạm Đội Nút Bấm
+            </h1>
+            <span className="flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              FLEET-TELEMETRY
+            </span>
           </div>
-          <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-2xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-                Quản Trị Hạm Đội Nút Bấm IoT
-              </h1>
-              <span className="px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold bg-cyan-500/10 text-cyan-600 dark:text-cyan-400 border border-cyan-500/20">
-                FLEET v2.0
-              </span>
-            </div>
-            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-              Cấu hình phần cứng ESP32, ánh xạ sản phẩm động không cần nạp firmware & theo dõi telemetry thời gian thực
-            </p>
-          </div>
+          <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+            Cấu hình phần cứng ESP32, ánh xạ sản phẩm động & giám sát viễn trắc thời gian thực
+          </p>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <button
+        {/* Command Bar Actions */}
+        <div className="flex items-center gap-1.5">
+          <motion.button
             type="button"
-            onClick={() => setShowAirPodsModal(true)}
-            className="px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-white font-bold text-xs shadow-md shadow-cyan-500/25 flex items-center space-x-2 transition-all btn-press"
-          >
-            <Bluetooth className="w-4 h-4 animate-pulse" />
-            <span>Nút Trắng (AirPods Style)</span>
-          </button>
-
-          <button
+            whileTap={{ scale: 0.96 }}
             onClick={handleOpenCreateModal}
-            className="px-4 py-2.5 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-bold text-xs shadow-md shadow-cyan-500/25 flex items-center space-x-2 transition-all btn-press"
+            className="px-2.5 py-1 rounded-md bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-colors"
           >
-            <Plus className="w-4 h-4" />
-            <span>+ Tạo Nút Bấm Mới</span>
-          </button>
+            <Plus className="w-3.5 h-3.5" strokeWidth={1.5} />
+            <span>Thêm Thiết Bị</span>
+          </motion.button>
 
-          <button
-            onClick={() => {
-              setShowWizard(true);
-              setWizardStep(1);
-              setWizardError(null);
-            }}
-            className="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs border border-slate-200/80 dark:border-white/10 flex items-center space-x-2 transition-all"
-          >
-            <Sparkles className="w-4 h-4 text-cyan-500" />
-            <span>Wizard Cấu Hình 4 Bước</span>
-          </button>
+          {/* Batch Tools Dropdown */}
+          <div className="relative">
+            <button
+              type="button"
+              onClick={(e) => {
+                e.stopPropagation();
+                setShowToolsDropdown(!showToolsDropdown);
+              }}
+              className="px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300 text-xs font-medium flex items-center gap-1.5 transition-colors"
+            >
+              <Sliders className="w-3.5 h-3.5 text-zinc-500" strokeWidth={1.5} />
+              <span>Công Cụ</span>
+              <ChevronDown className="w-3 h-3 text-zinc-400" />
+            </button>
 
-          <button
-            onClick={() => {
-              setShowBulkModal(true);
-              handleParseCsv();
-            }}
-            className="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs border border-slate-200/80 dark:border-white/10 flex items-center space-x-2 transition-all"
-          >
-            <FileSpreadsheet className="w-4 h-4 text-emerald-500" />
-            <span>Nhập CSV Hàng Loạt</span>
-          </button>
+            <AnimatePresence>
+              {showToolsDropdown && (
+                <motion.div
+                  initial={{ opacity: 0, scale: 0.95, y: -4 }}
+                  animate={{ opacity: 1, scale: 1, y: 0 }}
+                  exit={{ opacity: 0, scale: 0.95, y: -4 }}
+                  transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                  style={{ transformOrigin: 'top right' }}
+                  onClick={(e) => e.stopPropagation()}
+                  className="absolute right-0 mt-1 w-52 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl py-1 z-40 text-xs text-zinc-700 dark:text-zinc-300 divide-y divide-zinc-100 dark:divide-zinc-800"
+                >
+                  <div className="py-0.5">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowAirPodsModal(true);
+                        setShowToolsDropdown(false);
+                      }}
+                      className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                    >
+                      <Bluetooth className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
+                      <span>Ghép Nối Nút (AirPods)</span>
+                    </button>
 
-          <Link
-            to="/store/device-templates"
-            className="px-3.5 py-2.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 font-bold text-xs border border-slate-200/80 dark:border-white/10 flex items-center space-x-2 transition-all"
-          >
-            <Layers className="w-4 h-4 text-indigo-500" />
-            <span>Mẫu Thiết Bị (Templates)</span>
-          </Link>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowWizard(true);
+                        setWizardStep(1);
+                        setWizardError(null);
+                        setShowToolsDropdown(false);
+                      }}
+                      className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                    >
+                      <Sparkles className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
+                      <span>Wizard Cấu Hình 4 Bước</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowBulkModal(true);
+                        handleParseCsv();
+                        setShowToolsDropdown(false);
+                      }}
+                      className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                    >
+                      <FileSpreadsheet className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
+                      <span>Nhập CSV Hàng Loạt</span>
+                    </button>
+                  </div>
+
+                  <div className="py-0.5">
+                    <Link
+                      to="/store/device-templates"
+                      onClick={() => setShowToolsDropdown(false)}
+                      className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                    >
+                      <Layers className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
+                      <span>Mẫu Thiết Bị (Templates)</span>
+                    </Link>
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
 
-      {/* Fleet KPI Statistics Breakdown */}
-      <div className="grid grid-cols-2 md:grid-cols-5 gap-3.5">
-        <div className="p-4 rounded-2xl bg-white dark:bg-[#0F172A] border border-slate-200/80 dark:border-white/10 shadow-sm">
-          <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider font-mono">
+      {/* ── Sleek Horizontal Fleet Metrics Bar ── */}
+      <div className="grid grid-cols-2 sm:grid-cols-5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg divide-y sm:divide-y-0 sm:divide-x divide-zinc-200 dark:divide-zinc-800 overflow-hidden">
+        <div className="p-3 sm:px-4 sm:py-2.5 flex flex-col justify-between">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
             Tổng Thiết Bị
-          </div>
-          <div className="flex items-baseline gap-2 mt-1.5">
-            <span className="text-2xl font-extrabold font-mono text-slate-900 dark:text-white">
+          </span>
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span className="text-xl font-bold font-mono text-zinc-900 dark:text-zinc-100">
               {fleetStats.total}
             </span>
-            <span className="text-[11px] text-slate-400">nút toàn mạng</span>
+            <span className="text-[10.5px] font-mono text-zinc-400">nút</span>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white dark:bg-[#0F172A] border border-emerald-500/20 dark:border-emerald-500/30 bg-emerald-500/5 shadow-sm">
+        <div className="p-3 sm:px-4 sm:py-2.5 flex flex-col justify-between">
           <div className="flex items-center justify-between">
-            <div className="text-[11px] font-bold text-emerald-600 dark:text-emerald-400 uppercase tracking-wider font-mono">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
               Đang Online
-            </div>
-            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            </span>
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
           </div>
-          <div className="flex items-baseline gap-2 mt-1.5">
-            <span className="text-2xl font-extrabold font-mono text-emerald-600 dark:text-emerald-400">
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
               {fleetStats.online}
             </span>
-            <span className="text-[11px] text-emerald-600/70 dark:text-emerald-400/70">&lt;25s heartbeat</span>
+            <span className="text-[10.5px] font-mono text-zinc-400">&lt;25s beat</span>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white dark:bg-[#0F172A] border border-slate-200/80 dark:border-white/10 shadow-sm">
-          <div className="text-[11px] font-bold text-slate-500 dark:text-slate-400 uppercase tracking-wider font-mono">
-            Chế Độ Deep Sleep
-          </div>
-          <div className="flex items-baseline gap-2 mt-1.5">
-            <span className="text-2xl font-extrabold font-mono text-slate-700 dark:text-slate-300">
+        <div className="p-3 sm:px-4 sm:py-2.5 flex flex-col justify-between">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+            Deep Sleep
+          </span>
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span className="text-xl font-bold font-mono text-zinc-700 dark:text-zinc-300">
               {fleetStats.offline}
             </span>
-            <span className="text-[11px] text-slate-400">&lt;15µA chờ ngắt</span>
+            <span className="text-[10.5px] font-mono text-zinc-400">&lt;15µA</span>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white dark:bg-[#0F172A] border border-rose-500/20 dark:border-rose-500/30 bg-rose-500/5 shadow-sm">
-          <div className="text-[11px] font-bold text-rose-600 dark:text-rose-400 uppercase tracking-wider font-mono">
-            Cảnh Báo Pin Yếu
+        <div className="p-3 sm:px-4 sm:py-2.5 flex flex-col justify-between">
+          <div className="flex items-center justify-between">
+            <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+              Cảnh Báo Pin
+            </span>
+            <span
+              className={`w-1.5 h-1.5 rounded-full ${
+                fleetStats.lowBattery > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
+              }`}
+            ></span>
           </div>
-          <div className="flex items-baseline gap-2 mt-1.5">
-            <span className="text-2xl font-extrabold font-mono text-rose-600 dark:text-rose-400">
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span
+              className={`text-xl font-bold font-mono ${
+                fleetStats.lowBattery > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-900 dark:text-zinc-100'
+              }`}
+            >
               {fleetStats.lowBattery}
             </span>
-            <span className="text-[11px] text-rose-600/70 dark:text-rose-400/70">&lt; 20% LiPo</span>
+            <span className="text-[10.5px] font-mono text-zinc-400">&lt;20%</span>
           </div>
         </div>
 
-        <div className="p-4 rounded-2xl bg-white dark:bg-[#0F172A] border border-amber-500/20 dark:border-amber-500/30 bg-amber-500/5 shadow-sm col-span-2 md:col-span-1">
-          <div className="text-[11px] font-bold text-amber-600 dark:text-amber-400 uppercase tracking-wider font-mono">
-            Chưa Cấu Hình SKU
-          </div>
-          <div className="flex items-baseline gap-2 mt-1.5">
-            <span className="text-2xl font-extrabold font-mono text-amber-600 dark:text-amber-400">
+        <div className="p-3 sm:px-4 sm:py-2.5 flex flex-col justify-between col-span-2 sm:col-span-1">
+          <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
+            Chưa Gán SKU
+          </span>
+          <div className="mt-1 flex items-baseline gap-1.5">
+            <span
+              className={`text-xl font-bold font-mono ${
+                fleetStats.unconfigured > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-900 dark:text-zinc-100'
+              }`}
+            >
               {fleetStats.unconfigured}
             </span>
-            <span className="text-[11px] text-amber-600/70 dark:text-amber-400/70">chờ gán sản phẩm</span>
+            <span className="text-[10.5px] font-mono text-zinc-400">chờ gán</span>
           </div>
         </div>
       </div>
 
-      {/* Filter & Search Bar */}
-      <div className="p-4 bg-white dark:bg-[#0F172A] border border-slate-200/80 dark:border-white/10 rounded-2xl shadow-sm flex flex-col md:flex-row items-center justify-between gap-3">
-        <div className="relative w-full md:w-96">
-          <Search className="w-4 h-4 text-slate-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+      {/* ── Filter & Search Command Bar ── */}
+      <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+        {/* Search Input */}
+        <div className="relative w-full sm:w-64">
+          <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" strokeWidth={1.5} />
           <input
             type="text"
-            placeholder="Tìm theo Device ID, Tên, Mã PIN 6 số, Vị trí..."
+            placeholder="Tìm theo Device ID, Tên, Vị trí..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 text-xs rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+            className="w-full pl-8 pr-7 py-1 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400 transition-colors"
           />
+          {searchQuery && (
+            <button
+              type="button"
+              onClick={() => setSearchQuery('')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
+            >
+              <X className="w-3 h-3" />
+            </button>
+          )}
         </div>
 
-        <div className="flex items-center gap-3 w-full md:w-auto">
-          <div className="flex items-center gap-1.5">
-            <Filter className="w-3.5 h-3.5 text-slate-400" />
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Trạng thái:</span>
+        {/* Filters */}
+        <div className="flex items-center gap-2 flex-wrap">
+          <div className="flex items-center gap-1.5 text-xs text-zinc-500">
+            <Filter className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value)}
-              className="text-xs font-semibold px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white focus:outline-none"
+              className="text-xs px-2 py-1 rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 focus:outline-none cursor-pointer"
             >
-              <option value="ALL">Tất cả ({devices.length})</option>
-              <option value="ACTIVE">Hoạt Động (ACTIVE)</option>
-              <option value="DISABLED">Đã Tắt (DISABLED)</option>
-              <option value="UNCLAIMED">Chưa Kích Hoạt</option>
+              <option value="ALL">Tất cả trạng thái ({devices.length})</option>
+              <option value="ACTIVE">Hoạt động (ACTIVE)</option>
+              <option value="DISABLED">Tạm ngưng (DISABLED)</option>
+              <option value="UNCLAIMED">Chưa kích hoạt</option>
             </select>
           </div>
 
-          <div className="flex items-center gap-1.5">
-            <span className="text-xs font-bold text-slate-500 dark:text-slate-400">Sản phẩm:</span>
+          <div className="flex items-center gap-1.5 text-xs text-zinc-500">
             <select
               value={productFilter}
               onChange={(e) => setProductFilter(e.target.value)}
-              className="text-xs font-semibold px-2.5 py-1.5 rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white focus:outline-none max-w-xs truncate"
+              className="text-xs px-2 py-1 rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 focus:outline-none max-w-xs truncate cursor-pointer"
             >
               <option value="ALL">Tất cả sản phẩm</option>
               {products.map((p) => (
@@ -844,546 +942,348 @@ export const StoreDevicesPage: React.FC = () => {
               ))}
             </select>
           </div>
-
-          {/* Grid vs Table View Mode Switcher */}
-          <div className="flex items-center p-1 rounded-xl bg-slate-100 dark:bg-black/30 border border-slate-200 dark:border-white/10 ml-1">
-            <button
-              type="button"
-              onClick={() => setViewMode('grid')}
-              className={`p-1.5 rounded-lg text-xs font-bold transition-all ${
-                viewMode === 'grid'
-                  ? 'bg-white dark:bg-slate-800 text-cyan-600 dark:text-cyan-400 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
-              }`}
-              title="Dạng Lưới (Cards Grid)"
-            >
-              <LayoutGrid className="w-4 h-4" />
-            </button>
-            <button
-              type="button"
-              onClick={() => setViewMode('table')}
-              className={`p-1.5 rounded-lg text-xs font-bold transition-all ${
-                viewMode === 'table'
-                  ? 'bg-white dark:bg-slate-800 text-cyan-600 dark:text-cyan-400 shadow-sm'
-                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-slate-200'
-              }`}
-              title="Dạng Bảng (Table View)"
-            >
-              <List className="w-4 h-4" />
-            </button>
-          </div>
         </div>
       </div>
 
-      {/* Device Cards Grid or Table View */}
-      {filteredDevices.length === 0 ? (
-        <div className="p-12 text-center bg-white dark:bg-[#0F172A] border border-dashed border-slate-200 dark:border-white/10 rounded-3xl">
-          <Cpu className="w-12 h-12 text-slate-300 dark:text-slate-600 mx-auto mb-3" />
-          <h3 className="text-base font-bold text-slate-700 dark:text-slate-300">Không tìm thấy thiết bị nào</h3>
-          <p className="text-xs text-slate-400 dark:text-slate-500 mt-1 max-w-sm mx-auto">
-            Thử thay đổi từ khóa tìm kiếm hoặc sử dụng nút <strong>+ Tạo Nút Bấm Mới</strong> để tạo nhanh nút bấm cho cửa hàng.
-          </p>
-        </div>
-      ) : viewMode === 'grid' ? (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-          {filteredDevices.map((device) => {
-            const isOnline =
-              device.lastSeenAt &&
-              Date.now() - new Date(device.lastSeenAt).getTime() < 25000 &&
-              device.status === 'ACTIVE';
+      {/* ── High-Density Hardware Terminal Table ── */}
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-x-auto lg:overflow-visible">
+        {loading ? (
+          <div className="py-16 text-center">
+            <div className="inline-flex items-center gap-2 text-xs font-mono text-zinc-400">
+              <span className="w-2 h-2 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-pulse inline-block"></span>
+              Đang tải danh sách thiết bị viễn trắc...
+            </div>
+          </div>
+        ) : filteredDevices.length === 0 ? (
+          <div className="py-16 text-center space-y-2">
+            <Cpu className="w-7 h-7 text-zinc-200 dark:text-zinc-700 mx-auto" strokeWidth={1.5} />
+            <p className="text-xs font-medium text-zinc-400">
+              Không tìm thấy thiết bị nào khớp với bộ lọc
+            </p>
+          </div>
+        ) : (
+          <table className="w-full text-left border-collapse">
+            <thead>
+              <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-800/40 text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+                <th className="py-2 px-3.5 font-semibold">Thiết Bị (Hardware ID)</th>
+                <th className="py-2 px-3.5 font-semibold">Trạng Thái</th>
+                <th className="py-2 px-3.5 font-semibold">Sản Phẩm Ánh Xạ</th>
+                <th className="py-2 px-3.5 font-semibold">Viễn Trắc (Telemetry)</th>
+                <th className="py-2 px-3.5 font-semibold text-right">Thao Tác</th>
+              </tr>
+            </thead>
+            <motion.tbody
+              variants={tableContainerVariants}
+              initial="hidden"
+              animate="show"
+              className="divide-y divide-zinc-100 dark:divide-zinc-800/60 text-xs"
+            >
+              {filteredDevices.map((device, index) => {
+                const isOnline =
+                  device.lastSeenAt &&
+                  Date.now() - new Date(device.lastSeenAt).getTime() < 25000 &&
+                  device.status === 'ACTIVE';
 
-            const assignedProduct =
-              device.product || device.configuration?.product;
+                const assignedProduct =
+                  device.product || device.configuration?.product;
 
-            return (
-              <div
-                key={device.id}
-                className="group relative flex flex-col justify-between p-5 bg-white dark:bg-[#0F172A] border border-slate-200/80 dark:border-white/10 hover:border-cyan-500/50 dark:hover:border-cyan-400/40 rounded-3xl shadow-sm hover:shadow-lg transition-all duration-200"
-              >
-                <div>
-                  {/* Top Row: Device ID & Status Pill */}
-                  <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
-                    <div className="flex items-center gap-2">
-                      <div className="relative flex items-center justify-center">
-                        <div
-                          className={`w-2.5 h-2.5 rounded-full ${
-                            isOnline
-                              ? 'bg-emerald-500 shadow-[0_0_8px_rgba(16,185,129,0.8)] animate-pulse'
-                              : 'bg-slate-400'
+                const isNearBottom = index >= filteredDevices.length - 2 && filteredDevices.length > 2;
+
+                return (
+                  <motion.tr
+                    key={device.id}
+                    variants={tableRowVariants}
+                    className="hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30 transition-colors group"
+                  >
+                    {/* Device ID & Name */}
+                    <td className="py-2.5 px-3.5 whitespace-nowrap">
+                      <div className="flex items-center gap-2">
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            device.status === 'ACTIVE'
+                              ? isOnline
+                                ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)] animate-pulse'
+                                : 'bg-emerald-500/80'
+                              : device.status === 'DISABLED'
+                              ? 'bg-rose-500'
+                              : 'bg-zinc-400'
                           }`}
                         />
-                      </div>
-                      <span className="font-mono font-extrabold text-sm text-slate-900 dark:text-white tracking-tight">
-                        {device.deviceId}
-                      </span>
-                      <button
-                        onClick={() => handleCopy(device.deviceId, device.id)}
-                        className="text-slate-400 hover:text-cyan-500 transition-colors"
-                        title="Sao chép ID"
-                      >
-                        {copiedId === device.id ? (
-                          <Check className="w-3.5 h-3.5 text-emerald-500" />
-                        ) : (
-                          <Copy className="w-3.5 h-3.5" />
-                        )}
-                      </button>
-                    </div>
-
-                    <span
-                      className={`text-[10px] font-mono font-bold px-2 py-0.5 rounded-full border ${
-                        device.status === 'ACTIVE'
-                          ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20'
-                          : device.status === 'DISABLED'
-                          ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/20'
-                          : 'bg-slate-500/10 text-slate-600 dark:text-slate-400 border-slate-500/20'
-                      }`}
-                    >
-                      {device.status}
-                    </span>
-                  </div>
-
-                  {/* Device Custom Name & Location */}
-                  <div className="pt-3 pb-2 space-y-1">
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white group-hover:text-cyan-500 dark:group-hover:text-cyan-400 transition-colors">
-                      {device.customName || 'Smart Order Button'}
-                    </h3>
-                    <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-slate-500 dark:text-slate-400">
-                      {device.location && (
-                        <span className="flex items-center gap-1 font-medium">
-                          <MapPin className="w-3 h-3 text-cyan-500" />
-                          {device.location}
-                        </span>
-                      )}
-                      {device.pairingCode ? (
-                        <span className="font-mono text-[10px] bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20 px-1.5 py-0.5 rounded font-bold">
-                          PIN: {device.pairingCode}
-                        </span>
-                      ) : device.macAddress ? (
-                        <span className="font-mono text-[10px] bg-slate-100 dark:bg-black/40 px-1.5 py-0.5 rounded text-slate-500">
-                          MAC: {device.macAddress}
-                        </span>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {/* Hardware Telemetry Bar */}
-                  <div className="my-3 p-2.5 rounded-xl bg-slate-50 dark:bg-black/30 border border-slate-100 dark:border-white/5 flex flex-col gap-1.5 text-xs font-mono">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center space-x-1.5">
-                        <Battery
-                          className={`w-4 h-4 ${
-                            device.batteryLevel < 20
-                              ? 'text-rose-500 animate-bounce'
-                              : device.batteryLevel < 50
-                              ? 'text-amber-500'
-                              : 'text-emerald-500'
-                          }`}
-                        />
-                        <span className="font-bold text-slate-700 dark:text-slate-300">
-                          {device.batteryLevel}%
-                        </span>
-                      </div>
-
-                      <div className="flex items-center space-x-1.5">
-                        <Wifi
-                          className={`w-4 h-4 ${
-                            device.wifiRSSI > -65
-                              ? 'text-emerald-500'
-                              : device.wifiRSSI > -80
-                              ? 'text-amber-500'
-                              : 'text-rose-500'
-                          }`}
-                        />
-                        <span className="text-slate-600 dark:text-slate-400">
-                          {device.wifiRSSI} dBm
-                        </span>
-                      </div>
-
-                      <div className="flex items-center space-x-1 text-[10px] text-slate-400">
-                        <Clock className="w-3 h-3" />
-                        <span>
-                          {device.lastSeenAt
-                            ? new Date(device.lastSeenAt).toLocaleTimeString('vi-VN', {
-                                hour: '2-digit',
-                                minute: '2-digit',
-                              })
-                            : 'Chưa thấy'}
-                        </span>
-                      </div>
-                    </div>
-
-                    {/* Expiration Bar */}
-                    <div className="pt-1.5 border-t border-slate-100 dark:border-white/5 flex items-center justify-between text-[10px]">
-                      <span className="text-slate-400">Thời hạn dùng:</span>
-                      <span className={`font-bold ${device.expiresAt && new Date(device.expiresAt) < new Date() ? 'text-rose-500' : 'text-slate-700 dark:text-slate-300'}`}>
-                        {device.expiresAt ? new Date(device.expiresAt).toLocaleDateString('vi-VN') : '1 Năm (Mặc định)'}
-                      </span>
-                    </div>
-                  </div>
-
-                  {/* Dynamic Product Mapping Banner */}
-                  <div className="mt-2 p-3 rounded-2xl bg-cyan-500/5 dark:bg-cyan-500/10 border border-cyan-500/20 space-y-2">
-                    <div className="flex items-center justify-between">
-                      <div className="flex items-center gap-1.5 text-[10px] font-bold text-cyan-600 dark:text-cyan-400 uppercase tracking-wider font-mono">
-                        <Tag className="w-3 h-3" />
-                        <span>Sản Phẩm Đang Ánh Xạ:</span>
-                      </div>
-                      <button
-                        onClick={() => {
-                          setAssigningDevice(device);
-                          setSelectedProductId(assignedProduct?.id || '');
-                          setAssignCustomName(device.customName || '');
-                        }}
-                        className="text-[10px] font-bold text-cyan-600 dark:text-cyan-300 hover:underline flex items-center gap-0.5"
-                      >
-                        <span>Đổi SKU</span>
-                        <ChevronRight className="w-3 h-3" />
-                      </button>
-                    </div>
-
-                    {assignedProduct ? (
-                      <div>
-                        <p className="text-xs font-bold text-slate-900 dark:text-white truncate">
-                          {assignedProduct.name}
-                        </p>
-                        <div className="flex items-center justify-between text-[11px] mt-0.5">
-                          <span className="font-mono text-cyan-600 dark:text-cyan-400 text-[10px]">
-                            SKU: {assignedProduct.sku}
-                          </span>
-                          <span className="font-mono font-bold text-slate-800 dark:text-slate-200">
-                            {assignedProduct.price?.toLocaleString()} ₫ / {assignedProduct.unit}
-                          </span>
+                        <div>
+                          <div className="flex items-center gap-1.5 font-mono text-sm font-medium text-zinc-900 dark:text-zinc-100 leading-none">
+                            <span>{device.deviceId}</span>
+                            <button
+                              type="button"
+                              onClick={() => handleCopy(device.deviceId, device.id)}
+                              className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 transition-colors"
+                              title="Sao chép Device ID"
+                            >
+                              {copiedId === device.id ? (
+                                <Check className="w-3 h-3 text-emerald-500" />
+                              ) : (
+                                <Copy className="w-3 h-3" />
+                              )}
+                            </button>
+                          </div>
+                          <div className="text-[11px] text-zinc-500 dark:text-zinc-400 mt-1 truncate max-w-[220px]">
+                            {device.customName || 'Smart Order Button'}
+                            {device.location ? ` · ${device.location}` : ''}
+                          </div>
                         </div>
                       </div>
-                    ) : (
-                      <div className="py-1 text-center">
-                        <p className="text-xs text-amber-600 dark:text-amber-400 font-semibold">
-                          ⚠️ Chưa gán sản phẩm đặt hàng
-                        </p>
+                    </td>
+
+                    {/* Status with Tiny Solid Dot */}
+                    <td className="py-2.5 px-3.5 whitespace-nowrap">
+                      <div className="flex items-center gap-1.5">
+                        <span
+                          className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                            device.status === 'ACTIVE'
+                              ? isOnline
+                                ? 'bg-emerald-500'
+                                : 'bg-emerald-500/80'
+                              : device.status === 'DISABLED'
+                              ? 'bg-rose-500'
+                              : 'bg-zinc-400'
+                          }`}
+                        />
+                        <span className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
+                          {device.status === 'ACTIVE'
+                            ? isOnline
+                              ? 'Trực tuyến'
+                              : 'Sẵn sàng'
+                            : device.status === 'DISABLED'
+                            ? 'Tạm ngưng'
+                            : 'Chưa kích hoạt'}
+                        </span>
+                      </div>
+                    </td>
+
+                    {/* Mapped SKU */}
+                    <td className="py-2.5 px-3.5">
+                      {assignedProduct ? (
+                        <div>
+                          <div className="text-xs font-medium text-zinc-900 dark:text-zinc-100 truncate max-w-[200px]">
+                            {assignedProduct.name}
+                          </div>
+                          <div className="text-[10px] text-zinc-500 dark:text-zinc-400 font-mono mt-0.5">
+                            SKU: {assignedProduct.sku} · {device.configuration?.defaultQuantity || 1} {assignedProduct.unit || 'món'}
+                          </div>
+                        </div>
+                      ) : (
                         <button
+                          type="button"
                           onClick={() => {
                             setAssigningDevice(device);
                             setSelectedProductId('');
                             setAssignCustomName(device.customName || '');
                           }}
-                          className="mt-1.5 px-3 py-1 text-[11px] font-bold rounded-lg bg-cyan-500 text-slate-950 hover:bg-cyan-400 shadow-sm"
+                          className="text-[11px] font-medium text-zinc-400 hover:text-zinc-800 dark:hover:text-zinc-200 inline-flex items-center gap-1 transition-colors"
                         >
-                          + Gán Sản Phẩm Ngay
+                          <Plus className="w-3 h-3" />
+                          <span>Gán SKU</span>
                         </button>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Card Bottom Actions */}
-                <div className="pt-4 mt-3 border-t border-slate-100 dark:border-white/5 flex flex-col gap-2">
-                  <div className="grid grid-cols-3 gap-1.5">
-                    <button
-                      onClick={() => handleSimulatePress(device.deviceId)}
-                      disabled={simulatingDeviceId === device.deviceId}
-                      className="py-1.5 px-2 rounded-xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-bold text-[10px] flex items-center justify-center gap-1 shadow-sm transition-all"
-                      title="Mô phỏng thiết bị gửi tín hiệu đặt hàng lên server"
-                    >
-                      {simulatingDeviceId === device.deviceId ? (
-                        <RefreshCw className="w-3 h-3 animate-spin" />
-                      ) : (
-                        <Radio className="w-3 h-3 text-cyan-300" />
                       )}
-                      <span>Test Bấm Nút</span>
-                    </button>
+                    </td>
 
-                    <button
-                      onClick={() => handleUpdateBattery(device.deviceId, 100)}
-                      className="py-1.5 px-2 rounded-xl bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:hover:bg-emerald-900/50 text-emerald-700 dark:text-emerald-400 border border-emerald-500/20 text-[10px] font-bold flex items-center justify-center gap-1 transition-all"
-                      title="Sạc / Thay pin mới (Đặt lại 100%)"
-                    >
-                      <Battery className="w-3 h-3 text-emerald-500" />
-                      <span>Sạc Pin</span>
-                    </button>
-
-                    <button
-                      onClick={() => handleExtendWarranty(device.deviceId, 12)}
-                      className="py-1.5 px-2 rounded-xl bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-950/40 dark:hover:bg-cyan-900/50 text-cyan-700 dark:text-cyan-300 border border-cyan-500/20 text-[10px] font-bold flex items-center justify-center gap-1 transition-all"
-                      title="Gia hạn thời hạn sử dụng thêm 12 tháng"
-                    >
-                      <Clock className="w-3 h-3 text-cyan-500" />
-                      <span>+1 Năm</span>
-                    </button>
-                  </div>
-
-                  <div className="flex items-center justify-between gap-2 pt-1 border-t border-slate-50 dark:border-white/5">
-                    <div className="flex items-center space-x-1">
-                      <button
-                        onClick={() => handleOpenEditModal(device)}
-                        className="p-1.5 rounded-lg bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-500/10 dark:hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 transition-colors"
-                        title="Chỉnh sửa thông tin nút (Edit)"
-                      >
-                        <Edit3 className="w-3.5 h-3.5" />
-                      </button>
-
-                      <button
-                        onClick={() => setQrModalDevice(device)}
-                        className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors"
-                        title="Xem & In Mã QR Ghép Nối"
-                      >
-                        <QrCode className="w-3.5 h-3.5 text-indigo-500" />
-                      </button>
-
-                      <button
-                        onClick={() => handleInspect(device)}
-                        className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors"
-                        title="Xem Telemetry & Nhật Ký Kiểm Toán"
-                      >
-                        <Activity className="w-3.5 h-3.5 text-emerald-500" />
-                      </button>
-
-                      <button
-                        onClick={() => handleRepair(device)}
-                        className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 transition-colors"
-                        title="Tạo Lại Token Ghép Nối (Re-pair)"
-                      >
-                        <RefreshCw className="w-3.5 h-3.5 text-amber-500" />
-                      </button>
-
-                      <button
-                        onClick={() => setDeletingDevice(device)}
-                        className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 transition-colors"
-                        title="Xóa nút bấm (Delete)"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-
-                    <button
-                      onClick={() => handleToggleStatus(device)}
-                      className={`px-2.5 py-1.5 rounded-xl text-[11px] font-bold flex items-center space-x-1 transition-all ${
-                        device.status === 'ACTIVE'
-                          ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400'
-                          : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400'
-                      }`}
-                    >
-                      <Power className="w-3 h-3" />
-                      <span>{device.status === 'ACTIVE' ? 'Tạm Dừng' : 'Kích Hoạt'}</span>
-                    </button>
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-      ) : (
-        /* Data Table View */
-        <div className="overflow-hidden rounded-3xl bg-white dark:bg-[#0F172A] border border-slate-200/80 dark:border-white/10 shadow-sm">
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-slate-50 dark:bg-black/30 text-slate-500 dark:text-slate-400 font-mono uppercase text-[10px] tracking-wider border-b border-slate-200/80 dark:border-white/10">
-                <tr>
-                  <th className="py-3.5 px-4 font-bold">Mã Nút & Tên</th>
-                  <th className="py-3.5 px-4 font-bold">Trạng Thái</th>
-                  <th className="py-3.5 px-4 font-bold">Sản Phẩm Gán</th>
-                  <th className="py-3.5 px-4 font-bold">SL Đặt</th>
-                  <th className="py-3.5 px-4 font-bold">Pin & Sóng</th>
-                  <th className="py-3.5 px-4 font-bold">Thời Hạn</th>
-                  <th className="py-3.5 px-4 font-bold">Vị Trí</th>
-                  <th className="py-3.5 px-4 font-bold text-right">Thao Tác Quản Lý</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-slate-100 dark:divide-white/5">
-                {filteredDevices.map((device) => {
-                  const isOnline =
-                    device.lastSeenAt &&
-                    Date.now() - new Date(device.lastSeenAt).getTime() < 25000 &&
-                    device.status === 'ACTIVE';
-                  const assignedProduct =
-                    device.product || device.configuration?.product;
-
-                  return (
-                    <tr
-                      key={device.id}
-                      className="hover:bg-slate-50/80 dark:hover:bg-white/[0.02] transition-colors"
-                    >
-                      <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-2">
-                          <div
-                            className={`w-2.5 h-2.5 rounded-full flex-shrink-0 ${
-                              isOnline
-                                ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)] animate-pulse'
-                                : 'bg-slate-400'
-                            }`}
-                          />
-                          <div>
-                            <div className="flex items-center gap-1.5 font-mono font-bold text-slate-900 dark:text-white">
-                              <span>{device.deviceId}</span>
-                              <button
-                                onClick={() => handleCopy(device.deviceId, device.id)}
-                                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
-                                title="Copy Mã"
-                              >
-                                {copiedId === device.id ? (
-                                  <Check className="w-3 h-3 text-emerald-500" />
-                                ) : (
-                                  <Copy className="w-3 h-3" />
-                                )}
-                              </button>
-                            </div>
-                            <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate max-w-[200px]">
-                              {device.customName || 'Chưa đặt tên'}
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-
-                      <td className="py-3.5 px-4">
-                        <span
-                          className={`inline-flex items-center px-2 py-0.5 rounded-full text-[10px] font-bold font-mono ${
-                            device.status === 'ACTIVE'
-                              ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400 border border-emerald-500/20'
-                              : 'bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-400'
-                          }`}
-                        >
-                          {device.status}
+                    {/* Horizontal Minimalist Telemetry */}
+                    <td className="py-2.5 px-3.5 whitespace-nowrap">
+                      <div className="flex items-center gap-3.5 text-xs font-mono text-zinc-500 dark:text-zinc-400">
+                        {/* Battery */}
+                        <span className="flex items-center gap-1" title={`Dung lượng pin: ${device.batteryLevel}%`}>
+                          <Battery className="w-3.5 h-3.5 text-zinc-400 shrink-0" strokeWidth={1.5} />
+                          <span>{device.batteryLevel}%</span>
                         </span>
-                      </td>
 
-                      <td className="py-3.5 px-4">
-                        {assignedProduct ? (
-                          <div>
-                            <div className="font-bold text-slate-900 dark:text-white">
-                              {assignedProduct.name}
-                            </div>
-                            <div className="text-[10px] text-cyan-600 dark:text-cyan-400 font-mono">
-                              SKU: {assignedProduct.sku} • {assignedProduct.price?.toLocaleString()} ₫
-                            </div>
-                          </div>
-                        ) : (
-                          <span className="text-amber-500 text-[11px] font-semibold">
-                            ⚠️ Chưa gán SKU
-                          </span>
-                        )}
-                      </td>
+                        {/* Signal RSSI */}
+                        <span className="flex items-center gap-1" title={`Cường độ Wi-Fi: ${device.wifiRSSI || -65} dBm`}>
+                          <Wifi className="w-3.5 h-3.5 text-zinc-400 shrink-0" strokeWidth={1.5} />
+                          <span>{device.wifiRSSI || -65} dBm</span>
+                        </span>
 
-                      <td className="py-3.5 px-4 font-mono font-bold text-slate-700 dark:text-slate-300">
-                        {device.configuration?.defaultQuantity || 1} {assignedProduct?.unit || 'món'}
-                      </td>
+                        {/* Expiry */}
+                        <span className="flex items-center gap-1 text-[11px]" title={`Thời hạn: ${device.expiresAt ? new Date(device.expiresAt).toLocaleDateString('vi-VN') : '1 Năm'}`}>
+                          <Clock className="w-3.5 h-3.5 text-zinc-400 shrink-0" strokeWidth={1.5} />
+                          <span>{device.expiresAt ? new Date(device.expiresAt).toLocaleDateString('vi-VN') : '1 Năm'}</span>
+                        </span>
+                      </div>
+                    </td>
 
-                      <td className="py-3.5 px-4">
-                        <div className="flex items-center gap-3 font-mono text-[11px]">
-                          <span
-                            className={`flex items-center gap-1 font-bold ${
-                              device.batteryLevel < 20
-                                ? 'text-rose-500'
-                                : device.batteryLevel < 50
-                                ? 'text-amber-500'
-                                : 'text-emerald-500'
-                            }`}
-                          >
-                            <Battery className="w-3.5 h-3.5" />
-                            {device.batteryLevel}%
-                          </span>
-                          <span className="flex items-center gap-1 text-slate-500">
-                            <Wifi className="w-3.5 h-3.5" />
-                            {device.wifiRSSI} dBm
-                          </span>
-                        </div>
-                      </td>
+                    {/* Actions Architecture */}
+                    <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
+                      <div className="flex items-center justify-end gap-1.5">
+                        {/* Subtle Minimalist Primary Action (Test Ping) - reveals on row hover */}
+                        <motion.button
+                          type="button"
+                          whileTap={{ scale: 0.94 }}
+                          onClick={() => handleSimulatePress(device.deviceId)}
+                          disabled={simulatingDeviceId === device.deviceId}
+                          className="opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-[11px] font-medium flex items-center gap-1 shadow-2xs"
+                          title="Mô phỏng bấm nút gửi tín hiệu đặt hàng"
+                        >
+                          {simulatingDeviceId === device.deviceId ? (
+                            <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" strokeWidth={1.5} />
+                          ) : (
+                            <Play className="w-3 h-3 text-zinc-500" strokeWidth={1.5} />
+                          )}
+                          <span>Test Ping</span>
+                        </motion.button>
 
-                      <td className="py-3.5 px-4">
-                        {device.expiresAt ? (
-                          <div className="font-mono text-[11px]">
-                            <span
-                              className={
-                                new Date(device.expiresAt).getTime() < Date.now()
-                                  ? 'text-rose-500 font-bold'
-                                  : 'text-slate-600 dark:text-slate-400'
-                              }
-                            >
-                              {new Date(device.expiresAt).toLocaleDateString('vi-VN')}
-                            </span>
-                            {new Date(device.expiresAt).getTime() < Date.now() && (
-                              <div className="text-[9px] text-rose-500 font-bold uppercase">Hết hạn</div>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-slate-400 text-[11px]">Vô thời hạn</span>
-                        )}
-                      </td>
+                        {/* Context Menu Dropdown */}
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setOpenMenuId(openMenuId === device.id ? null : device.id);
+                            }}
+                            className="p-1 rounded-md hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-300 dark:text-zinc-600 group-hover:text-zinc-900 dark:group-hover:text-zinc-100 transition-colors"
+                            title="Thao tác"
+                          >
+                            <MoreHorizontal className="w-4 h-4" strokeWidth={1.5} />
+                          </button>
 
-                      <td className="py-3.5 px-4 text-slate-600 dark:text-slate-400 text-[11px]">
-                        {device.location || '—'}
-                      </td>
+                          <AnimatePresence>
+                            {openMenuId === device.id && (
+                              <motion.div
+                                initial={{ opacity: 0, scale: 0.95, y: isNearBottom ? 4 : -4 }}
+                                animate={{ opacity: 1, scale: 1, y: 0 }}
+                                exit={{ opacity: 0, scale: 0.95, y: isNearBottom ? 4 : -4 }}
+                                transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                                style={{ transformOrigin: isNearBottom ? 'bottom right' : 'top right' }}
+                                onClick={(e) => e.stopPropagation()}
+                                className={`absolute right-0 ${
+                                  isNearBottom ? 'bottom-full mb-1' : 'top-full mt-1'
+                                } w-48 rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 shadow-xl py-1 z-30 text-xs text-zinc-700 dark:text-zinc-300 text-left divide-y divide-zinc-100 dark:divide-zinc-800`}
+                              >
+                              <div className="py-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleOpenEditModal(device);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                >
+                                  <Edit3 className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
+                                  <span>Chỉnh sửa thông tin</span>
+                                </button>
 
-                      <td className="py-3.5 px-4 text-right">
-                        <div className="flex items-center justify-end gap-1.5">
-                          <button
-                            onClick={() => handleSimulatePress(device.deviceId)}
-                            className="p-1.5 rounded-lg bg-indigo-50 hover:bg-indigo-100 dark:bg-indigo-500/10 dark:hover:bg-indigo-500/20 text-indigo-600 dark:text-indigo-400 transition-colors"
-                            title="Thử Nghiệm Nhấn Nút (Tạo đơn ngay)"
-                          >
-                            <Play className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleUpdateBattery(device.deviceId, 100)}
-                            className="p-1.5 rounded-lg bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-500/10 dark:hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 transition-colors"
-                            title="Sạc Đầy Pin (100%)"
-                          >
-                            <Zap className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleExtendWarranty(device.deviceId, 12)}
-                            className="p-1.5 rounded-lg bg-purple-50 hover:bg-purple-100 dark:bg-purple-500/10 dark:hover:bg-purple-500/20 text-purple-600 dark:text-purple-400 transition-colors"
-                            title="Gia Hạn 12 Tháng (+1 Năm)"
-                          >
-                            <Calendar className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleOpenEditModal(device)}
-                            className="p-1.5 rounded-lg bg-cyan-50 hover:bg-cyan-100 dark:bg-cyan-500/10 dark:hover:bg-cyan-500/20 text-cyan-600 dark:text-cyan-400 transition-colors"
-                            title="Chỉnh sửa nút (Edit)"
-                          >
-                            <Edit3 className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => setQrModalDevice(device)}
-                            className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-indigo-500 transition-colors"
-                            title="Mã QR"
-                          >
-                            <QrCode className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleInspect(device)}
-                            className="p-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-emerald-500 transition-colors"
-                            title="Telemetry & Nhật ký"
-                          >
-                            <Activity className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => handleToggleStatus(device)}
-                            className={`p-1.5 rounded-lg transition-colors ${
-                              device.status === 'ACTIVE'
-                                ? 'bg-rose-50 hover:bg-rose-100 text-rose-600 dark:bg-rose-500/10 dark:text-rose-400'
-                                : 'bg-emerald-50 hover:bg-emerald-100 text-emerald-600 dark:bg-emerald-500/10 dark:text-emerald-400'
-                            }`}
-                            title={device.status === 'ACTIVE' ? 'Tạm Dừng' : 'Kích Hoạt'}
-                          >
-                            <Power className="w-3.5 h-3.5" />
-                          </button>
-                          <button
-                            onClick={() => setDeletingDevice(device)}
-                            className="p-1.5 rounded-lg bg-rose-50 hover:bg-rose-100 dark:bg-rose-500/10 dark:hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 transition-colors"
-                            title="Xóa nút bấm (Delete)"
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        </div>
-      )}
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setAssigningDevice(device);
+                                    setSelectedProductId(assignedProduct?.id || '');
+                                    setAssignCustomName(device.customName || '');
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                >
+                                  <Tag className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
+                                  <span>Đổi SKU sản phẩm</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setQrModalDevice(device);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                >
+                                  <QrCode className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
+                                  <span>Xem & In Mã QR</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleInspect(device);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                >
+                                  <Activity className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
+                                  <span>Telemetry & Nhật ký</span>
+                                </button>
+                              </div>
+
+                              <div className="py-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleUpdateBattery(device.deviceId, 100);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                >
+                                  <Battery className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
+                                  <span>Sạc pin đầy 100%</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleExtendWarranty(device.deviceId, 12);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                >
+                                  <Clock className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
+                                  <span>Gia hạn (+1 năm)</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleRepair(device);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                >
+                                  <RefreshCw className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
+                                  <span>Tái cấp Token ghép nối</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleToggleStatus(device);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                >
+                                  <Power className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
+                                  <span>{device.status === 'ACTIVE' ? 'Tạm dừng nút' : 'Kích hoạt lại'}</span>
+                                </button>
+                              </div>
+
+                              <div className="py-0.5">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setDeletingDevice(device);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center gap-2 transition-colors"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" strokeWidth={1.5} />
+                                  <span>Xóa thiết bị</span>
+                                </button>
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    </div>
+                  </td>
+                </motion.tr>
+              );
+            })}
+          </motion.tbody>
+          </table>
+        )}
+      </div>
 
       {/* ========================================================================= */}
       {/* 1. DEVICE SETUP & CONFIGURATION MODAL (CODE / QR / NEW)                   */}
