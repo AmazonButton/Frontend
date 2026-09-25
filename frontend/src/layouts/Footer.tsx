@@ -17,7 +17,7 @@ export const Footer: React.FC = () => {
   };
 
   return (
-    <footer className="relative z-20 bg-[#FAFAFA] dark:bg-[#090D16] border-t border-slate-200/90 dark:border-slate-800 transition-colors selection:bg-slate-900 selection:text-white">
+    <footer className="relative z-0 bg-[#FAFAFA] dark:bg-[#090D16] border-t border-slate-200/90 dark:border-slate-800 transition-colors selection:bg-slate-900 selection:text-white">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* ========================================================================= */}
         {/* MAIN NAVIGATION & INFORMATION (4 Columns Layout matching design)          */}

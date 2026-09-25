@@ -1,14 +1,205 @@
 import React, { useState, useEffect } from 'react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useSound } from '../../context/OrderSoundContext';
 import { subscribeToCustomer, getSocket } from '../../services/socket';
 import { Device, Order, Product } from '../../types';
-import { Radio, ShoppingBag, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3 } from 'lucide-react';
+import { Radio, ShoppingBag, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3, Settings, ChevronDown } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Floating3DCard } from '../../components/3d/Floating3DCard';
 import { WebBluetoothProvisioner } from '../../components/devices/WebBluetoothProvisioner';
 import { WhiteDeviceAirPodsModal } from '../../components/devices/WhiteDeviceAirPodsModal';
+
+
+// ─────────────────────────────────────────────
+// DeviceCardUI — Apple Home style card
+// ─────────────────────────────────────────────
+interface DeviceCardUIProps {
+  dev: Device;
+  productImg: string;
+  name: string;
+  priceStr: string | null;
+  isOnline: boolean;
+  battery: number;
+  rssi: number;
+  isPressing: boolean;
+  simulatingId: string | null;
+  onOrder: (id: string) => void;
+  onSimulate: (id: string) => void;
+  onConfigOpen: (dev: Device) => void;
+  onWifiOpen: (dev: Device) => void;
+}
+
+const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
+  dev, productImg, name, priceStr, isOnline, battery, rssi,
+  isPressing, simulatingId, onOrder, onSimulate, onConfigOpen, onWifiOpen,
+}) => {
+  const [expanded, setExpanded] = React.useState(false);
+  const cfg = dev.configuration;
+
+  return (
+    <motion.div
+      layout
+      whileHover={{ scale: 1.012, y: -3 }}
+      whileTap={{ scale: 0.988 }}
+      transition={{ type: 'spring', stiffness: 300, damping: 25 }}
+      className={`relative bg-white rounded-3xl overflow-hidden shadow-xs border transition-all ${
+        isPressing
+          ? 'border-amber-300 shadow-amber-100 shadow-lg ring-2 ring-amber-200'
+          : 'border-zinc-200/80 hover:shadow-md hover:border-zinc-300'
+      }`}
+      style={{ willChange: 'transform' }}
+    >
+      {/* Product Image on soft bg-zinc-50 */}
+      <div className="relative h-36 bg-zinc-50 flex items-center justify-center overflow-hidden">
+        <img
+          src={productImg}
+          alt={name}
+          className="h-full w-full object-contain p-4 mix-blend-multiply transition-transform duration-300 hover:scale-105"
+          onError={(e) => { (e.target as HTMLImageElement).src = '/assets/products/vinhhao.png'; }}
+        />
+        <AnimatePresence>
+          {isPressing && (
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              className="absolute inset-0 bg-amber-400/20 flex items-center justify-center backdrop-blur-xs"
+            >
+              <Radio className="w-8 h-8 text-amber-600 animate-pulse" />
+            </motion.div>
+          )}
+        </AnimatePresence>
+
+        {/* Subtle Gear/Settings Icon in Top Right Corner */}
+        <motion.button
+          whileTap={{ scale: 0.9 }}
+          onClick={(e) => {
+            e.stopPropagation();
+            setExpanded((v) => !v);
+          }}
+          className={`absolute top-3 right-3 w-7 h-7 rounded-full flex items-center justify-center shadow-xs border transition-all z-10 ${
+            expanded
+              ? 'bg-zinc-900 border-zinc-900 text-white'
+              : 'bg-white/90 backdrop-blur-sm border-zinc-200/80 text-zinc-400 hover:text-zinc-700 hover:border-zinc-300'
+          }`}
+          title={expanded ? 'Đóng cài đặt' : 'Cài đặt thiết bị'}
+        >
+          <Settings className="w-3.5 h-3.5" />
+        </motion.button>
+      </div>
+
+      {/* Info & Primary Action */}
+      <div className="p-4 space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-zinc-900 truncate">{name}</h3>
+            <p className="text-xs text-zinc-400 mt-0.5 truncate">
+              {cfg?.product?.name || 'Nút bấm thông minh 1 chạm'}
+            </p>
+          </div>
+          <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
+            <span
+              className={`w-2 h-2 rounded-full ${
+                dev.status === 'DISABLED'
+                  ? 'bg-rose-400'
+                  : isOnline
+                  ? 'bg-emerald-500'
+                  : 'bg-zinc-300'
+              }`}
+              title={dev.status === 'DISABLED' ? 'Đã tắt' : isOnline ? 'Online' : 'Offline'}
+            />
+            <span className="text-xs font-medium text-zinc-500">{battery}%</span>
+          </div>
+        </div>
+
+        {/* Single Primary Action Button: "Đặt ngay — [Price]" */}
+        <motion.button
+          whileTap={{ scale: 0.98 }}
+          onClick={() => onOrder(dev.deviceId)}
+          className="w-full py-2.5 rounded-2xl bg-zinc-900 text-white text-xs font-semibold flex items-center justify-center gap-2 hover:bg-zinc-800 transition-colors shadow-xs"
+        >
+          <ShoppingBag className="w-3.5 h-3.5" />
+          <span>{priceStr ? `Đặt ngay — ${priceStr}` : 'Đặt ngay'}</span>
+        </motion.button>
+
+        {/* Expandable Settings Drawer */}
+        <AnimatePresence initial={false}>
+          {expanded && (
+            <motion.div
+              key="drawer"
+              initial={{ height: 0, opacity: 0 }}
+              animate={{ height: "auto", opacity: 1 }}
+              exit={{ height: 0, opacity: 0 }}
+              transition={{ type: "spring", bounce: 0, duration: 0.3 }}
+              className="overflow-hidden"
+            >
+              <div className="pt-3 border-t border-zinc-100 space-y-2.5">
+                {/* Telemetry row */}
+                <div className="flex items-center justify-between text-[11px] text-zinc-400 font-mono px-0.5">
+                  <span className="flex items-center gap-1">
+                    <Wifi className="w-3 h-3 text-zinc-400" />
+                    {rssi} dBm
+                  </span>
+                  <span className="truncate max-w-[85px] text-zinc-400" title={dev.deviceId}>
+                    {dev.deviceId}
+                  </span>
+                  <span className="flex items-center gap-1 text-zinc-400">
+                    <Clock className="w-3 h-3 text-zinc-400" />
+                    {cfg?.cancelWindowSeconds ?? 60}s
+                  </span>
+                </div>
+
+                {/* Gesture guide as minimalist outline tags */}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <span className="px-2 py-0.5 rounded-full border border-zinc-200/90 bg-zinc-50/70 text-[10px] text-zinc-500 font-medium">
+                    1 chạm: Bật
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full border border-zinc-200/90 bg-zinc-50/70 text-[10px] text-zinc-500 font-medium">
+                    2 chạm: Đặt
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full border border-zinc-200/90 bg-zinc-50/70 text-[10px] text-zinc-500 font-medium">
+                    Giữ 5s: Wi-Fi
+                  </span>
+                </div>
+
+                {/* Technical actions styled as minimalist outline tags */}
+                <div className="flex items-center gap-1.5 pt-0.5">
+                  <button
+                    type="button"
+                    onClick={() => onSimulate(dev.deviceId)}
+                    disabled={simulatingId === dev.deviceId}
+                    className="flex-1 px-2.5 py-1.5 rounded-full border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 text-zinc-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors"
+                  >
+                    <Radio className={`w-3 h-3 text-zinc-400 ${simulatingId === dev.deviceId ? 'animate-spin' : ''}`} />
+                    <span>Thử nút</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onConfigOpen(dev)}
+                    className="flex-1 px-2.5 py-1.5 rounded-full border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 text-zinc-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors"
+                  >
+                    <Sliders className="w-3 h-3 text-zinc-400" />
+                    <span>Cấu hình</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onWifiOpen(dev)}
+                    className="flex-1 px-2.5 py-1.5 rounded-full border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 text-zinc-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors"
+                  >
+                    <Wifi className="w-3 h-3 text-zinc-400" />
+                    <span>Wi-Fi</span>
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
+      </div>
+    </motion.div>
+  );
+};
 
 export const CustomerHomePage: React.FC = () => {
   const { user } = useAuth();
@@ -467,570 +658,348 @@ export const CustomerHomePage: React.FC = () => {
   };
 
   return (
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-6">
-      {/* Order Success Celebration Modal */}
-      {showSuccessModal && activeSuccessOrder && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
-          <div className="relative w-full max-w-md bg-white dark:bg-[#101014] rounded-3xl shadow-2xl overflow-hidden border border-slate-200 dark:border-zinc-800 animate-in fade-in zoom-in-95 duration-200">
-            {/* Top Header Banner */}
-            <div className="bg-gradient-to-r from-emerald-600 via-teal-600 to-cyan-600 dark:from-emerald-700 dark:via-teal-800 dark:to-zinc-900 p-6 text-white text-center relative overflow-hidden">
-              <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-white/20 backdrop-blur-md rounded-full text-[10px] font-mono font-bold tracking-wider uppercase mb-2">
-                <Radio className="w-3.5 h-3.5 animate-pulse text-emerald-200" />
-                <span>Nút Bấm ESP32 Đã Kích Hoạt</span>
-              </div>
-
-              <h3 className="text-xl font-black tracking-tight flex items-center justify-center gap-2">
-                <Sparkles className="w-5 h-5 text-amber-300" />
-                <span>Đã Tạo Đơn Hàng Thành Công!</span>
-              </h3>
-              <p className="text-xs text-emerald-100 mt-1 max-w-xs mx-auto">
-                Tín hiệu ngắt phần hardware đã được xác thực và chuyển tiếp đến trạm đại lý.
-              </p>
-            </div>
-
-            {/* Order Details Body */}
-            <div className="p-5 space-y-4">
-              {/* Receipt Box */}
-              <div className="bg-slate-50 dark:bg-black/50 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-4 space-y-3">
-                <div className="flex items-center justify-between pb-2.5 border-b border-slate-200 dark:border-zinc-800">
-                  <div>
-                    <span className="text-[10px] font-mono font-bold text-slate-400 uppercase tracking-wider">Mã Đơn Hàng</span>
-                    <p className="font-mono font-bold text-sm text-slate-900 dark:text-white">{activeSuccessOrder.orderNumber}</p>
-                  </div>
-                  <span className="px-2.5 py-0.5 text-[10px] font-mono font-bold rounded-full bg-amber-500/10 text-amber-600 dark:text-amber-400 border border-amber-500/30">
-                    CHỜ GIAO HÀNG
-                  </span>
+    <div className="min-h-screen bg-[#FBFBFC]">
+    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+      {/* Order Success Modal */}
+      <AnimatePresence>
+        {showSuccessModal && activeSuccessOrder && (
+          <motion.div
+            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
+          >
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 20 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ type: 'spring', stiffness: 280, damping: 26 }}
+              className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-zinc-100"
+            >
+              <div className="bg-emerald-500 px-6 pt-6 pb-5 text-white">
+                <div className="flex items-center gap-2 mb-2">
+                  <CheckCircle2 className="w-5 h-5" />
+                  <span className="text-sm font-semibold">Đặt hàng thành công</span>
                 </div>
-
-                {/* Product Items */}
-                <div className="space-y-1.5">
+                <p className="text-2xl font-bold">#{activeSuccessOrder.orderNumber}</p>
+                <p className="text-emerald-100 text-xs mt-1">Đơn hàng của bạn đã được gửi đến đại lý</p>
+              </div>
+              <div className="p-5 space-y-4">
+                <div className="space-y-2">
                   {activeSuccessOrder.items?.map((it: any) => (
-                    <div key={it.id || it.productName} className="flex items-center justify-between text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="w-6 h-6 rounded-lg bg-blue-500/10 dark:bg-red-500/15 text-blue-600 dark:text-red-400 flex items-center justify-center font-mono font-bold text-[11px]">
-                          {it.quantity}x
-                        </span>
-                        <span className="font-semibold text-slate-800 dark:text-slate-200">{it.productName}</span>
-                      </div>
-                      <span className="font-mono font-bold text-slate-900 dark:text-white">{it.totalPrice?.toLocaleString()} ₫</span>
+                    <div key={it.id || it.productName} className="flex justify-between text-sm">
+                      <span className="text-zinc-600">{it.quantity}× {it.productName}</span>
+                      <span className="font-semibold text-zinc-900">{it.totalPrice?.toLocaleString('vi-VN')} ₫</span>
                     </div>
                   ))}
-                </div>
-
-                {/* Total & Delivery Address */}
-                <div className="pt-2 border-t border-slate-200 dark:border-zinc-800 space-y-1 text-xs">
-                  <div className="flex justify-between font-bold text-slate-900 dark:text-white">
-                    <span>Tổng tiền thanh toán:</span>
-                    <span className="text-emerald-600 dark:text-emerald-400 font-mono font-black text-sm">{activeSuccessOrder.totalAmount?.toLocaleString()} ₫</span>
-                  </div>
-                  <div className="flex items-start gap-1 text-[11px] text-slate-500 dark:text-slate-400 pt-0.5">
-                    <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
-                    <span className="truncate">Giao đến: {activeSuccessOrder.deliveryAddress}</span>
+                  <div className="flex justify-between text-sm font-bold pt-2 border-t border-zinc-100">
+                    <span className="text-zinc-900">Tổng cộng</span>
+                    <span className="text-emerald-600">{activeSuccessOrder.totalAmount?.toLocaleString('vi-VN')} ₫</span>
                   </div>
                 </div>
-              </div>
-
-              {/* Cancel Countdown Notice */}
-              {secondsRemaining > 0 && (
-                <div className="p-3.5 bg-amber-500/10 border border-amber-500/20 rounded-2xl space-y-2">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-bold text-amber-700 dark:text-amber-300 flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-amber-500 animate-spin" />
-                      Thời gian hủy miễn phí:
-                    </span>
-                    <span className="font-mono text-sm font-black text-amber-700 dark:text-amber-300 bg-white dark:bg-zinc-900 px-2.5 py-0.5 rounded-lg border border-amber-500/30 shadow-sm">
-                      00:{secondsRemaining < 10 ? `0${secondsRemaining}` : secondsRemaining}s
-                    </span>
-                  </div>
-
-                  <div className="w-full bg-amber-200 dark:bg-amber-950/60 h-1.5 rounded-full overflow-hidden">
-                    <div
-                      className="bg-gradient-to-r from-amber-500 to-rose-500 h-full transition-all duration-1000 ease-linear rounded-full"
-                      style={{ width: `${(secondsRemaining / ((activeSuccessOrder as any).cancelWindowSeconds || 60)) * 100}%` }}
-                    />
-                  </div>
-
-                  <p className="text-[11px] text-amber-700 dark:text-amber-400 flex items-center gap-1.5">
-                    <Lightbulb className="w-3.5 h-3.5 shrink-0 text-amber-500" />
-                    <span><strong>Mẹo:</strong> Nhấn đúp 2 lần trên nút vật lý ESP32 để hủy tức thì.</span>
-                  </p>
+                <div className="flex items-center gap-2 text-xs text-zinc-400">
+                  <MapPin className="w-3.5 h-3.5 shrink-0" />
+                  <span className="truncate">{activeSuccessOrder.deliveryAddress}</span>
                 </div>
-              )}
-
-              {/* Action Buttons */}
-              <div className="space-y-2 pt-1">
                 {secondsRemaining > 0 && (
-                  <button
-                    onClick={() => {
-                      handleCancelOrder(activeSuccessOrder.id);
-                      setShowSuccessModal(false);
-                    }}
-                    className="w-full py-2.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-600 dark:text-rose-400 border border-rose-500/30 font-bold text-xs flex items-center justify-center gap-1.5 transition-all"
-                  >
-                    <X className="w-4 h-4" />
-                    <span>HỦY ĐƠN HÀNG NÀY (00:{secondsRemaining < 10 ? `0${secondsRemaining}` : secondsRemaining}s)</span>
-                  </button>
+                  <div className="p-3 bg-amber-50 border border-amber-100 rounded-2xl space-y-2">
+                    <div className="flex justify-between items-center text-xs">
+                      <span className="font-medium text-amber-700 flex items-center gap-1.5">
+                        <Clock className="w-3.5 h-3.5" />Có thể hủy trong:
+                      </span>
+                      <span className="font-mono font-bold text-amber-800 tabular-nums">
+                        00:{secondsRemaining < 10 ? `0${secondsRemaining}` : secondsRemaining}s
+                      </span>
+                    </div>
+                    <div className="w-full bg-amber-100 h-1 rounded-full overflow-hidden">
+                      <motion.div
+                        className="bg-amber-400 h-full rounded-full"
+                        animate={{ width: `${(secondsRemaining / ((activeSuccessOrder as any).cancelWindowSeconds || 60)) * 100}%` }}
+                        transition={{ duration: 1, ease: 'linear' }}
+                      />
+                    </div>
+                  </div>
                 )}
-
-                <button
-                  onClick={() => setShowSuccessModal(false)}
-                  className="w-full py-3 rounded-xl bg-blue-600 hover:bg-blue-700 dark:bg-gradient-to-r dark:from-red-600 dark:to-rose-600 dark:hover:from-red-500 dark:hover:to-rose-500 text-white font-bold text-xs shadow-lg shadow-blue-500/20 dark:shadow-red-600/30 flex items-center justify-center gap-1.5 transition-all"
-                >
-                  <CheckCircle2 className="w-4 h-4 text-cyan-300 dark:text-white" />
-                  <span>ĐÃ HIỂU — THEO DÕI ĐƠN HÀNG</span>
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Customer Welcoming Header - Modern Glassmorphism Hero */}
-      <div className="relative overflow-hidden rounded-3xl bg-gradient-to-br from-slate-900 via-slate-900 to-slate-950 text-white p-6 sm:p-8 shadow-xl shadow-slate-950/10 border border-slate-800/80">
-        {/* Subtle Ambient Glow Background */}
-        <div className="absolute top-0 right-0 -mt-8 -mr-8 w-64 h-64 bg-cyan-500/15 rounded-full blur-3xl pointer-events-none" />
-        <div className="absolute bottom-0 left-1/3 -mb-12 w-64 h-64 bg-blue-600/10 rounded-full blur-3xl pointer-events-none" />
-
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
-          <div className="space-y-3">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-xs font-medium text-cyan-300">
-              <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              <span>Cổng Cư Dân Thông Minh • 1 Chạm Đặt Nhanh</span>
-            </div>
-
-            <div>
-              <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-white">
-                Xin chào, {user?.fullName || 'Cư Dân Sunwah Pearl'}!
-              </h1>
-              <p className="text-xs sm:text-sm text-slate-300 mt-1.5 flex items-center gap-2">
-                <MapPin className="w-4 h-4 text-cyan-400 shrink-0" />
-                <span>
-                  Đại lý phục vụ: <strong className="text-white font-semibold">{user?.store?.name || 'Đại lý Nước & Gas Gia Định'}</strong>
-                </span>
-                <span className="text-slate-500">•</span>
-                <span className="text-slate-400">Căn hộ {(user as any)?.customerProfile?.apartment || '1204 - Sapphire'}</span>
-              </p>
-            </div>
-          </div>
-
-          {/* Quick Metrics Strip */}
-          <div className="flex items-center gap-3 flex-wrap">
-            <div className="px-4 py-3 rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-cyan-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-300">
-                <Radio className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Nút Bấm Sẵn Sàng</div>
-                <div className="text-lg font-black text-white">{devices.length} <span className="text-xs font-normal text-slate-400">thiết bị</span></div>
-              </div>
-            </div>
-
-            <div className="px-4 py-3 rounded-2xl bg-white/5 backdrop-blur-md border border-white/10 flex items-center gap-3">
-              <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-500/30 flex items-center justify-center text-emerald-300">
-                <Battery className="w-5 h-5" />
-              </div>
-              <div>
-                <div className="text-[10px] font-mono uppercase tracking-wider text-slate-400">Pin Thiết Bị TB</div>
-                <div className="text-lg font-black text-white">96% <span className="text-xs font-normal text-slate-400">khỏe</span></div>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Cancelled Success Toast */}
-      {cancelToast && (
-        <div className="p-4 bg-emerald-600 text-white rounded-2xl shadow-xl flex items-center justify-between animate-bounce">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="w-5 h-5 shrink-0" />
-            <span className="text-xs font-bold">{cancelToast}</span>
-          </div>
-          <button onClick={() => setCancelToast(null)} className="p-1 hover:bg-emerald-700 rounded-lg">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Throttled Anti-Spam Notice */}
-      {throttledNotice && (
-        <div className="p-4 bg-amber-600 text-white rounded-2xl shadow-xl flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <AlertCircle className="w-5 h-5 shrink-0" />
-            <span className="text-xs font-semibold">{throttledNotice}</span>
-          </div>
-          <button onClick={() => setThrottledNotice(null)} className="p-1 hover:bg-amber-700 rounded-lg">
-            <X className="w-4 h-4" />
-          </button>
-        </div>
-      )}
-
-      {/* Cancellation Grace Period Floating Banner */}
-      {!showSuccessModal && activeCancelOrder && secondsRemaining > 0 && (
-        <div className="p-4 bg-gradient-to-r from-amber-500 via-orange-500 to-amber-600 text-white rounded-2xl shadow-xl flex items-center justify-between animate-pulse">
-          <div className="space-y-1">
-            <div className="flex items-center gap-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-amber-200" />
-              <p className="text-[11px] font-mono font-bold uppercase tracking-wider opacity-95">Đơn hàng mới tạo từ nút ESP32</p>
-            </div>
-            <p className="text-xs font-medium">
-              Mã #{activeCancelOrder.orderNumber} • Hủy miễn phí: <strong className="font-mono">00:{secondsRemaining < 10 ? `0${secondsRemaining}` : secondsRemaining}s</strong>
-            </p>
-            <p className="text-[10px] text-amber-100 flex items-center gap-1">
-              <Lightbulb className="w-3.5 h-3.5 text-amber-300" />
-              <span>Nhấn đúp 2 lần trên nút ESP32 để hủy ngay</span>
-            </p>
-          </div>
-          <button
-            onClick={() => handleCancelOrder(activeCancelOrder.id)}
-            className="px-3.5 py-2 bg-white text-rose-700 text-xs font-bold rounded-xl shadow hover:bg-slate-100 btn-press shrink-0 ml-2"
-          >
-            Hủy Đơn
-          </button>
-        </div>
-      )}
-
-      {/* Main Grid: Left = Buttons, Right = Orders History */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        
-        {/* Left Column: Smart Buttons */}
-        <div className="lg:col-span-7 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-1">
-            <div className="flex items-center gap-2.5">
-              <div className="w-8 h-8 rounded-xl bg-blue-500/10 dark:bg-cyan-500/15 border border-blue-500/20 dark:border-cyan-500/30 flex items-center justify-center text-blue-600 dark:text-cyan-400">
-                <Radio className="w-4 h-4" />
-              </div>
-              <div>
-                <h2 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
-                  Nút Bấm Của Bạn ({devices.length})
-                </h2>
-                <p className="text-[11px] text-slate-500 dark:text-zinc-400">
-                  Nút IoT phần cứng đã gán vào căn hộ
-                </p>
-              </div>
-            </div>
-
-            {/* Unified Action Controls Bar - Only Scan & Connect */}
-            <div className="inline-flex items-center p-1 rounded-2xl bg-slate-100 dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-xs shadow-inner">
-              <button
-                type="button"
-                onClick={() => setShowAirPodsModal(true)}
-                className="px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-bold text-xs flex items-center gap-2 shadow-sm shadow-blue-500/25 transition-all active:scale-95"
-              >
-                <Bluetooth className="w-3.5 h-3.5 animate-pulse" />
-                <span>Quét & Kết Nối Nút Bấm</span>
-              </button>
-            </div>
-          </div>
-
-          {loading ? (
-            <div className="p-12 text-center text-xs font-mono text-slate-500 bg-white dark:bg-[#101014] rounded-3xl border border-slate-200 dark:border-zinc-800">
-              <div className="w-6 h-6 mx-auto mb-2 border-2 border-cyan-500 border-t-transparent rounded-full animate-spin" />
-              Đang tải danh sách nút bấm...
-            </div>
-          ) : devices.length === 0 ? (
-            <div className="p-10 bg-white dark:bg-[#101014] border border-slate-200 dark:border-zinc-800 rounded-3xl text-center space-y-4 shadow-sm">
-              <div className="w-16 h-16 mx-auto rounded-3xl bg-slate-100 dark:bg-zinc-800/80 flex items-center justify-center text-slate-400">
-                <Radio className="w-8 h-8" />
-              </div>
-              <div className="space-y-1">
-                <h4 className="text-sm font-bold text-slate-800 dark:text-zinc-200">Chưa có nút bấm nào</h4>
-                <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto">
-                  Bạn chưa liên kết nút bấm nào. Bấm "Nút Trắng" hoặc quét mã QR từ thiết bị để bắt đầu trải nghiệm 1 chạm.
-                </p>
-              </div>
-              <button
-                onClick={() => setShowAirPodsModal(true)}
-                className="px-5 py-2.5 rounded-2xl bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs inline-flex items-center gap-2 shadow-md shadow-blue-500/20"
-              >
-                <Bluetooth className="w-4 h-4" />
-                <span>Ghép Nối Nút Trắng Ngay</span>
-              </button>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {devices.map((dev) => {
-                const config = dev.configuration;
-                const product = config?.product;
-
-                const isDevicePressing = isPressing && pressingDeviceId === dev.deviceId;
-                const isOnline = dev.lastSeenAt && (Date.now() - new Date(dev.lastSeenAt).getTime() < 25000);
-
-                // Fallback image based on product category
-                const productImg = product?.imageUrl || 
-                  (product?.name?.includes('gas') ? 'https://images.unsplash.com/photo-1585771724684-38269d6639fd?auto=format&fit=crop&w=400&q=80'
-                  : product?.name?.includes('Gạo') ? 'https://images.unsplash.com/photo-1586201375761-83865001e31c?auto=format&fit=crop&w=400&q=80'
-                  : product?.name?.includes('Khải Hoàn') || product?.name?.includes('mắm') ? 'https://images.unsplash.com/photo-1615485290382-441e4d049cb5?auto=format&fit=crop&w=400&q=80'
-                  : 'https://images.unsplash.com/photo-1548839140-29a749e1bc4e?auto=format&fit=crop&w=400&q=80');
-
-                return (
-                  <Floating3DCard key={dev.id} depth={12} className="rounded-3xl">
-                    <div
-                      className={`relative overflow-hidden bg-white dark:bg-[#11141c] border rounded-3xl p-5 shadow-sm transition-all flex flex-col justify-between space-y-4 ${
-                        isDevicePressing
-                          ? 'border-amber-500 ring-4 ring-amber-400/30 shadow-xl scale-[1.01]'
-                          : 'border-slate-200/80 dark:border-zinc-800/90 hover:border-cyan-500/40 hover:shadow-lg'
-                      }`}
+                <div className="space-y-2">
+                  {secondsRemaining > 0 && (
+                    <button
+                      onClick={() => { handleCancelOrder(activeSuccessOrder.id); setShowSuccessModal(false); }}
+                      className="w-full py-2.5 rounded-2xl text-rose-500 bg-rose-50 hover:bg-rose-100 border border-rose-100 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
                     >
-                      {/* Top Header Card */}
-                      <div className="flex items-start gap-4 justify-between">
-                        {/* Product Thumbnail */}
-                        <div className="relative w-16 h-16 rounded-2xl overflow-hidden bg-slate-100 dark:bg-zinc-800 border border-slate-200/80 dark:border-zinc-700/80 shrink-0 shadow-sm">
-                          <img
-                            src={productImg}
-                            alt={product?.name || 'Sản phẩm'}
-                            className="w-full h-full object-cover"
-                          />
-                          <div className="absolute inset-0 bg-gradient-to-t from-black/40 via-transparent to-transparent" />
-                          <span className="absolute bottom-1 left-1.5 text-[8px] font-bold text-white uppercase tracking-wider">
-                            {dev.hardwareModel?.includes('WHITE') || dev.deviceId?.includes('WHITE') ? 'SOB PRO' : 'ESP32'}
-                          </span>
-                        </div>
+                      <X className="w-3.5 h-3.5" />Hủy đơn hàng
+                    </button>
+                  )}
+                  <button
+                    onClick={() => setShowSuccessModal(false)}
+                    className="w-full py-3 rounded-2xl bg-zinc-900 text-white text-sm font-semibold hover:bg-zinc-700 transition-colors"
+                  >
+                    Đã hiểu — Theo dõi đơn hàng
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-                        {/* Title & Product Info */}
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 flex-wrap">
-                            <span className="text-[10px] font-mono font-bold tracking-wider text-slate-400 bg-slate-100 dark:bg-zinc-800 px-2 py-0.5 rounded-lg border border-slate-200/60 dark:border-zinc-700/60">
-                              {dev.deviceId}
-                            </span>
-                            <span
-                              className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border ${
-                                dev.status === 'DISABLED'
-                                  ? 'bg-rose-500/10 text-rose-600 dark:text-rose-400 border-rose-500/25'
-                                  : dev.status === 'EXPIRED'
-                                  ? 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/25'
-                                  : isOnline
-                                  ? 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/25'
-                                  : 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border-slate-200 dark:border-zinc-700'
-                              }`}
-                            >
-                              <span
-                                className={`w-1.5 h-1.5 rounded-full ${
-                                  dev.status === 'DISABLED' ? 'bg-rose-500' : dev.status === 'EXPIRED' ? 'bg-amber-500' : isOnline ? 'bg-emerald-500 animate-pulse' : 'bg-slate-400'
-                                }`}
-                              />
-                              {dev.status === 'DISABLED' ? 'Tạm Khóa' : dev.status === 'EXPIRED' ? 'Hết Hạn' : isOnline ? 'Đang Online' : 'Chế Độ Chờ (Deep Sleep)'}
-                            </span>
-                          </div>
 
-                          <h3 className="text-base font-extrabold text-slate-900 dark:text-white mt-1.5 truncate">
-                            {config?.customName || dev.customName || 'Smart Button'}
-                          </h3>
 
-                          <div className="flex items-center gap-2 mt-1 text-xs">
-                            <span className="text-slate-600 dark:text-zinc-300 font-medium truncate">
-                              {product?.name || 'Chưa gán mặt hàng'}
-                            </span>
-                            <span className="text-slate-300 dark:text-zinc-700">•</span>
-                            <span className="text-cyan-600 dark:text-cyan-400 font-bold font-mono shrink-0">
-                              {((product?.price || 0) * (config?.defaultQuantity || 1)).toLocaleString()} ₫
-                            </span>
-                          </div>
-                        </div>
+      {/* ── PART 1: Greeting Header ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 15 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, ease: [0.25, 0.46, 0.45, 0.94] }}
+        className="space-y-3"
+      >
+        <div>
+          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
+            Xin chào, {user?.fullName || 'Cư Dân'}
+          </h1>
+          <div className="flex flex-wrap items-center gap-3 mt-2">
+            <span className="flex items-center gap-1.5 text-sm text-zinc-400">
+              <MapPin className="w-3.5 h-3.5" />
+              {user?.store?.name || 'Đại lý Nước & Gas Gia Định'}
+            </span>
+            <span className="text-zinc-200">·</span>
+            <span className="text-sm text-zinc-400">
+              Căn hộ {(user as any)?.customerProfile?.apartment || '—'}
+            </span>
+          </div>
+        </div>
+        <div className="flex flex-wrap items-center gap-5">
+          <span className="flex items-center gap-2 text-sm text-zinc-500">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
+            {devices.filter(d => d.lastSeenAt && Date.now() - new Date(d.lastSeenAt).getTime() < 25000).length}/{devices.length} nút online
+          </span>
+          <span className="flex items-center gap-1.5 text-sm text-zinc-500">
+            <Battery className="w-3.5 h-3.5 text-zinc-400" />
+            Pin trung bình {devices.length > 0 ? Math.round(devices.reduce((s, d) => s + (d.batteryLevel ?? 96), 0) / devices.length) : 96}%
+          </span>
+          <motion.button
+            whileTap={{ scale: 0.96 }}
+            onClick={() => setShowAirPodsModal(true)}
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 text-white text-xs font-medium rounded-full hover:bg-zinc-700 transition-colors"
+          >
+            <Bluetooth className="w-3 h-3" />
+            Thêm nút mới
+          </motion.button>
+        </div>
+      </motion.div>
 
-                        {/* Physical Tactile Button Visualizer */}
-                        <div
-                          onClick={() => handleSimulatePress(dev.deviceId)}
-                          className={`w-14 h-14 rounded-2xl border-2 flex flex-col items-center justify-center shrink-0 cursor-pointer transition-all shadow-inner group ${
-                            isDevicePressing
-                              ? 'bg-amber-400 border-amber-300 text-amber-950 scale-95 shadow-amber-500/30 ring-4 ring-amber-400/40 animate-pulse'
-                              : 'bg-gradient-to-b from-slate-50 to-slate-200 dark:from-zinc-800 dark:to-zinc-900 border-slate-300 dark:border-zinc-700 text-slate-700 dark:text-zinc-300 hover:border-cyan-500/50 hover:shadow-md active:scale-95'
-                          }`}
-                          title="Nhấp để mô phỏng bấm nút vật lý"
-                        >
-                          <div className={`w-8 h-8 rounded-full border flex items-center justify-center ${
-                            isDevicePressing ? 'bg-amber-500 border-amber-600 text-white' : 'bg-blue-600 border-blue-500 text-white shadow-sm'
-                          }`}>
-                            <Radio className={`w-4 h-4 ${simulatingDeviceId === dev.deviceId ? 'animate-spin' : ''}`} />
-                          </div>
-                          <span className="text-[8px] font-black uppercase tracking-widest mt-0.5 opacity-75">
-                            {isDevicePressing ? 'ĐANG BẤM' : 'BẤM THỬ'}
-                          </span>
-                        </div>
-                      </div>
+      {/* Cancelled Toast */}
+      <AnimatePresence>
+        {cancelToast && (
+          <motion.div
+            initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-3 bg-emerald-600 text-white rounded-2xl shadow-xl text-xs font-medium"
+          >
+            <CheckCircle2 className="w-4 h-4 shrink-0" />
+            <span>{cancelToast}</span>
+            <button onClick={() => setCancelToast(null)} className="ml-2 opacity-70 hover:opacity-100"><X className="w-3.5 h-3.5" /></button>
+          </motion.div>
+        )}
+        {throttledNotice && (
+          <motion.div
+            initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
+            className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-3 bg-amber-500 text-white rounded-2xl shadow-xl text-xs font-medium"
+          >
+            <AlertCircle className="w-4 h-4 shrink-0" />
+            <span>{throttledNotice}</span>
+            <button onClick={() => setThrottledNotice(null)} className="ml-2 opacity-70 hover:opacity-100"><X className="w-3.5 h-3.5" /></button>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
-                      {/* Live Pressing Progress Banner */}
-                      {isDevicePressing && (
-                        <div className="p-3 bg-amber-500/15 border border-amber-500/30 rounded-2xl flex items-center gap-2.5 text-xs text-amber-800 dark:text-amber-200 font-semibold animate-pulse">
-                          <Radio className="w-4 h-4 text-amber-500 animate-pulse shrink-0" />
-                          <span>Đang nhận tín hiệu từ nút ESP32: Nhấn đúp 2 lần để Đặt / Hủy đơn, Giữ 5s để Đổi Wi-Fi</span>
-                        </div>
-                      )}
-
-                      {/* Hardware Telemetry Bar */}
-                      <div className="grid grid-cols-3 gap-2 py-2 px-3 rounded-2xl bg-slate-50 dark:bg-zinc-900/60 border border-slate-100 dark:border-zinc-800/80 text-[11px] font-mono text-slate-600 dark:text-zinc-400">
-                        <div className="flex items-center gap-1.5">
-                          <Battery className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
-                          <span>Pin: <strong className="text-slate-800 dark:text-zinc-200">{dev.batteryLevel ?? 96}%</strong></span>
-                        </div>
-                        <div className="flex items-center gap-1.5 justify-center">
-                          <Wifi className="w-3.5 h-3.5 text-blue-500 shrink-0" />
-                          <span>Sóng: <strong className="text-slate-800 dark:text-zinc-200">{dev.wifiRSSI ?? -55} dBm</strong></span>
-                        </div>
-                        <div className="flex items-center gap-1 justify-end text-slate-500 dark:text-zinc-400">
-                          <span>Hủy: <strong className="text-slate-800 dark:text-zinc-200">{config?.cancelWindowSeconds ?? 60}s</strong></span>
-                        </div>
-                      </div>
-
-                      {/* Hardware Physical Gestures Guide */}
-                      <div className="px-3 py-2 rounded-2xl bg-slate-50/80 dark:bg-zinc-950/70 border border-slate-100 dark:border-zinc-800/70 text-[10px] text-slate-600 dark:text-zinc-400 flex items-center justify-between">
-                        <span className="flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
-                          <strong className="text-blue-600 dark:text-sky-400">1 Click:</strong> Bật nguồn
-                        </span>
-                        <span className="text-slate-300 dark:text-zinc-700">•</span>
-                        <span className="flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-indigo-500" />
-                          <strong className="text-indigo-600 dark:text-indigo-400">2 Clicks:</strong> Đặt / Hủy đơn
-                        </span>
-                        <span className="text-slate-300 dark:text-zinc-700">•</span>
-                        <span className="flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
-                          <strong className="text-amber-600 dark:text-amber-400">Giữ 5s:</strong> Đổi Wi-Fi
-                        </span>
-                      </div>
-
-                      {/* Primary CTA & Clean Action Toolbar */}
-                      <div className="space-y-2 pt-1">
-                        <button
-                          type="button"
-                          onClick={() => handleQuickReorder(dev.deviceId)}
-                          className="w-full py-3.5 rounded-2xl bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-extrabold text-xs shadow-md shadow-blue-500/20 flex items-center justify-center gap-2 transition-all active:scale-[0.99]"
-                        >
-                          <ShoppingBag className="w-4 h-4" />
-                          <span>Đặt Hàng Ngay (1 Chạm Vật Lý)</span>
-                        </button>
-
-                        <div className="grid grid-cols-3 gap-2">
-                          <button
-                            type="button"
-                            onClick={() => handleSimulatePress(dev.deviceId)}
-                            disabled={simulatingDeviceId === dev.deviceId}
-                            className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200/80 dark:border-zinc-800 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                            title="Thử nghiệm tín hiệu nút bấm vật lý"
-                          >
-                            <Radio className={`w-3.5 h-3.5 text-blue-600 dark:text-sky-400 ${simulatingDeviceId === dev.deviceId ? 'animate-spin' : ''}`} />
-                            <span>{simulatingDeviceId === dev.deviceId ? 'Đang gửi...' : 'Thử Nút'}</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => openConfigModal(dev)}
-                            className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200/80 dark:border-zinc-800 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                          >
-                            <Sliders className="w-3.5 h-3.5 text-slate-500" />
-                            <span>Cấu Hình</span>
-                          </button>
-
-                          <button
-                            type="button"
-                            onClick={() => setChangeWifiDevice(dev)}
-                            className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200/80 dark:border-zinc-800 text-[11px] font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                          >
-                            <Wifi className="w-3.5 h-3.5 text-slate-500" />
-                            <span>Đổi Wi-Fi</span>
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </Floating3DCard>
-                );
-              })}
+      {/* Cancel grace banner */}
+      <AnimatePresence>
+        {!showSuccessModal && activeCancelOrder && secondsRemaining > 0 && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
+            className="flex items-center justify-between px-4 py-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs"
+          >
+            <div className="flex items-center gap-2">
+              <Clock className="w-4 h-4 text-amber-500 shrink-0" />
+              <span className="text-amber-700 font-medium">
+                Đơn #{activeCancelOrder.orderNumber} — Hủy miễn phí trong{' '}
+                <span className="font-mono font-bold tabular-nums">
+                  00:{secondsRemaining < 10 ? `0${secondsRemaining}` : secondsRemaining}s
+                </span>
+              </span>
             </div>
-          )}
+            <button
+              onClick={() => handleCancelOrder(activeCancelOrder.id)}
+              className="px-3 py-1.5 text-rose-500 bg-rose-50 hover:bg-rose-100 border border-rose-100 rounded-full text-xs font-medium transition-colors"
+            >
+              Hủy đơn
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* ── PART 2: Device Grid ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 15 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, delay: 0.1, ease: [0.25, 0.46, 0.45, 0.94] }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-zinc-900">
+            Nút Đặt Hàng
+            {devices.length > 0 && <span className="ml-2 text-zinc-400 font-normal text-sm">({devices.length})</span>}
+          </h2>
         </div>
 
-        {/* Right Column: Order History */}
-        <div className="lg:col-span-5 space-y-4">
-          <div className="flex items-center justify-between pb-1">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-xl bg-slate-100 dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700/80 flex items-center justify-center text-slate-500 dark:text-zinc-400">
-                <Clock className="w-4 h-4" />
-              </div>
-              <h2 className="text-base font-black text-slate-900 dark:text-white tracking-tight">
-                Lịch Sử Đặt Hàng
-              </h2>
-            </div>
-            <span className="text-[11px] font-mono text-slate-400">5 đơn gần nhất</span>
+        {loading ? (
+          <div className="py-16 text-center text-zinc-400 text-sm">
+            <div className="w-5 h-5 border-2 border-zinc-300 border-t-zinc-600 rounded-full animate-spin mx-auto mb-3" />
+            Đang tải...
           </div>
-
-          {orders.length === 0 ? (
-            <div className="p-8 bg-white dark:bg-[#11141c] border border-slate-200/80 dark:border-zinc-800 rounded-3xl text-center space-y-2 shadow-sm">
-              <div className="w-12 h-12 mx-auto rounded-2xl bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-400">
-                <ShoppingBag className="w-5 h-5" />
-              </div>
-              <p className="text-xs text-slate-600 dark:text-zinc-300 font-semibold">Chưa có đơn hàng nào</p>
-              <p className="text-[11px] text-slate-400">Đơn hàng tạo từ nút bấm ESP32 sẽ xuất hiện tại đây.</p>
+        ) : devices.length === 0 ? (
+          <motion.div
+            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
+            className="py-16 text-center bg-white border border-zinc-200 rounded-3xl"
+          >
+            <div className="w-12 h-12 mx-auto rounded-2xl bg-zinc-100 flex items-center justify-center text-zinc-400 mb-4">
+              <Radio className="w-5 h-5" />
             </div>
-          ) : (
-            <div className="space-y-3">
-              {orders.slice(0, 5).map((order) => {
-                const isPending = order.status === 'PENDING';
-                const statusMap: Record<string, { label: string; dot: string; cls: string }> = {
-                  PENDING: { label: 'Chờ xác nhận (Có thể hủy)', dot: 'bg-amber-400 animate-ping', cls: 'bg-amber-500/10 text-amber-700 dark:text-amber-300 border-amber-500/30' },
-                  CONFIRMED: { label: 'Đã xác nhận', dot: 'bg-blue-500', cls: 'bg-blue-500/10 text-blue-700 dark:text-blue-300 border-blue-500/30' },
-                  PREPARING: { label: 'Đang đóng gói', dot: 'bg-indigo-500', cls: 'bg-indigo-500/10 text-indigo-700 dark:text-indigo-300 border-indigo-500/30' },
-                  SHIPPING: { label: 'Đang giao hàng', dot: 'bg-sky-500', cls: 'bg-sky-500/10 text-sky-700 dark:text-sky-300 border-sky-500/30' },
-                  COMPLETED: { label: 'Giao thành công', dot: 'bg-emerald-500', cls: 'bg-emerald-500/10 text-emerald-700 dark:text-emerald-300 border-emerald-500/30' },
-                  CANCELLED: { label: 'Đã hủy', dot: 'bg-slate-400', cls: 'bg-rose-500/10 text-rose-700 dark:text-rose-400 border-rose-500/25' },
-                };
-                const statusInfo = statusMap[order.status] || { label: order.status, dot: 'bg-slate-400', cls: 'bg-slate-500/10 text-slate-500 border-slate-500/30' };
+            <p className="text-sm font-medium text-zinc-700 mb-1">Chưa có nút bấm nào</p>
+            <p className="text-xs text-zinc-400 mb-4 max-w-xs mx-auto">Kết nối nút đặt hàng thông minh của bạn để bắt đầu.</p>
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setShowAirPodsModal(true)}
+              className="px-5 py-2.5 bg-zinc-900 text-white rounded-2xl text-xs font-medium inline-flex items-center gap-2 hover:bg-zinc-700 transition-colors"
+            >
+              <Bluetooth className="w-3.5 h-3.5" />
+              Ghép nối nút bấm
+            </motion.button>
+          </motion.div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {devices.map((dev) => {
+              const cfg = dev.configuration;
+              const product = cfg?.product;
+              const isOnline = dev.lastSeenAt && Date.now() - new Date(dev.lastSeenAt).getTime() < 25000;
+              const battery = dev.batteryLevel ?? 96;
+              const rssi = dev.wifiRSSI ?? -55;
+              const isPressing = pressingDeviceId === dev.deviceId;
+              const getCleanProductCutout = (p?: Product | null): string => {
+                const n = (p?.name || '').toLowerCase();
+                if (n.includes('gas') || n.includes('petrolimex') || n.includes('saigon') || n.includes('total')) {
+                  return '/assets/products/Petrolimex.png';
+                }
+                if (n.includes('gạo') || n.includes('rice') || n.includes('st25')) {
+                  return '/assets/products/rice-st25.png';
+                }
+                if (n.includes('nước') || n.includes('lavie') || n.includes('vĩnh') || n.includes('ion') || n.includes('satori') || n.includes('water')) {
+                  return '/assets/products/vinhhao.png';
+                }
+                if (p?.imageUrl && !p.imageUrl.includes('photo-1548839140-29a749e1bc4e') && !p.imageUrl.includes('photo-1586201375761-83865001e31c')) {
+                  return p.imageUrl;
+                }
+                return '/assets/products/vinhhao.png';
+              };
+              const productImg = getCleanProductCutout(product);
+              const name = cfg?.customName || dev.customName || 'Nút Đặt Hàng';
+              const priceStr = product ? `${((product.price || 0) * (cfg?.defaultQuantity || 1)).toLocaleString('vi-VN')} ₫` : null;
 
-                return (
-                  <div
-                    key={order.id}
-                    className={`relative bg-white dark:bg-[#11141c] border rounded-2xl p-4 shadow-sm text-xs space-y-3 transition-all ${
-                      isPending
-                        ? 'border-amber-500/50 shadow-amber-500/10 ring-2 ring-amber-500/20'
-                        : 'border-slate-200/80 dark:border-zinc-800/80 hover:border-slate-300 dark:hover:border-zinc-700'
-                    }`}
-                  >
-                    <div className="flex items-center justify-between gap-2">
-                      <span className="font-mono font-bold text-slate-800 dark:text-zinc-200 text-xs">
-                        #{order.orderNumber}
-                      </span>
-                      <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[10px] font-mono font-bold border ${statusInfo.cls}`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${statusInfo.dot}`} />
-                        {statusInfo.label}
-                      </span>
-                    </div>
+              return (
+                <DeviceCardUI
+                  key={dev.id}
+                  dev={dev}
+                  productImg={productImg}
+                  name={name}
+                  priceStr={priceStr}
+                  isOnline={!!isOnline}
+                  battery={battery}
+                  rssi={rssi}
+                  isPressing={isPressing}
+                  simulatingId={simulatingDeviceId}
+                  onOrder={handleQuickReorder}
+                  onSimulate={handleSimulatePress}
+                  onConfigOpen={openConfigModal}
+                  onWifiOpen={setChangeWifiDevice}
+                />
+              );
+            })}
+          </div>
+        )}
+      </motion.div>
 
-                    <div className="space-y-1.5 pt-1">
-                      {order.items.map((it) => (
-                        <div key={it.id} className="flex justify-between items-center text-slate-700 dark:text-zinc-300">
-                          <span className="font-semibold">{it.quantity}x {it.productName}</span>
-                          <span className="font-mono font-bold text-slate-900 dark:text-white">{it.totalPrice.toLocaleString()} ₫</span>
-                        </div>
-                      ))}
-                    </div>
-
-                    <div className="text-[11px] text-slate-400 dark:text-zinc-500 pt-2.5 border-t border-slate-100 dark:border-zinc-800/80 flex justify-between font-mono items-center">
-                      <span>{new Date(order.createdAt).toLocaleDateString('vi-VN')}</span>
-                      <span>Tổng tiền: <strong className="text-sm font-extrabold text-slate-900 dark:text-white font-mono">{order.totalAmount.toLocaleString()} ₫</strong></span>
-                    </div>
-
-                    {/* Quick Cancel Action directly on order card if PENDING */}
-                    {isPending && (
-                      <div className="pt-1">
-                        <button
-                          onClick={() => handleCancelOrder(order.id)}
-                          className="w-full py-2 rounded-xl bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 dark:hover:bg-rose-950/50 text-rose-600 dark:text-rose-400 border border-rose-200 dark:border-rose-900/50 font-bold text-[11px] flex items-center justify-center gap-1.5 transition-colors"
-                        >
-                          <X className="w-3.5 h-3.5" />
-                          <span>HỦY ĐƠN HÀNG NÀY (TRONG CỬA SỔ 60S)</span>
-                        </button>
+      {/* ── PART 3: Order History ── */}
+      <motion.div
+        initial={{ opacity: 0, y: 15 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.45, delay: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
+      >
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-base font-semibold text-zinc-900">Lịch sử đặt hàng</h2>
+          <span className="text-xs text-zinc-400">5 đơn gần nhất</span>
+        </div>
+        {orders.length === 0 ? (
+          <div className="py-12 text-center bg-white border border-zinc-200 rounded-3xl">
+            <ShoppingBag className="w-8 h-8 text-zinc-300 mx-auto mb-3" />
+            <p className="text-sm text-zinc-400">Chưa có đơn hàng nào</p>
+          </div>
+        ) : (
+          <div className="bg-white border border-zinc-200 rounded-3xl divide-y divide-zinc-100 overflow-hidden">
+            {orders.slice(0, 5).map((order, idx) => {
+              const isPending = order.status === 'PENDING';
+              const statusConfig: Record<string, { label: string; dot: string; ring: string; text: string }> = {
+                PENDING:   { label: 'Chờ xác nhận',  dot: 'bg-amber-400',   ring: 'bg-amber-50 border-amber-200',     text: 'text-amber-700'  },
+                CONFIRMED: { label: 'Đã tiếp nhận', dot: 'bg-emerald-500', ring: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700'},
+                PREPARING: { label: 'Đang chuẩn bị',dot: 'bg-violet-500',  ring: 'bg-violet-50 border-violet-200',   text: 'text-violet-700' },
+                SHIPPING:  { label: 'Đang giao',    dot: 'bg-sky-500',     ring: 'bg-sky-50 border-sky-200',         text: 'text-sky-700'    },
+                COMPLETED: { label: 'Đã giao',      dot: 'bg-emerald-500', ring: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700'},
+                CANCELLED: { label: 'Đã hủy',       dot: 'bg-rose-500',    ring: 'bg-rose-50 border-rose-200',       text: 'text-rose-700'   },
+              };
+              const s = statusConfig[order.status] || { label: order.status, dot: 'bg-zinc-300', ring: 'bg-zinc-50 border-zinc-200', text: 'text-zinc-500' };
+              return (
+                <motion.div
+                  key={order.id}
+                  initial={{ opacity: 0, y: 8 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  transition={{ delay: idx * 0.06 }}
+                  className={`px-5 py-4 ${isPending ? 'bg-amber-50/50' : ''}`}
+                >
+                  <div className="flex items-start justify-between gap-4">
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="text-xs font-mono font-semibold text-zinc-600">#{order.orderNumber}</span>
+                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${s.ring} ${s.text}`}>
+                          <span className={`w-1.5 h-1.5 rounded-full ${s.dot} ${order.status === 'PENDING' ? 'animate-pulse' : ''}`} />
+                          {s.label}
+                        </span>
                       </div>
+                      <div className="mt-1.5 space-y-0.5">
+                        {order.items.map((it) => (
+                          <div key={it.id} className="flex justify-between text-xs text-zinc-500">
+                            <span>{it.quantity}× {it.productName}</span>
+                            <span className="font-medium text-zinc-700">{it.totalPrice.toLocaleString('vi-VN')} ₫</span>
+                          </div>
+                        ))}
+                      </div>
+                      <div className="flex items-center gap-3 mt-2">
+                        <span className="text-[11px] text-zinc-400">{new Date(order.createdAt).toLocaleDateString('vi-VN')}</span>
+                        <span className="text-[11px] text-zinc-400">·</span>
+                        <span className="text-[11px] font-semibold text-zinc-700">{order.totalAmount.toLocaleString('vi-VN')} ₫</span>
+                      </div>
+                    </div>
+                    {isPending && (
+                      <motion.button
+                        whileTap={{ scale: 0.95 }}
+                        onClick={() => handleCancelOrder(order.id)}
+                        className="shrink-0 text-rose-500 bg-rose-50 hover:bg-rose-100 border border-rose-100 px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1 transition-colors"
+                      >
+                        <X className="w-3 h-3" />
+                        Hủy đơn
+                      </motion.button>
                     )}
                   </div>
-                );
-              })}
-            </div>
-          )}
-        </div>
-      </div>
+                </motion.div>
+              );
+            })}
+          </div>
+        )}
+      </motion.div>
 
-
-
-      {/* ========================================================================= */}
       {/* 2. BẢNG CẤU HÌNH MẠNG WI-FI (TRỰC TIẾP TRÊN WEB HOẶC QUA THIẾT BỊ)       */}
       {/* ========================================================================= */}
       {changeWifiDevice && (
@@ -1579,6 +1548,8 @@ export const CustomerHomePage: React.FC = () => {
           fetchData();
         }}
       />
+    </div>
+
     </div>
   );
 };
