@@ -10,6 +10,7 @@ import confetti from 'canvas-confetti';
 import { Floating3DCard } from '../../components/3d/Floating3DCard';
 import { WebBluetoothProvisioner } from '../../components/devices/WebBluetoothProvisioner';
 import { WhiteDeviceAirPodsModal } from '../../components/devices/WhiteDeviceAirPodsModal';
+import { OrderSuccessModal } from '../../components/orders/OrderSuccessModal';
 
 
 // ─────────────────────────────────────────────
@@ -419,7 +420,9 @@ export const CustomerHomePage: React.FC = () => {
       const res = await api.post('/orders/quick-reorder', { deviceId });
       if (res.data.success) {
         const { order, cancelWindowSeconds } = res.data.data;
+        setActiveSuccessOrder(order);
         setActiveCancelOrder(order);
+        setShowSuccessModal(true);
         setSecondsRemaining(cancelWindowSeconds || 60);
         confetti({ particleCount: 70, spread: 70, origin: { y: 0.5 } });
         fetchData();
@@ -660,85 +663,17 @@ export const CustomerHomePage: React.FC = () => {
   return (
     <div className="min-h-screen bg-[#FBFBFC]">
     <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8">
-      {/* Order Success Modal */}
-      <AnimatePresence>
-        {showSuccessModal && activeSuccessOrder && (
-          <motion.div
-            initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm"
-          >
-            <motion.div
-              initial={{ opacity: 0, scale: 0.92, y: 20 }}
-              animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.95 }}
-              transition={{ type: 'spring', stiffness: 280, damping: 26 }}
-              className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-zinc-100"
-            >
-              <div className="bg-emerald-500 px-6 pt-6 pb-5 text-white">
-                <div className="flex items-center gap-2 mb-2">
-                  <CheckCircle2 className="w-5 h-5" />
-                  <span className="text-sm font-semibold">Đặt hàng thành công</span>
-                </div>
-                <p className="text-2xl font-bold">#{activeSuccessOrder.orderNumber}</p>
-                <p className="text-emerald-100 text-xs mt-1">Đơn hàng của bạn đã được gửi đến đại lý</p>
-              </div>
-              <div className="p-5 space-y-4">
-                <div className="space-y-2">
-                  {activeSuccessOrder.items?.map((it: any) => (
-                    <div key={it.id || it.productName} className="flex justify-between text-sm">
-                      <span className="text-zinc-600">{it.quantity}× {it.productName}</span>
-                      <span className="font-semibold text-zinc-900">{it.totalPrice?.toLocaleString('vi-VN')} ₫</span>
-                    </div>
-                  ))}
-                  <div className="flex justify-between text-sm font-bold pt-2 border-t border-zinc-100">
-                    <span className="text-zinc-900">Tổng cộng</span>
-                    <span className="text-emerald-600">{activeSuccessOrder.totalAmount?.toLocaleString('vi-VN')} ₫</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-zinc-400">
-                  <MapPin className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">{activeSuccessOrder.deliveryAddress}</span>
-                </div>
-                {secondsRemaining > 0 && (
-                  <div className="p-3 bg-amber-50 border border-amber-100 rounded-2xl space-y-2">
-                    <div className="flex justify-between items-center text-xs">
-                      <span className="font-medium text-amber-700 flex items-center gap-1.5">
-                        <Clock className="w-3.5 h-3.5" />Có thể hủy trong:
-                      </span>
-                      <span className="font-mono font-bold text-amber-800 tabular-nums">
-                        00:{secondsRemaining < 10 ? `0${secondsRemaining}` : secondsRemaining}s
-                      </span>
-                    </div>
-                    <div className="w-full bg-amber-100 h-1 rounded-full overflow-hidden">
-                      <motion.div
-                        className="bg-amber-400 h-full rounded-full"
-                        animate={{ width: `${(secondsRemaining / ((activeSuccessOrder as any).cancelWindowSeconds || 60)) * 100}%` }}
-                        transition={{ duration: 1, ease: 'linear' }}
-                      />
-                    </div>
-                  </div>
-                )}
-                <div className="space-y-2">
-                  {secondsRemaining > 0 && (
-                    <button
-                      onClick={() => { handleCancelOrder(activeSuccessOrder.id); setShowSuccessModal(false); }}
-                      className="w-full py-2.5 rounded-2xl text-rose-500 bg-rose-50 hover:bg-rose-100 border border-rose-100 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors"
-                    >
-                      <X className="w-3.5 h-3.5" />Hủy đơn hàng
-                    </button>
-                  )}
-                  <button
-                    onClick={() => setShowSuccessModal(false)}
-                    className="w-full py-3 rounded-2xl bg-zinc-900 text-white text-sm font-semibold hover:bg-zinc-700 transition-colors"
-                  >
-                    Đã hiểu — Theo dõi đơn hàng
-                  </button>
-                </div>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+      {/* Order Success Modal (Apple iOS / Airbnb "Digital Receipt" Experience) */}
+      <OrderSuccessModal
+        isOpen={showSuccessModal && !!activeSuccessOrder}
+        order={activeSuccessOrder}
+        secondsRemaining={secondsRemaining}
+        onClose={() => setShowSuccessModal(false)}
+        onCancelOrder={(orderId) => {
+          handleCancelOrder(orderId);
+          setShowSuccessModal(false);
+        }}
+      />
 
 
 
@@ -813,20 +748,20 @@ export const CustomerHomePage: React.FC = () => {
         {!showSuccessModal && activeCancelOrder && secondsRemaining > 0 && (
           <motion.div
             initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-            className="flex items-center justify-between px-4 py-3 bg-amber-50 border border-amber-200 rounded-2xl text-xs"
+            className="flex items-center justify-between px-4 py-2.5 bg-white border border-zinc-200/90 rounded-2xl shadow-xs text-xs"
           >
             <div className="flex items-center gap-2">
-              <Clock className="w-4 h-4 text-amber-500 shrink-0" />
-              <span className="text-amber-700 font-medium">
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
+              <span className="text-zinc-600 font-medium">
                 Đơn #{activeCancelOrder.orderNumber} — Hủy miễn phí trong{' '}
-                <span className="font-mono font-bold tabular-nums">
-                  00:{secondsRemaining < 10 ? `0${secondsRemaining}` : secondsRemaining}s
+                <span className="font-mono font-bold text-zinc-900 tabular-nums">
+                  {secondsRemaining}s
                 </span>
               </span>
             </div>
             <button
               onClick={() => handleCancelOrder(activeCancelOrder.id)}
-              className="px-3 py-1.5 text-rose-500 bg-rose-50 hover:bg-rose-100 border border-rose-100 rounded-full text-xs font-medium transition-colors"
+              className="px-3 py-1 text-rose-500 hover:text-rose-600 border border-rose-200 hover:bg-rose-50 rounded-lg text-xs font-medium transition-colors cursor-pointer"
             >
               Hủy đơn
             </button>
