@@ -718,7 +718,7 @@ export const StoreDevicesPage: React.FC = () => {
             type="button"
             whileTap={{ scale: 0.96 }}
             onClick={handleOpenCreateModal}
-            className="px-2.5 py-1 rounded-md bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-colors"
+            className="px-2.5 py-1 rounded-md bg-[#287DA8] hover:bg-[#206588] text-white text-xs font-semibold shadow-[0_2px_8px_rgba(40,125,168,0.25)] flex items-center gap-1.5 transition-all cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" strokeWidth={1.5} />
             <span>Thêm Thiết Bị</span>

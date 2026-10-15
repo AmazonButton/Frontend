@@ -486,10 +486,10 @@ export const StoreDashboard: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowChart(!showChart)}
-              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-xs font-medium transition-all ${
+              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-xs font-medium transition-all cursor-pointer ${
                 showChart
-                  ? 'bg-zinc-900 text-white border-zinc-900 dark:bg-zinc-100 dark:text-zinc-900 dark:border-zinc-100'
-                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-zinc-400'
+                  ? 'bg-[#287DA8] text-white border-[#287DA8] shadow-[0_2px_8px_rgba(40,125,168,0.25)]'
+                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-[#287DA8] hover:text-[#287DA8]'
               }`}
             >
               <TrendingUp className="w-3.5 h-3.5" />
@@ -500,7 +500,7 @@ export const StoreDashboard: React.FC = () => {
             <button
               type="button"
               onClick={() => setShowInventoryModal(true)}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 text-xs font-medium transition-all hover:border-zinc-400"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 hover:bg-[#287DA8]/5 text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] border border-zinc-200 dark:border-zinc-700 hover:border-[#287DA8]/40 text-xs font-medium transition-all cursor-pointer"
             >
               <Boxes className="w-3.5 h-3.5" />
               Kho Hàng
@@ -510,7 +510,7 @@ export const StoreDashboard: React.FC = () => {
             <button
               type="button"
               onClick={() => testStoreBankSpeaker()}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700 text-xs font-medium transition-all hover:border-zinc-400"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 hover:bg-[#287DA8]/5 text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] border border-zinc-200 dark:border-zinc-700 hover:border-[#287DA8]/40 text-xs font-medium transition-all cursor-pointer"
               title="Nghe thử âm lượng loa thông báo"
             >
               <Volume2 className="w-3.5 h-3.5" />
@@ -536,7 +536,7 @@ export const StoreDashboard: React.FC = () => {
               label: 'Đang Tiến Hành',
               value: inProgressCount,
               sub: 'chuẩn bị & giao',
-              dot: 'bg-blue-500',
+              dot: 'bg-[#287DA8]',
               urgent: false,
               valueColor: 'text-zinc-900 dark:text-zinc-100',
             },
@@ -544,7 +544,7 @@ export const StoreDashboard: React.FC = () => {
               label: 'Đã Hoàn Thành',
               value: completedCount,
               sub: 'giao thành công',
-              dot: 'bg-emerald-500',
+              dot: 'bg-[#4AA785]',
               urgent: false,
               valueColor: 'text-zinc-900 dark:text-zinc-100',
             },
@@ -632,16 +632,16 @@ export const StoreDashboard: React.FC = () => {
                   key={tab.key}
                   type="button"
                   onClick={() => setStatusFilter(tab.key)}
-                  className={`relative px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 z-10 ${
+                  className={`relative px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 z-10 cursor-pointer ${
                     isActive
-                      ? 'text-white dark:text-zinc-900 font-semibold'
-                      : 'text-zinc-500 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
+                      ? 'text-white font-semibold'
+                      : 'text-zinc-500 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-white hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
                   }`}
                 >
                   {isActive && (
                     <motion.span
                       layoutId="activeStoreDashboardTab"
-                      className="absolute inset-0 bg-zinc-900 dark:bg-zinc-100 rounded-md -z-10 shadow-xs"
+                      className="absolute inset-0 bg-[#287DA8] rounded-md -z-10 shadow-[0_2px_8px_rgba(40,125,168,0.3)] pointer-events-none"
                       transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                     />
                   )}
@@ -650,7 +650,7 @@ export const StoreDashboard: React.FC = () => {
                     <span
                       className={`text-[9.5px] font-mono px-1.5 py-0.5 rounded-full leading-none transition-colors ${
                         isActive
-                          ? 'bg-white/20 dark:bg-zinc-900/20 text-white dark:text-zinc-900'
+                          ? 'bg-white/25 text-white font-bold'
                           : (tab as any).urgent
                           ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 font-bold'
                           : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'
@@ -673,7 +673,7 @@ export const StoreDashboard: React.FC = () => {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Tìm mã đơn, tên, SĐT..."
-                className="w-full pl-8 pr-7 py-1 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-500 transition-colors"
+                className="w-full pl-8 pr-7 py-1 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-[#287DA8] focus:ring-1 focus:ring-[#287DA8]/20 transition-colors"
               />
               {searchQuery && (
                 <button
@@ -689,7 +689,7 @@ export const StoreDashboard: React.FC = () => {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="px-2 py-1 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 focus:outline-none cursor-pointer"
+              className="px-2 py-1 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 focus:outline-none focus:border-[#287DA8] cursor-pointer"
             >
               <option value="PRIORITY">Ưu tiên xử lý</option>
               <option value="NEWEST">Mới nhất</option>
@@ -812,7 +812,7 @@ export const StoreDashboard: React.FC = () => {
                               type="button"
                               whileTap={{ scale: 0.96 }}
                               onClick={() => handleUpdateStatus(order.id, 'CONFIRMED')}
-                              className="px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-[11px] font-semibold rounded-md shadow-xs transition-colors"
+                              className="px-2.5 py-1 bg-[#287DA8] hover:bg-[#206588] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
                             >
                               Tiếp Nhận
                             </motion.button>
@@ -822,7 +822,7 @@ export const StoreDashboard: React.FC = () => {
                               type="button"
                               whileTap={{ scale: 0.96 }}
                               onClick={() => handleUpdateStatus(order.id, 'PREPARING')}
-                              className="px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-[11px] font-semibold rounded-md shadow-xs transition-colors"
+                              className="px-2.5 py-1 bg-[#287DA8] hover:bg-[#206588] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
                             >
                               Chuẩn Bị
                             </motion.button>
@@ -832,7 +832,7 @@ export const StoreDashboard: React.FC = () => {
                               type="button"
                               whileTap={{ scale: 0.96 }}
                               onClick={() => handleUpdateStatus(order.id, 'OUT_FOR_DELIVERY')}
-                              className="px-2.5 py-1 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-[11px] font-semibold rounded-md shadow-xs transition-colors"
+                              className="px-2.5 py-1 bg-[#287DA8] hover:bg-[#206588] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
                             >
                               Xuất Giao
                             </motion.button>
@@ -842,13 +842,13 @@ export const StoreDashboard: React.FC = () => {
                               type="button"
                               whileTap={{ scale: 0.96 }}
                               onClick={() => handleUpdateStatus(order.id, 'COMPLETED')}
-                              className="px-2.5 py-1 bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-semibold rounded-md shadow-xs transition-colors"
+                              className="px-2.5 py-1 bg-[#4AA785] hover:bg-[#3d9173] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(74,167,133,0.25)] transition-all cursor-pointer"
                             >
                               Đã Giao ✓
                             </motion.button>
                           )}
                           {(order.status === 'COMPLETED' || (order.status as string) === 'DELIVERED') && (
-                            <span className="text-[10.5px] font-mono text-emerald-600 dark:text-emerald-400 flex items-center justify-end gap-1">
+                            <span className="text-[10.5px] font-mono text-[#4AA785] dark:text-[#5ec29e] flex items-center justify-end gap-1 font-semibold">
                               <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                               Đã giao
                             </span>
@@ -867,71 +867,101 @@ export const StoreDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* ── Inventory Modal ── */}
+      {/* ── Inventory Modal (Redesigned: Minimalist, Airy, Border-b List, Tabular Nums) ── */}
       {showInventoryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/40 backdrop-blur-sm">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-900/40 backdrop-blur-xs">
           <div className="fixed inset-0" onClick={() => setShowInventoryModal(false)} />
-          <div className="relative z-10 w-full max-w-4xl bg-white dark:bg-zinc-900 rounded-2xl border border-zinc-200 dark:border-zinc-800 shadow-2xl p-0 max-h-[90vh] flex flex-col overflow-hidden">
+          <div className="relative z-10 w-full max-w-4xl bg-white dark:bg-[#0B0F17] rounded-xl border border-slate-200/80 dark:border-zinc-800 shadow-[0_20px_50px_rgba(0,0,0,0.12)] p-0 max-h-[88vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
 
-            {/* Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-800/30 shrink-0">
-              <div className="flex items-center gap-3">
-                <div className="w-9 h-9 rounded-xl bg-zinc-900 dark:bg-zinc-100 flex items-center justify-center">
-                  <Boxes className="w-4.5 h-4.5 text-white dark:text-zinc-900" />
-                </div>
-                <div>
-                  <h3 className="text-[14px] font-bold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-                    Quản Lý Kho Hàng
-                    <span className="text-[10px] font-mono font-medium px-2 py-0.5 rounded-full bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-                      {filteredInventory.length} sản phẩm
-                    </span>
-                  </h3>
-                  <p className="text-[11px] text-zinc-400 dark:text-zinc-500">
-                    Cập nhật số lượng tồn kho và gắn ảnh thực tế
-                  </p>
-                </div>
+            {/* 1. Modal Header */}
+            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-zinc-800/80 bg-white dark:bg-[#0B0F17] shrink-0">
+              <div className="flex items-center gap-2.5">
+                <h3 className="text-base font-semibold text-[#0F172A] dark:text-zinc-100 tracking-tight">
+                  Quản Lý Kho Hàng
+                </h3>
+                <span className="inline-flex items-center px-2 py-0.5 rounded-[6px] bg-[#F1F5F9] dark:bg-zinc-800 text-[11px] font-medium text-[#475569] dark:text-zinc-400 tabular-nums">
+                  {filteredInventory.length} sản phẩm
+                </span>
               </div>
 
               <div className="flex items-center gap-2">
                 <button
                   type="button"
                   onClick={() => setShowAddProductForm(!showAddProductForm)}
-                  className="px-3 py-1.5 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-xs font-semibold transition-colors flex items-center gap-1.5"
+                  className="px-3 py-1.5 rounded-lg bg-[#287DA8] hover:bg-[#206588] text-white text-xs font-medium shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
                 >
                   <Plus className="w-3.5 h-3.5" />
-                  {showAddProductForm ? 'Ẩn Form' : 'Thêm Món'}
+                  <span>{showAddProductForm ? 'Ẩn Form' : 'Thêm Món'}</span>
                 </button>
 
                 <button
                   type="button"
                   onClick={() => setShowInventoryModal(false)}
-                  className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 flex items-center justify-center transition-colors"
+                  className="w-8 h-8 rounded-lg text-slate-400 hover:text-slate-700 dark:hover:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 flex items-center justify-center transition-colors cursor-pointer"
+                  title="Đóng"
                 >
                   <X className="w-4 h-4" />
                 </button>
               </div>
             </div>
 
+            {/* 2. Filter Bar (Search + Categories) */}
+            <div className="px-6 py-3 border-b border-slate-100 dark:border-zinc-800/80 bg-white dark:bg-[#0B0F17] flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5 shrink-0">
+              {/* Search */}
+              <div className="relative flex-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Tìm kiếm sản phẩm, thương hiệu..."
+                  value={inventorySearch}
+                  onChange={(e) => setInventorySearch(e.target.value)}
+                  className="w-full pl-9 pr-3 py-1.5 text-xs rounded-lg bg-[#F8FAFC] dark:bg-zinc-800/60 border border-slate-200/70 dark:border-zinc-700/80 text-[#0F172A] dark:text-zinc-100 placeholder:text-slate-400 focus:outline-none focus:bg-white focus:border-[#287DA8] focus:ring-1 focus:ring-[#287DA8]/20 transition-all"
+                />
+              </div>
+
+              {/* Categories */}
+              <div className="flex items-center gap-1 overflow-x-auto scrollbar-none pb-0.5 sm:pb-0">
+                {['Tất cả', 'Nước mắm', 'Nước uống', 'Gas', 'Gạo', 'Dầu ăn & Gia vị'].map((cat) => {
+                  const isCatActive = inventoryCategory === cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setInventoryCategory(cat)}
+                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-colors cursor-pointer ${
+                        isCatActive
+                          ? 'bg-[#287DA8] text-white shadow-xs font-medium'
+                          : 'text-[#64748B] dark:text-zinc-400 hover:text-[#0F172A] dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800'
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
+            {/* Modal Body */}
             <div className="flex-1 overflow-y-auto">
-              {/* Toast */}
+              {/* Toast Message */}
               {saveToast && (
-                <div className="mx-6 mt-4 px-4 py-2.5 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-medium flex items-center gap-2">
-                  <Check className="w-4 h-4 shrink-0" />
-                  {saveToast}
+                <div className="mx-6 mt-3 px-3.5 py-2 rounded-lg bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200/80 dark:border-emerald-800 text-emerald-700 dark:text-emerald-300 text-xs font-medium flex items-center gap-2">
+                  <Check className="w-3.5 h-3.5 shrink-0" />
+                  <span>{saveToast}</span>
                 </div>
               )}
 
-              {/* Add Product Form */}
+              {/* Collapsible Add Product Form */}
               {showAddProductForm && (
-                <div className="mx-6 mt-4 p-5 bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-700 rounded-xl space-y-4">
+                <div className="mx-6 mt-4 p-4 bg-[#F8FAFC] dark:bg-zinc-800/40 border border-slate-200/80 dark:border-zinc-700 rounded-xl space-y-3.5">
                   <div className="flex items-center justify-between">
-                    <h4 className="text-xs font-bold uppercase tracking-wider text-zinc-600 dark:text-zinc-400">
+                    <h4 className="text-xs font-semibold text-[#0F172A] dark:text-zinc-200">
                       Thêm Nhu Yếu Phẩm Mới Vào Kho
                     </h4>
                     <button
                       type="button"
                       onClick={() => setShowAddProductForm(false)}
-                      className="text-xs text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300"
+                      className="text-xs text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 cursor-pointer"
                     >
                       Đóng
                     </button>
@@ -939,33 +969,33 @@ export const StoreDashboard: React.FC = () => {
 
                   <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                     <div className="sm:col-span-2 space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Tên sản phẩm *</label>
+                      <label className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">Tên sản phẩm *</label>
                       <input
                         type="text"
                         placeholder="VD: Nước Mắm Cốt Nhĩ Cá Cơm 500ml..."
                         value={newProdName}
                         onChange={(e) => setNewProdName(e.target.value)}
-                        className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500 transition-colors"
+                        className="w-full px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-[#0F172A] dark:text-zinc-100 focus:outline-none focus:border-[#287DA8] transition-colors"
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Thương hiệu</label>
+                      <label className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">Thương hiệu</label>
                       <input
                         type="text"
                         placeholder="VD: Khải Hoàn, Chinsu..."
                         value={newProdBrand}
                         onChange={(e) => setNewProdBrand(e.target.value)}
-                        className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500 transition-colors"
+                        className="w-full px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-[#0F172A] dark:text-zinc-100 focus:outline-none focus:border-[#287DA8] transition-colors"
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Danh mục</label>
+                      <label className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">Danh mục</label>
                       <select
                         value={newProdCategory}
                         onChange={(e) => setNewProdCategory(e.target.value as any)}
-                        className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none cursor-pointer"
+                        className="w-full px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-[#0F172A] dark:text-zinc-100 focus:outline-none cursor-pointer"
                       >
                         <option value="Nước mắm">Nước mắm</option>
                         <option value="Nước uống">Nước uống</option>
@@ -977,50 +1007,50 @@ export const StoreDashboard: React.FC = () => {
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Đơn vị</label>
+                      <label className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">Đơn vị quy cách</label>
                       <input
                         type="text"
                         placeholder="VD: Chai 520ml, Bình 20L..."
                         value={newProdUnit}
                         onChange={(e) => setNewProdUnit(e.target.value)}
-                        className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500 transition-colors"
+                        className="w-full px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-[#0F172A] dark:text-zinc-100 focus:outline-none focus:border-[#287DA8] transition-colors"
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Giá bán (₫)</label>
+                      <label className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">Giá bán (₫)</label>
                       <input
                         type="number"
                         value={newProdPrice}
                         onChange={(e) => setNewProdPrice(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none font-mono"
+                        className="w-full px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-[#0F172A] dark:text-zinc-100 focus:outline-none tabular-nums"
                       />
                     </div>
 
                     <div className="space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Tồn kho ban đầu *</label>
+                      <label className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">Tồn kho ban đầu *</label>
                       <input
                         type="number"
                         min="0"
                         value={newProdStock}
                         onChange={(e) => setNewProdStock(Math.max(0, parseInt(e.target.value) || 0))}
-                        className="w-full px-3 py-2 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none font-mono font-bold"
+                        className="w-full px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-[#0F172A] dark:text-zinc-100 focus:outline-none tabular-nums font-semibold"
                       />
                     </div>
 
                     <div className="sm:col-span-2 space-y-1">
-                      <label className="text-[10px] font-bold text-zinc-500 uppercase tracking-wide">Ảnh sản phẩm</label>
+                      <label className="text-[11px] font-medium text-slate-600 dark:text-zinc-400">Ảnh sản phẩm</label>
                       <div className="flex items-center gap-2">
                         <input
                           type="text"
-                          placeholder="Dán link ảnh (https://...)"
+                          placeholder="Dán liên kết ảnh (https://...)"
                           value={newProdImage}
                           onChange={(e) => setNewProdImage(e.target.value)}
-                          className="flex-1 px-3 py-2 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500 transition-colors"
+                          className="flex-1 px-3 py-1.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-[#0F172A] dark:text-zinc-100 focus:outline-none focus:border-[#287DA8] transition-colors"
                         />
-                        <label className="px-3 py-2 rounded-lg bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-xs font-semibold cursor-pointer flex items-center gap-1.5 shrink-0 transition-colors border border-zinc-200 dark:border-zinc-700">
+                        <label className="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 text-xs font-medium cursor-pointer flex items-center gap-1.5 shrink-0 transition-colors border border-slate-200 dark:border-zinc-700">
                           <Camera className="w-3.5 h-3.5" />
-                          Tải Ảnh
+                          <span>Tải Ảnh</span>
                           <input
                             type="file"
                             accept="image/*"
@@ -1043,66 +1073,38 @@ export const StoreDashboard: React.FC = () => {
                     <button
                       type="button"
                       onClick={handleAddNewProduct}
-                      className="px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-xs font-semibold transition-colors flex items-center gap-1.5"
+                      className="px-4 py-1.5 rounded-lg bg-[#287DA8] hover:bg-[#206588] text-white text-xs font-medium shadow-xs transition-colors flex items-center gap-1.5 cursor-pointer"
                     >
                       <Save className="w-3.5 h-3.5" />
-                      Lưu Sản Phẩm
+                      <span>Lưu Sản Phẩm</span>
                     </button>
                   </div>
                 </div>
               )}
 
-              {/* Filter Bar */}
-              <div className="flex flex-col sm:flex-row items-center gap-2 px-6 pt-4 pb-3">
-                <div className="relative flex-1 w-full">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-zinc-400" />
-                  <input
-                    type="text"
-                    placeholder="Tìm kiếm sản phẩm, thương hiệu..."
-                    value={inventorySearch}
-                    onChange={(e) => setInventorySearch(e.target.value)}
-                    className="w-full pl-8 pr-3 py-2 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500 transition-colors"
-                  />
-                </div>
-
-                <div className="flex items-center gap-1 overflow-x-auto w-full sm:w-auto shrink-0">
-                  {['Tất cả', 'Nước mắm', 'Nước uống', 'Gas', 'Gạo', 'Dầu ăn & Gia vị'].map((cat) => (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => setInventoryCategory(cat)}
-                      className={`px-2.5 py-1.5 rounded-lg text-xs font-medium shrink-0 transition-colors ${
-                        inventoryCategory === cat
-                          ? 'bg-zinc-900 text-white dark:bg-zinc-100 dark:text-zinc-900'
-                          : 'text-zinc-500 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              {/* Inventory List */}
-              <div className="px-6 pb-4 space-y-2">
+              {/* 3. Product List (Border-b Row list, No box-in-box) */}
+              <div className="divide-y divide-slate-100 dark:divide-zinc-800/60">
                 {filteredInventory.map((item) => (
                   <div
                     key={item.id}
-                    className="flex flex-col md:flex-row md:items-center justify-between gap-3 p-3.5 bg-zinc-50 dark:bg-zinc-800/40 border border-zinc-200 dark:border-zinc-700 rounded-xl hover:border-zinc-300 dark:hover:border-zinc-600 transition-colors group"
+                    className="px-6 py-3 flex items-center justify-between hover:bg-[#F8FAFC] dark:hover:bg-zinc-800/40 transition-colors group"
                   >
-                    <div className="flex items-center gap-3 min-w-0">
-                      <div className="relative shrink-0 w-10 h-10 rounded-lg overflow-hidden border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800">
+                    {/* Left: Image (48x48) + Info */}
+                    <div className="flex items-center gap-3.5 min-w-0 pr-4">
+                      {/* Product Thumbnail with subtle hover actions */}
+                      <div className="relative shrink-0 w-12 h-12 rounded-[6px] overflow-hidden border border-slate-200/80 dark:border-zinc-700/80 bg-white dark:bg-zinc-800 group/thumb">
                         <img
                           src={item.imageUrl}
                           alt={item.name}
                           className="w-full h-full object-cover"
                         />
+                        {/* Hover Overlay with Camera Icon */}
                         <label
                           htmlFor={`img-upload-${item.id}`}
-                          className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 flex items-center justify-center cursor-pointer transition-opacity"
-                          title="Đổi ảnh"
+                          className="absolute inset-0 bg-slate-900/60 opacity-0 group-hover/thumb:opacity-100 flex items-center justify-center cursor-pointer transition-opacity"
+                          title="Đổi ảnh sản phẩm"
                         >
-                          <Camera className="w-3 h-3 text-white" />
+                          <Camera className="w-3.5 h-3.5 text-white" />
                           <input
                             id={`img-upload-${item.id}`}
                             type="file"
@@ -1111,50 +1113,68 @@ export const StoreDashboard: React.FC = () => {
                             onChange={(e) => handleImageUpload(item.id, e)}
                           />
                         </label>
+
+                        {/* Subtle Link icon to paste URL */}
+                        <button
+                          type="button"
+                          onClick={() => handleImageUrlPrompt(item.id, item.imageUrl)}
+                          className="absolute bottom-0.5 right-0.5 p-1 rounded bg-black/60 text-white/90 hover:text-white opacity-0 group-hover/thumb:opacity-100 transition-opacity"
+                          title="Dán link ảnh"
+                        >
+                          <ExternalLink className="w-2.5 h-2.5" />
+                        </button>
                       </div>
 
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-center gap-1.5 mb-0.5">
-                          <span className="text-[10px] font-mono text-zinc-400">{item.category}</span>
-                          <span className="text-[10px] text-zinc-300 dark:text-zinc-600">·</span>
-                          <span className="text-[10px] text-zinc-400">{item.brand}</span>
-                        </div>
-                        <h4 className="text-[12px] font-semibold text-zinc-900 dark:text-zinc-100 truncate">
+                      {/* Text details */}
+                      <div className="min-w-0">
+                        <h4 className="text-[13px] font-medium text-[#1E293B] dark:text-zinc-100 truncate leading-snug">
                           {item.name}
                         </h4>
-                        <div className="flex items-center gap-2 mt-0.5">
-                          <span className="text-[11px] font-mono font-bold text-zinc-700 dark:text-zinc-300">
+                        <div className="text-[12px] text-[#64748B] dark:text-zinc-400 font-normal flex items-center gap-1.5 mt-0.5 flex-wrap">
+                          <span className="font-semibold text-[#0F172A] dark:text-white tabular-nums">
                             {item.price.toLocaleString('vi-VN')} ₫
                           </span>
-                          <span className="text-[10px] text-zinc-400">/ {item.unit}</span>
-                          <button
-                            type="button"
-                            onClick={() => handleImageUrlPrompt(item.id, item.imageUrl)}
-                            className="text-[10px] text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 underline flex items-center gap-0.5 ml-1"
-                          >
-                            <ExternalLink className="w-2.5 h-2.5" />
-                            Dán URL
-                          </button>
+                          <span className="text-slate-300 dark:text-zinc-600">·</span>
+                          <span>{item.unit}</span>
+                          {item.brand && (
+                            <>
+                              <span className="text-slate-300 dark:text-zinc-600">·</span>
+                              <span className="text-slate-400 dark:text-zinc-500">{item.brand}</span>
+                            </>
+                          )}
                         </div>
                       </div>
                     </div>
 
-                    <div className="flex items-center justify-between md:justify-end gap-3 shrink-0 pt-2.5 md:pt-0 border-t md:border-t-0 border-zinc-200 dark:border-zinc-700">
-                      <span className="text-[11px] font-semibold">
+                    {/* Right: Status Badge + Counter + Trash (Perfect Column Alignment) */}
+                    <div className="flex items-center gap-4 shrink-0">
+                      {/* Status Badge: Fixed width for strict column alignment */}
+                      <div className="w-24 flex justify-end">
                         {item.stock === 0 ? (
-                          <span className="text-rose-600">Hết hàng</span>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#FEF2F2] dark:bg-rose-950/40 text-[#991B1B] dark:text-rose-400 whitespace-nowrap">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#ef4444]"></span>
+                            Hết hàng
+                          </span>
                         ) : item.stock <= item.minStockAlert ? (
-                          <span className="text-amber-600">Sắp hết</span>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#FFFBEB] dark:bg-amber-950/40 text-[#92400E] dark:text-amber-400 whitespace-nowrap">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#f59e0b]"></span>
+                            Sắp hết
+                          </span>
                         ) : (
-                          <span className="text-emerald-600">Sẵn hàng</span>
+                          <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium bg-[#F0FDF4] dark:bg-emerald-950/40 text-[#166534] dark:text-emerald-400 whitespace-nowrap">
+                            <span className="w-1.5 h-1.5 rounded-full bg-[#16a34a]"></span>
+                            Sẵn hàng
+                          </span>
                         )}
-                      </span>
+                      </div>
 
-                      <div className="flex items-center border border-zinc-200 dark:border-zinc-700 rounded-lg overflow-hidden bg-white dark:bg-zinc-900">
+                      {/* Quantity Stepper [- 120 +] (Fixed width number for alignment) */}
+                      <div className="inline-flex items-center rounded-[6px] border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 overflow-hidden shadow-2xs">
                         <button
                           type="button"
                           onClick={() => handleStockChange(item.id, Math.max(0, item.stock - 1))}
-                          className="w-7 h-7 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 font-bold flex items-center justify-center transition-colors text-xs"
+                          className="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors text-xs font-semibold cursor-pointer select-none"
+                          title="Giảm 1"
                         >
                           −
                         </button>
@@ -1163,49 +1183,53 @@ export const StoreDashboard: React.FC = () => {
                           min="0"
                           value={item.stock}
                           onChange={(e) => handleStockChange(item.id, e.target.value)}
-                          className="w-14 h-7 text-center font-mono font-bold text-xs bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none"
+                          className="w-10 h-7 text-center font-medium text-xs text-[#0F172A] dark:text-zinc-100 bg-transparent focus:outline-none tabular-nums p-0"
                         />
                         <button
                           type="button"
                           onClick={() => handleStockChange(item.id, item.stock + 1)}
-                          className="w-7 h-7 bg-zinc-50 dark:bg-zinc-800 hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-300 font-bold flex items-center justify-center transition-colors text-xs"
+                          className="w-7 h-7 flex items-center justify-center text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors text-xs font-semibold cursor-pointer select-none"
+                          title="Tăng 1"
                         >
                           +
                         </button>
                       </div>
 
-                      {item.id.startsWith('custom-prod-') && (
+                      {/* Delete Custom Item Button */}
+                      {item.id.startsWith('custom-prod-') ? (
                         <button
                           type="button"
                           onClick={() => handleDeleteProduct(item.id, item.name)}
-                          className="p-1.5 text-zinc-400 hover:text-rose-600 transition-colors"
-                          title="Xóa món"
+                          className="w-7 h-7 rounded-[6px] flex items-center justify-center text-slate-400 hover:text-rose-600 hover:bg-rose-50 dark:hover:bg-rose-950/40 transition-colors cursor-pointer"
+                          title="Xóa món này"
                         >
                           <Trash2 className="w-3.5 h-3.5" />
                         </button>
+                      ) : (
+                        <div className="w-7 h-7" />
                       )}
                     </div>
                   </div>
                 ))}
 
                 {filteredInventory.length === 0 && (
-                  <div className="py-10 text-center text-zinc-400 text-xs">
+                  <div className="py-16 text-center text-slate-400 text-xs">
                     Không tìm thấy sản phẩm nào khớp với tìm kiếm.
                   </div>
                 )}
               </div>
             </div>
 
-            {/* Modal Footer */}
-            <div className="px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-800/30 flex items-center justify-between shrink-0">
-              <span className="text-[11px] text-zinc-400 flex items-center gap-1.5">
+            {/* 4. Modal Footer */}
+            <div className="px-6 py-3.5 border-t border-slate-100 dark:border-zinc-800/80 bg-white dark:bg-[#0B0F17] flex items-center justify-between shrink-0">
+              <span className="text-[11px] text-[#64748B] dark:text-zinc-400 flex items-center gap-1.5 font-normal">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500" />
                 Số lượng và thông tin kho lưu tự động
               </span>
               <button
                 type="button"
                 onClick={() => setShowInventoryModal(false)}
-                className="px-4 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-zinc-200 text-white dark:text-zinc-900 text-xs font-semibold transition-colors"
+                className="px-4 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-[#0F172A] dark:text-zinc-200 text-xs font-medium transition-colors cursor-pointer"
               >
                 Đóng
               </button>
