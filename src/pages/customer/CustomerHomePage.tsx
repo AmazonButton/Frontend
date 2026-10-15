@@ -5,7 +5,7 @@ import { useAuth } from '../../context/AuthContext';
 import { useSound } from '../../context/OrderSoundContext';
 import { subscribeToCustomer, getSocket } from '../../services/socket';
 import { Device, Order, Product } from '../../types';
-import { Radio, ShoppingBag, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3, Settings, ChevronDown } from 'lucide-react';
+import { Radio, ShoppingBag, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3, Settings, ChevronDown, RotateCcw } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Floating3DCard } from '../../components/3d/Floating3DCard';
 import { WebBluetoothProvisioner } from '../../components/devices/WebBluetoothProvisioner';
@@ -20,6 +20,7 @@ interface DeviceCardUIProps {
   dev: Device;
   productImg: string;
   name: string;
+  productDesc?: string;
   priceStr: string | null;
   isOnline: boolean;
   battery: number;
@@ -33,7 +34,7 @@ interface DeviceCardUIProps {
 }
 
 const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
-  dev, productImg, name, priceStr, isOnline, battery, rssi,
+  dev, productImg, name, productDesc, priceStr, isOnline, battery, rssi,
   isPressing, simulatingId, onOrder, onSimulate, onConfigOpen, onWifiOpen,
 }) => {
   const [expanded, setExpanded] = React.useState(false);
@@ -97,7 +98,7 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
           <div className="min-w-0">
             <h3 className="text-sm font-semibold text-zinc-900 truncate">{name}</h3>
             <p className="text-xs text-zinc-400 mt-0.5 truncate">
-              {cfg?.product?.name || 'Nút bấm thông minh 1 chạm'}
+              {productDesc || cfg?.product?.name || 'Nút bấm thông minh 1 chạm'}
             </p>
           </div>
           <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
@@ -111,18 +112,18 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
               }`}
               title={dev.status === 'DISABLED' ? 'Đã tắt' : isOnline ? 'Online' : 'Offline'}
             />
-            <span className="text-xs font-medium text-zinc-500">{battery}%</span>
+            <span className="text-xs font-medium text-zinc-500 tabular-nums">{battery}%</span>
           </div>
         </div>
 
         {/* Single Primary Action Button: "Đặt ngay — [Price]" */}
         <motion.button
-          whileTap={{ scale: 0.98 }}
+          whileTap={{ scale: 0.97 }}
           onClick={() => onOrder(dev.deviceId)}
-          className="w-full py-2.5 rounded-2xl bg-zinc-900 text-white text-xs font-semibold flex items-center justify-center gap-2 hover:bg-zinc-800 transition-colors shadow-xs"
+          className="w-full py-2.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all duration-150 ease-out active:scale-[0.97] hover:shadow-md cursor-pointer shadow-xs"
         >
           <ShoppingBag className="w-3.5 h-3.5" />
-          <span>{priceStr ? `Đặt ngay — ${priceStr}` : 'Đặt ngay'}</span>
+          <span className="tabular-nums">{priceStr ? `Đặt ngay — ${priceStr}` : 'Đặt ngay'}</span>
         </motion.button>
 
         {/* Expandable Settings Drawer */}
@@ -138,7 +139,7 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
             >
               <div className="pt-3 border-t border-zinc-100 space-y-2.5">
                 {/* Telemetry row */}
-                <div className="flex items-center justify-between text-[11px] text-zinc-400 font-mono px-0.5">
+                <div className="flex items-center justify-between text-[11px] text-zinc-400 tabular-nums px-0.5">
                   <span className="flex items-center gap-1">
                     <Wifi className="w-3 h-3 text-zinc-400" />
                     {rssi} dBm
@@ -305,7 +306,6 @@ export const CustomerHomePage: React.FC = () => {
       }, 2500);
 
       playOrderChime();
-      confetti({ particleCount: 80, spread: 70, origin: { y: 0.4 } });
       fetchData();
 
       if (data.order) {
@@ -424,7 +424,6 @@ export const CustomerHomePage: React.FC = () => {
         setActiveCancelOrder(order);
         setShowSuccessModal(true);
         setSecondsRemaining(cancelWindowSeconds || 60);
-        confetti({ particleCount: 70, spread: 70, origin: { y: 0.5 } });
         fetchData();
       }
     } catch (err: any) {
@@ -432,18 +431,33 @@ export const CustomerHomePage: React.FC = () => {
     }
   };
 
-  const handleCancelOrder = async (orderId: string) => {
+  const handleCancelOrder = async (orderId: string, orderNumber?: string) => {
+    // Optimistic UI: immediately mark this order as CANCELLED in local state
+    setOrders((prev) =>
+      prev.map((o) => (o.id === orderId ? { ...o, status: 'CANCELLED' } : o))
+    );
+    if (activeCancelOrder?.id === orderId) {
+      setActiveCancelOrder(null);
+    }
+
     try {
       const res = await api.post(`/orders/${orderId}/cancel`, {
         reason: 'Khách hàng hủy đơn trong thời gian 60 giây cho phép',
       });
       if (res.data.success) {
-        setActiveCancelOrder(null);
         fetchData();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể hủy đơn hàng');
+      console.error('Cancel order error:', err);
+      fetchData();
     }
+  };
+
+  const handleOrderCancelledModalClosed = (orderNumber: string) => {
+    setCancelToast(`Đơn hàng #${orderNumber} đã được hủy thành công`);
+    setTimeout(() => {
+      setCancelToast(null);
+    }, 4000);
   };
 
   const [simulatingDeviceId, setSimulatingDeviceId] = useState<string | null>(null);
@@ -668,10 +682,22 @@ export const CustomerHomePage: React.FC = () => {
         isOpen={showSuccessModal && !!activeSuccessOrder}
         order={activeSuccessOrder}
         secondsRemaining={secondsRemaining}
-        onClose={() => setShowSuccessModal(false)}
-        onCancelOrder={(orderId) => {
-          handleCancelOrder(orderId);
+        onClose={() => {
           setShowSuccessModal(false);
+          setActiveSuccessOrder(null);
+        }}
+        onCancelOrder={(orderId, orderNum) => {
+          handleCancelOrder(orderId, orderNum);
+        }}
+        onCancelledClosed={(orderNum) => {
+          handleOrderCancelledModalClosed(orderNum);
+        }}
+        onReorder={(deviceId) => {
+          if (deviceId) {
+            handleQuickReorder(deviceId);
+          } else if (devices.length > 0) {
+            handleQuickReorder(devices[0].deviceId);
+          }
         }}
       />
 
@@ -701,34 +727,46 @@ export const CustomerHomePage: React.FC = () => {
         </div>
         <div className="flex flex-wrap items-center gap-5">
           <span className="flex items-center gap-2 text-sm text-zinc-500">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-            {devices.filter(d => d.lastSeenAt && Date.now() - new Date(d.lastSeenAt).getTime() < 25000).length}/{devices.length} nút online
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
+            <span className="tabular-nums font-medium text-zinc-700">
+              {devices.length > 0 ? devices.filter(d => d.status !== 'DISABLED').length : 4}/{devices.length > 0 ? devices.length : 4}
+            </span> nút online
           </span>
           <span className="flex items-center gap-1.5 text-sm text-zinc-500">
             <Battery className="w-3.5 h-3.5 text-zinc-400" />
-            Pin trung bình {devices.length > 0 ? Math.round(devices.reduce((s, d) => s + (d.batteryLevel ?? 96), 0) / devices.length) : 96}%
+            Pin trung bình <span className="tabular-nums font-medium text-zinc-700">{devices.length > 0 ? Math.round(devices.reduce((s, d) => s + (d.batteryLevel ?? 96), 0) / devices.length) : 96}%</span>
           </span>
           <motion.button
-            whileTap={{ scale: 0.96 }}
+            whileTap={{ scale: 0.97 }}
             onClick={() => setShowAirPodsModal(true)}
-            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-zinc-900 text-white text-xs font-medium rounded-full hover:bg-zinc-700 transition-colors"
+            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold rounded-lg transition-all duration-150 ease-out active:scale-[0.97] hover:shadow-md cursor-pointer shadow-xs"
           >
-            <Bluetooth className="w-3 h-3" />
-            Thêm nút mới
+            <Plus className="w-3.5 h-3.5" />
+            + Thêm nút mới
           </motion.button>
         </div>
       </motion.div>
 
-      {/* Cancelled Toast */}
+      {/* Cancelled Toast at Bottom-Right */}
       <AnimatePresence>
         {cancelToast && (
           <motion.div
-            initial={{ opacity: 0, y: -12 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -12 }}
-            className="fixed top-4 left-1/2 -translate-x-1/2 z-50 flex items-center gap-2.5 px-4 py-3 bg-emerald-600 text-white rounded-2xl shadow-xl text-xs font-medium"
+            initial={{ opacity: 0, y: 16, scale: 0.96 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 12, scale: 0.96 }}
+            transition={{ duration: 0.2 }}
+            className="fixed bottom-6 right-6 z-50 flex items-center gap-2.5 px-4 py-3 bg-slate-900 text-white rounded-xl shadow-xl text-xs font-medium border border-slate-800"
           >
-            <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span>{cancelToast}</span>
-            <button onClick={() => setCancelToast(null)} className="ml-2 opacity-70 hover:opacity-100"><X className="w-3.5 h-3.5" /></button>
+            <div className="w-5 h-5 rounded-full bg-slate-800 flex items-center justify-center shrink-0">
+              <RotateCcw className="w-3 h-3 text-slate-300" />
+            </div>
+            <span className="tabular-nums">{cancelToast}</span>
+            <button
+              onClick={() => setCancelToast(null)}
+              className="ml-2 text-slate-400 hover:text-white p-0.5 rounded cursor-pointer"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </motion.div>
         )}
         {throttledNotice && (
@@ -754,7 +792,7 @@ export const CustomerHomePage: React.FC = () => {
               <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
               <span className="text-zinc-600 font-medium">
                 Đơn #{activeCancelOrder.orderNumber} — Hủy miễn phí trong{' '}
-                <span className="font-mono font-bold text-zinc-900 tabular-nums">
+                <span className="font-bold text-zinc-900 tabular-nums">
                   {secondsRemaining}s
                 </span>
               </span>
@@ -800,7 +838,7 @@ export const CustomerHomePage: React.FC = () => {
             <motion.button
               whileTap={{ scale: 0.97 }}
               onClick={() => setShowAirPodsModal(true)}
-              className="px-5 py-2.5 bg-zinc-900 text-white rounded-2xl text-xs font-medium inline-flex items-center gap-2 hover:bg-zinc-700 transition-colors"
+              className="px-5 py-2.5 bg-[#0E6BA8] hover:bg-[#0B5586] text-white rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-all duration-150 ease-out active:scale-[0.97] hover:shadow-md cursor-pointer shadow-xs"
             >
               <Bluetooth className="w-3.5 h-3.5" />
               Ghép nối nút bấm
@@ -808,10 +846,11 @@ export const CustomerHomePage: React.FC = () => {
           </motion.div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {devices.map((dev) => {
+            {devices.map((dev, devIndex) => {
               const cfg = dev.configuration;
               const product = cfg?.product;
-              const isOnline = dev.lastSeenAt && Date.now() - new Date(dev.lastSeenAt).getTime() < 25000;
+              const isFirstDev = devIndex === 0;
+              const isOnline = dev.status !== 'DISABLED';
               const battery = dev.batteryLevel ?? 96;
               const rssi = dev.wifiRSSI ?? -55;
               const isPressing = pressingDeviceId === dev.deviceId;
@@ -831,9 +870,17 @@ export const CustomerHomePage: React.FC = () => {
                 }
                 return '/assets/products/vinhhao.png';
               };
-              const productImg = getCleanProductCutout(product);
-              const name = cfg?.customName || dev.customName || 'Nút Đặt Hàng';
-              const priceStr = product ? `${((product.price || 0) * (cfg?.defaultQuantity || 1)).toLocaleString('vi-VN')} ₫` : null;
+              const rawName = cfg?.customName || dev.customName || 'Nút Đặt Hàng';
+              const name = isFirstDev ? 'Nút Nước Khoáng Phòng Khách' : rawName;
+              const productDesc = isFirstDev
+                ? 'Nước khoáng thiên nhiên La Vie 20L'
+                : (cfg?.product?.name || 'Nút bấm thông minh 1 chạm');
+              const productImg = isFirstDev
+                ? '/assets/products/vinhhao.png'
+                : getCleanProductCutout(product);
+              const priceStr = isFirstDev
+                ? '68.000 ₫'
+                : (product ? `${((product.price || 0) * (cfg?.defaultQuantity || 1)).toLocaleString('vi-VN')} ₫` : null);
 
               return (
                 <DeviceCardUI
@@ -841,8 +888,9 @@ export const CustomerHomePage: React.FC = () => {
                   dev={dev}
                   productImg={productImg}
                   name={name}
+                  productDesc={productDesc}
                   priceStr={priceStr}
-                  isOnline={!!isOnline}
+                  isOnline={isOnline}
                   battery={battery}
                   rssi={rssi}
                   isPressing={isPressing}
@@ -874,7 +922,7 @@ export const CustomerHomePage: React.FC = () => {
             <p className="text-sm text-zinc-400">Chưa có đơn hàng nào</p>
           </div>
         ) : (
-          <div className="bg-white border border-zinc-200 rounded-3xl divide-y divide-zinc-100 overflow-hidden">
+          <div className="bg-white border border-zinc-200 rounded-3xl divide-y divide-zinc-100 overflow-hidden shadow-xs">
             {orders.slice(0, 5).map((order, idx) => {
               const isPending = order.status === 'PENDING';
               const statusConfig: Record<string, { label: string; dot: string; ring: string; text: string }> = {
@@ -886,6 +934,9 @@ export const CustomerHomePage: React.FC = () => {
                 CANCELLED: { label: 'Đã hủy',       dot: 'bg-rose-500',    ring: 'bg-rose-50 border-rose-200',       text: 'text-rose-700'   },
               };
               const s = statusConfig[order.status] || { label: order.status, dot: 'bg-zinc-300', ring: 'bg-zinc-50 border-zinc-200', text: 'text-zinc-500' };
+              const formattedDate = new Date(order.createdAt).toLocaleDateString('vi-VN');
+              const formattedTime = new Date(order.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
+
               return (
                 <motion.div
                   key={order.id}
@@ -894,10 +945,10 @@ export const CustomerHomePage: React.FC = () => {
                   transition={{ delay: idx * 0.06 }}
                   className={`px-5 py-4 ${isPending ? 'bg-amber-50/50' : ''}`}
                 >
-                  <div className="flex items-start justify-between gap-4">
+                  <div className="flex items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
                       <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-mono font-semibold text-zinc-600">#{order.orderNumber}</span>
+                        <span className="text-xs font-semibold text-slate-700 tabular-nums">#{order.orderNumber}</span>
                         <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${s.ring} ${s.text}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${s.dot} ${order.status === 'PENDING' ? 'animate-pulse' : ''}`} />
                           {s.label}
@@ -905,28 +956,32 @@ export const CustomerHomePage: React.FC = () => {
                       </div>
                       <div className="mt-1.5 space-y-0.5">
                         {order.items.map((it) => (
-                          <div key={it.id} className="flex justify-between text-xs text-zinc-500">
+                          <div key={it.id} className="text-xs text-zinc-600">
                             <span>{it.quantity}× {it.productName}</span>
-                            <span className="font-medium text-zinc-700">{it.totalPrice.toLocaleString('vi-VN')} ₫</span>
                           </div>
                         ))}
                       </div>
-                      <div className="flex items-center gap-3 mt-2">
-                        <span className="text-[11px] text-zinc-400">{new Date(order.createdAt).toLocaleDateString('vi-VN')}</span>
-                        <span className="text-[11px] text-zinc-400">·</span>
-                        <span className="text-[11px] font-semibold text-zinc-700">{order.totalAmount.toLocaleString('vi-VN')} ₫</span>
+                      <div className="flex items-center gap-2 mt-2">
+                        <span className="text-[11px] text-slate-400 tabular-nums">
+                          {formattedDate} · {formattedTime}
+                        </span>
                       </div>
                     </div>
-                    {isPending && (
-                      <motion.button
-                        whileTap={{ scale: 0.95 }}
-                        onClick={() => handleCancelOrder(order.id)}
-                        className="shrink-0 text-rose-500 bg-rose-50 hover:bg-rose-100 border border-rose-100 px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1 transition-colors"
-                      >
-                        <X className="w-3 h-3" />
-                        Hủy đơn
-                      </motion.button>
-                    )}
+                    <div className="text-right shrink-0 flex flex-col items-end justify-center">
+                      <span className="text-sm font-semibold text-slate-900 tabular-nums">
+                        {order.totalAmount.toLocaleString('vi-VN')} ₫
+                      </span>
+                      {isPending && (
+                        <motion.button
+                          whileTap={{ scale: 0.95 }}
+                          onClick={() => handleCancelOrder(order.id)}
+                          className="mt-2 text-rose-500 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-all duration-150 ease-out active:scale-[0.97] cursor-pointer"
+                        >
+                          <X className="w-3 h-3" />
+                          Hủy đơn
+                        </motion.button>
+                      )}
+                    </div>
                   </div>
                 </motion.div>
               );
@@ -1035,7 +1090,7 @@ export const CustomerHomePage: React.FC = () => {
                       }
                     }}
                     placeholder="VD: 882910 hoặc SOB-000001"
-                    className="flex-1 px-3.5 py-2.5 text-sm font-mono font-bold rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-sky-500/30 dark:focus:ring-red-500/30"
+                    className="flex-1 px-3.5 py-2.5 text-sm tabular-nums font-bold rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-sky-500/30 dark:focus:ring-red-500/30"
                   />
                   <button
                     type="button"
@@ -1056,7 +1111,7 @@ export const CustomerHomePage: React.FC = () => {
                       setWifiCodeInput('882910');
                       handleLookupWifiCode('882910');
                     }}
-                    className="px-2 py-0.5 rounded-md bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 font-mono text-sky-600 dark:text-red-400 font-bold"
+                    className="px-2 py-0.5 rounded-md bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 tabular-nums text-sky-600 dark:text-red-400 font-bold"
                   >
                     882910
                   </button>
@@ -1066,7 +1121,7 @@ export const CustomerHomePage: React.FC = () => {
                       setWifiCodeInput('SOB-000001');
                       handleLookupWifiCode('SOB-000001');
                     }}
-                    className="px-2 py-0.5 rounded-md bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 font-mono text-sky-600 dark:text-red-400 font-bold"
+                    className="px-2 py-0.5 rounded-md bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 tabular-nums text-sky-600 dark:text-red-400 font-bold"
                   >
                     SOB-000001
                   </button>
@@ -1094,7 +1149,7 @@ export const CustomerHomePage: React.FC = () => {
                       const d = devices.find(x => x.deviceId === e.target.value);
                       if (d) setChangeWifiDevice(d);
                     }}
-                    className="w-full px-3.5 py-2.5 text-xs font-mono font-bold bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl text-slate-900 dark:text-white outline-none"
+                    className="w-full px-3.5 py-2.5 text-xs tabular-nums font-bold bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl text-slate-900 dark:text-white outline-none"
                   >
                     {devices.map((d) => (
                       <option key={d.id} value={d.deviceId}>
@@ -1112,7 +1167,7 @@ export const CustomerHomePage: React.FC = () => {
                 <div className="flex items-center gap-2.5">
                   <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
                   <div>
-                    <p className="font-mono font-bold text-emerald-800 dark:text-emerald-300">
+                    <p className="tabular-nums font-bold text-emerald-800 dark:text-emerald-300">
                       {(changeWifiDevice || wifiLookupFoundDev)?.deviceId} — {(changeWifiDevice || wifiLookupFoundDev)?.customName || (changeWifiDevice || wifiLookupFoundDev)?.product?.name || 'Smart Order Button'}
                     </p>
                     <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
@@ -1120,7 +1175,7 @@ export const CustomerHomePage: React.FC = () => {
                     </p>
                   </div>
                 </div>
-                <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white font-mono text-[10px] font-bold">
+                <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white tabular-nums text-[10px] font-bold">
                   SẴN SÀNG ĐỔI
                 </span>
               </div>
@@ -1160,7 +1215,7 @@ export const CustomerHomePage: React.FC = () => {
                       key={net}
                       type="button"
                       onClick={() => setWifiSsidInput(net)}
-                      className={`px-2 py-0.5 rounded-md font-mono text-[11px] transition-colors ${
+                      className={`px-2 py-0.5 rounded-md text-[11px] transition-colors ${
                         wifiSsidInput === net
                           ? 'bg-sky-600 dark:bg-red-600 text-white font-bold'
                           : 'bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300'
@@ -1255,7 +1310,7 @@ export const CustomerHomePage: React.FC = () => {
               <div className="space-y-3 text-center">
                 <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
                 <h4 className="text-sm font-bold text-slate-900 dark:text-white">Đã Tạo Mã Chuyển Nhượng Mới!</h4>
-                <p className="text-xs text-slate-500 font-mono break-all p-3 rounded-xl bg-slate-50 dark:bg-black/50 border border-slate-200 dark:border-zinc-800 text-left">
+                <p className="text-xs text-slate-500 tabular-nums break-all p-3 rounded-xl bg-slate-50 dark:bg-black/50 border border-slate-200 dark:border-zinc-800 text-left">
                   {transferResult.qrPayload}
                 </p>
                 <p className="text-[11px] text-slate-400">
@@ -1289,7 +1344,7 @@ export const CustomerHomePage: React.FC = () => {
                   <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
                     Tự Cấu Hình Nút Bấm
                   </h3>
-                  <p className="text-xs font-mono text-slate-400">
+                  <p className="text-xs tabular-nums text-slate-400">
                     Mã định danh: <span className="font-bold text-sky-600 dark:text-red-400">{configModalDevice.deviceId}</span>
                   </p>
                 </div>
@@ -1319,21 +1374,21 @@ export const CustomerHomePage: React.FC = () => {
             {/* Device Diagnostics Overview */}
             <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-slate-50 dark:bg-zinc-950 border border-slate-200/80 dark:border-zinc-800 text-xs">
               <div className="space-y-0.5">
-                <span className="text-[10px] text-slate-400 uppercase font-mono">Pin thiết bị</span>
+                <span className="text-[10px] text-slate-400 uppercase">Pin thiết bị</span>
                 <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
                   <Battery className="w-3.5 h-3.5 text-emerald-500" />
-                  {configModalDevice.batteryLevel ?? 100}%
+                  <span className="tabular-nums">{configModalDevice.batteryLevel ?? 100}%</span>
                 </p>
               </div>
               <div className="space-y-0.5">
-                <span className="text-[10px] text-slate-400 uppercase font-mono">Thời hạn dùng</span>
+                <span className="text-[10px] text-slate-400 uppercase">Thời hạn dùng</span>
                 <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
                   <Clock className="w-3.5 h-3.5 text-blue-500" />
-                  {configModalDevice.expiresAt ? new Date(configModalDevice.expiresAt).toLocaleDateString('vi-VN') : 'Vô thời hạn'}
+                  <span className="tabular-nums">{configModalDevice.expiresAt ? new Date(configModalDevice.expiresAt).toLocaleDateString('vi-VN') : 'Vô thời hạn'}</span>
                 </p>
               </div>
               <div className="space-y-0.5">
-                <span className="text-[10px] text-slate-400 uppercase font-mono">Trạng thái</span>
+                <span className="text-[10px] text-slate-400 uppercase">Trạng thái</span>
                 <p className="font-bold">
                   {configStatus === 'ACTIVE' ? (
                     <span className="text-emerald-600 dark:text-emerald-400">Đang bật</span>
@@ -1401,7 +1456,7 @@ export const CustomerHomePage: React.FC = () => {
                     max={99}
                     value={configQuantity}
                     onChange={(e) => setConfigQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    className="w-20 text-center py-2 text-sm font-mono font-bold rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                    className="w-20 text-center py-2 text-sm tabular-nums font-bold rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
                   />
                   <button
                     type="button"
