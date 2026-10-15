@@ -160,7 +160,7 @@ export const StoreProductsPage: React.FC = () => {
             type="button"
             whileTap={{ scale: 0.96 }}
             onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white text-white dark:text-zinc-900 text-xs font-semibold shadow-xs transition-colors"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#287DA8] hover:bg-[#206588] text-white text-xs font-semibold shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Thêm Sản Phẩm Mới</span>
@@ -245,16 +245,16 @@ export const StoreProductsPage: React.FC = () => {
                 key={cat}
                 type="button"
                 onClick={() => setCategoryFilter(cat)}
-                className={`relative px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors z-10 ${
+                className={`relative px-3 py-1.5 rounded-lg text-xs font-medium whitespace-nowrap transition-colors z-10 cursor-pointer ${
                   isActive
-                    ? 'text-white dark:text-zinc-900 font-semibold'
-                    : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-white hover:bg-zinc-100/60 dark:hover:bg-zinc-800/60'
+                    ? 'text-white font-semibold'
+                    : 'text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-white hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
                 }`}
               >
                 {isActive && (
                   <motion.span
                     layoutId="activeProductCategory"
-                    className="absolute inset-0 bg-zinc-900 dark:bg-zinc-100 rounded-lg -z-10 shadow-xs"
+                    className="absolute inset-0 bg-[#287DA8] rounded-lg -z-10 shadow-[0_2px_8px_rgba(40,125,168,0.25)] pointer-events-none"
                     transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                   />
                 )}
@@ -589,7 +589,7 @@ export const StoreProductsPage: React.FC = () => {
                     type="submit"
                     whileTap={{ scale: 0.96 }}
                     disabled={submitLoading}
-                    className="px-4 py-1.5 text-xs font-semibold text-white dark:text-zinc-900 bg-zinc-900 hover:bg-zinc-800 dark:bg-zinc-100 dark:hover:bg-white rounded-md shadow-xs disabled:opacity-50 transition-colors"
+                    className="px-4 py-1.5 text-xs font-semibold text-white bg-[#287DA8] hover:bg-[#206588] rounded-md shadow-[0_2px_8px_rgba(40,125,168,0.25)] disabled:opacity-50 transition-colors cursor-pointer"
                   >
                     {submitLoading ? 'Đang lưu...' : 'Lưu Sản Phẩm'}
                   </motion.button>
