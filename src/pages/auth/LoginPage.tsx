@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { AlertCircle, Eye, EyeOff, ArrowLeft } from 'lucide-react';
@@ -98,16 +99,21 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4 sm:p-6 lg:p-10 bg-[#FAFAFA] dark:bg-[#070A0F] transition-colors selection:bg-slate-900 selection:text-white">
+    <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4 sm:p-6 lg:p-10 bg-gradient-to-b from-[#F0F6FA] via-white to-[#F8FAFC] dark:from-[#090D14] dark:via-[#0B0F17] dark:to-[#070A0F] transition-colors selection:bg-[#287DA8] selection:text-white relative overflow-hidden">
+      {/* Soft Ambient Decorative Blur Curves (matching homepage) */}
+      <div className="absolute top-0 right-0 -mr-24 -mt-24 w-96 h-96 rounded-full bg-sky-100/60 dark:bg-sky-950/20 blur-3xl pointer-events-none" />
+      <div className="absolute bottom-0 left-0 -ml-24 -mb-24 w-96 h-96 rounded-full bg-sky-100/50 dark:bg-sky-950/20 blur-3xl pointer-events-none" />
+
       {/* Centered Minimalist Hardware Split Card */}
-      <div className="w-full max-w-4xl bg-white dark:bg-[#0B0F17] rounded-3xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 border border-slate-200/80 dark:border-slate-800 transition-all">
+      <div className="w-full max-w-4xl bg-white dark:bg-[#0B0F17] rounded-3xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 border border-slate-200/90 dark:border-zinc-800 shadow-[0_20px_50px_-12px_rgba(40,125,168,0.12)] transition-all relative z-10">
 
         {/* ========================================================================= */}
-        {/* LEFT PANEL: THE HARDWARE PRODUCT VIBE (Apple / Teenage Engineering style) */}
+        {/* LEFT PANEL: THE HARDWARE PRODUCT VIBE (Refined Pale Blue Atmosphere)      */}
         {/* ========================================================================= */}
-        <div className="lg:col-span-6 bg-slate-100 dark:bg-[#101522] p-8 sm:p-12 flex flex-col justify-between relative border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-slate-800 min-h-[360px] lg:min-h-[580px] overflow-hidden">
+        <div className="lg:col-span-6 bg-gradient-to-br from-sky-50/70 via-slate-50/60 to-blue-50/40 dark:from-[#0d1626] dark:via-[#0b101c] dark:to-[#070b14] p-8 sm:p-12 flex flex-col justify-between relative border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-zinc-800 min-h-[360px] lg:min-h-[580px] overflow-hidden">
           {/* Subtle Ambient Light Wash */}
-          <div className="absolute -top-24 -left-24 w-72 h-72 rounded-full bg-white/60 dark:bg-white/5 blur-3xl pointer-events-none" />
+          <div className="absolute -top-20 -left-20 w-80 h-80 rounded-full bg-sky-200/40 dark:bg-sky-500/10 blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-20 -right-20 w-80 h-80 rounded-full bg-blue-100/40 dark:bg-blue-600/10 blur-3xl pointer-events-none" />
 
           {/* Top: Small Brand Mark */}
           <div className="relative z-10">
@@ -125,9 +131,9 @@ export const LoginPage: React.FC = () => {
             </Link>
           </div>
 
-          {/* Center: FPT Hardware Button Showcase */}
+          {/* Center: Hardware Button Showcase (Brand Blue Theme matching Homepage) */}
           <div className="relative z-10 my-auto py-8 flex flex-col items-center justify-center w-full">
-            <FptSmartButton variant="minimal" />
+            <FptSmartButton variant="minimal" theme="brand" brandText="Smart" />
           </div>
 
           {/* Bottom Left Tagline */}
@@ -139,7 +145,7 @@ export const LoginPage: React.FC = () => {
         </div>
 
         {/* ========================================================================= */}
-        {/* RIGHT PANEL: MINIMALIST FORM (Pure White, stark typographic contrast)     */}
+        {/* RIGHT PANEL: MINIMALIST FORM (Clean Typography & Brand Blue Accents)      */}
         {/* ========================================================================= */}
         <div className="lg:col-span-6 bg-white dark:bg-[#0B0F17] p-8 sm:p-12 flex flex-col justify-center">
           <div className="max-w-sm w-full mx-auto space-y-6">
@@ -148,7 +154,7 @@ export const LoginPage: React.FC = () => {
             <div>
               <Link
                 to="/"
-                className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors mb-4 group"
+                className="inline-flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-[#287DA8] dark:text-slate-400 dark:hover:text-sky-400 transition-colors mb-4 group"
                 title="Quay lại trang chủ"
               >
                 <ArrowLeft className="w-3.5 h-3.5 transition-transform group-hover:-translate-x-1" />
@@ -159,8 +165,8 @@ export const LoginPage: React.FC = () => {
               </h1>
             </div>
 
-            {/* Demo Accounts: Minimalist Ghost Buttons */}
-            <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-50 dark:bg-slate-900/90 rounded-xl border border-slate-100 dark:border-slate-800">
+            {/* Demo Accounts: Animated Segmented Control */}
+            <div className="grid grid-cols-3 gap-1.5 p-1 bg-slate-100/80 dark:bg-slate-900/90 rounded-2xl border border-slate-200/80 dark:border-zinc-800 relative">
               {[
                 { label: 'Chủ Cửa Hàng', id: 'store@smartorder.local' },
                 { label: 'Khách Hàng', id: 'customer@smartorder.local' },
@@ -172,13 +178,31 @@ export const LoginPage: React.FC = () => {
                     key={demo.id}
                     type="button"
                     onClick={() => setDemoAccount(demo.id)}
-                    className={`py-2 px-1.5 text-xs rounded-lg transition-all text-center truncate ${
-                      isSelected
-                        ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold shadow-xs border border-slate-200/80 dark:border-slate-700'
-                        : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
-                    }`}
+                    className="relative py-2.5 px-1.5 text-xs rounded-xl font-medium transition-colors text-center truncate outline-none select-none cursor-pointer"
                   >
-                    {demo.label}
+                    {/* Animated Sliding Highlight Pill */}
+                    {isSelected && (
+                      <motion.div
+                        layoutId="active-login-role-pill"
+                        className="absolute inset-0 rounded-xl bg-white dark:bg-slate-800 border border-[#287DA8]/30 dark:border-sky-500/30 shadow-[0_2px_8px_rgba(40,125,168,0.12),0_1px_3px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] pointer-events-none"
+                        transition={{
+                          type: 'spring',
+                          stiffness: 240,
+                          damping: 24,
+                          mass: 0.7
+                        }}
+                      />
+                    )}
+
+                    <span
+                      className={`relative z-10 transition-colors duration-200 ${
+                        isSelected
+                          ? 'text-[#287DA8] dark:text-sky-300 font-bold'
+                          : 'text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-slate-200'
+                      }`}
+                    >
+                      {demo.label}
+                    </span>
                   </button>
                 );
               })}
@@ -217,10 +241,10 @@ export const LoginPage: React.FC = () => {
                   }}
                   onBlur={() => setIdentifierTouched(true)}
                   placeholder="store@smartorder.local"
-                  className={`w-full px-3.5 py-2.5 text-sm rounded-xl bg-white dark:bg-slate-900 border text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none transition-colors ${
+                  className={`w-full px-3.5 py-2.5 text-sm rounded-xl bg-white dark:bg-slate-900 border text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none transition-all ${
                     identifierError
-                      ? 'border-rose-400 focus:border-rose-500'
-                      : 'border-slate-200 dark:border-slate-800 focus:border-slate-900 dark:focus:border-slate-300'
+                      ? 'border-rose-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15'
+                      : 'border-slate-200 dark:border-slate-800 focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/15 dark:focus:border-sky-400'
                   }`}
                 />
                 {identifierError && (
@@ -241,7 +265,7 @@ export const LoginPage: React.FC = () => {
                   </label>
                   <Link
                     to="/forgot-password"
-                    className="text-xs text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors"
+                    className="text-xs text-[#287DA8] hover:text-[#206588] dark:text-sky-400 dark:hover:text-sky-300 font-medium transition-colors"
                   >
                     Quên mật khẩu?
                   </Link>
@@ -258,10 +282,10 @@ export const LoginPage: React.FC = () => {
                     }}
                     onBlur={() => setPasswordTouched(true)}
                     placeholder="Nhập mật khẩu"
-                    className={`w-full px-3.5 pr-10 py-2.5 text-sm rounded-xl bg-white dark:bg-slate-900 border text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none transition-colors ${
+                    className={`w-full px-3.5 pr-10 py-2.5 text-sm rounded-xl bg-white dark:bg-slate-900 border text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none transition-all ${
                       passwordError
-                        ? 'border-rose-400 focus:border-rose-500'
-                        : 'border-slate-200 dark:border-slate-800 focus:border-slate-900 dark:focus:border-slate-300'
+                        ? 'border-rose-400 focus:border-rose-500 focus:ring-2 focus:ring-rose-500/15'
+                        : 'border-slate-200 dark:border-slate-800 focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/15 dark:focus:border-sky-400'
                     }`}
                   />
                   <button
@@ -287,7 +311,7 @@ export const LoginPage: React.FC = () => {
                   type="checkbox"
                   checked={rememberMe}
                   onChange={(e) => setRememberMe(e.target.checked)}
-                  className="w-4 h-4 rounded border-slate-300 text-slate-900 focus:ring-slate-900 cursor-pointer"
+                  className="w-4 h-4 rounded border-slate-300 text-[#287DA8] focus:ring-[#287DA8] cursor-pointer"
                 />
                 <label
                   htmlFor="rememberMe"
@@ -297,15 +321,15 @@ export const LoginPage: React.FC = () => {
                 </label>
               </div>
 
-              {/* Primary Submit Button: Solid Black / Slate-900 */}
+              {/* Primary Submit Button: Brand Blue #287DA8 (Matching Homepage) */}
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-semibold text-sm transition-all disabled:opacity-50 active:scale-[0.99] flex items-center justify-center gap-2 shadow-xs"
+                className="w-full py-3.5 px-4 rounded-xl bg-[#287DA8] hover:bg-[#206588] text-white font-semibold text-sm transition-all shadow-[0_4px_16px_rgba(40,125,168,0.25)] hover:shadow-[0_6px_20px_rgba(40,125,168,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287DA8] focus-visible:ring-offset-2 disabled:opacity-50 active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
               >
                 {loading ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-white dark:border-slate-900 border-t-transparent rounded-full animate-spin" />
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     <span>ĐANG XÁC THỰC...</span>
                   </>
                 ) : (
@@ -319,7 +343,7 @@ export const LoginPage: React.FC = () => {
               Chưa có tài khoản?{' '}
               <Link
                 to="/register"
-                className="font-semibold text-slate-900 dark:text-white hover:underline ml-1"
+                className="font-bold text-[#287DA8] dark:text-sky-400 hover:text-[#206588] hover:underline ml-1 transition-colors"
               >
                 Đăng ký ngay
               </Link>

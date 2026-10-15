@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import { api } from '../../services/api';
 import {
   Store,
@@ -333,16 +334,21 @@ export const RegisterPage: React.FC = () => {
   }
 
   return (
-    <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4 sm:p-6 lg:p-10 bg-[#FAFAFA] dark:bg-[#070A0F] transition-colors selection:bg-slate-900 selection:text-white">
+    <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4 sm:p-6 lg:p-10 bg-gradient-to-b from-[#F0F6FA] via-white to-[#F8FAFC] dark:from-[#090D14] dark:via-[#0B0F17] dark:to-[#070A0F] transition-colors selection:bg-[#287DA8] selection:text-white relative overflow-hidden">
+      {/* Soft Ambient Decorative Blur Curves (matching homepage) */}
+      <div className="absolute top-0 right-0 -mr-24 -mt-24 w-96 h-96 rounded-full bg-sky-100/60 dark:bg-sky-950/20 blur-3xl pointer-events-none" />
+      <div className="absolute bottom-0 left-0 -ml-24 -mb-24 w-96 h-96 rounded-full bg-sky-100/50 dark:bg-sky-950/20 blur-3xl pointer-events-none" />
+
       {/* Centered Minimalist Hardware Split Card matching LoginPage */}
-      <div className="w-full max-w-5xl bg-white dark:bg-[#0B0F17] rounded-3xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 border border-slate-200/80 dark:border-slate-800 transition-all">
+      <div className="w-full max-w-5xl bg-white dark:bg-[#0B0F17] rounded-3xl overflow-hidden grid grid-cols-1 lg:grid-cols-12 border border-slate-200/90 dark:border-zinc-800 shadow-[0_20px_50px_-12px_rgba(40,125,168,0.12)] transition-all relative z-10">
 
         {/* ========================================================================= */}
         {/* LEFT PANEL: HARDWARE VIBE (Exact match with LoginPage)                    */}
         {/* ========================================================================= */}
-        <div className="lg:col-span-5 bg-slate-100 dark:bg-[#101522] p-8 sm:p-10 flex flex-col justify-between relative border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-slate-800 min-h-[360px] lg:min-h-[720px] overflow-hidden">
+        <div className="lg:col-span-5 bg-gradient-to-br from-sky-50/70 via-slate-50/60 to-blue-50/40 dark:from-[#0d1626] dark:via-[#0b101c] dark:to-[#070b14] p-8 sm:p-10 flex flex-col justify-between relative border-b lg:border-b-0 lg:border-r border-slate-200/80 dark:border-zinc-800 min-h-[360px] lg:min-h-[720px] overflow-hidden">
           {/* Subtle Ambient Light Wash */}
-          <div className="absolute -top-24 -left-24 w-72 h-72 rounded-full bg-white/60 dark:bg-white/5 blur-3xl pointer-events-none" />
+          <div className="absolute -top-20 -left-20 w-80 h-80 rounded-full bg-sky-200/40 dark:bg-sky-500/10 blur-3xl pointer-events-none" />
+          <div className="absolute -bottom-20 -right-20 w-80 h-80 rounded-full bg-blue-100/40 dark:bg-blue-600/10 blur-3xl pointer-events-none" />
 
           {/* Top: Small Brand Mark */}
           <div className="relative z-10">
@@ -360,9 +366,9 @@ export const RegisterPage: React.FC = () => {
             </Link>
           </div>
 
-          {/* Center: FPT Hardware Button Showcase */}
+          {/* Center: Hardware Button Showcase (Brand Blue Theme matching Homepage) */}
           <div className="relative z-10 my-auto py-8 flex flex-col items-center justify-center w-full">
-            <FptSmartButton variant="minimal" />
+            <FptSmartButton variant="minimal" theme="brand" brandText="Smart" />
           </div>
 
           {/* Bottom Left Tagline */}
@@ -395,30 +401,58 @@ export const RegisterPage: React.FC = () => {
             </div>
 
             {/* Role Selector: Elegant Segmented Control */}
-            <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100 dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800">
+            <div className="grid grid-cols-2 gap-1 p-1 bg-slate-100/90 dark:bg-slate-900 rounded-xl border border-slate-200/80 dark:border-slate-800 relative">
               <button
                 type="button"
                 onClick={() => setRole('STORE_OWNER')}
-                className={`py-2 px-3 text-xs sm:text-sm rounded-lg flex items-center justify-center gap-2 transition-all ${
-                  role === 'STORE_OWNER'
-                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold shadow-xs border border-slate-200/60 dark:border-slate-700'
-                    : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-                }`}
+                className="relative py-2.5 px-3 text-xs sm:text-sm rounded-lg flex items-center justify-center gap-2 transition-colors outline-none select-none cursor-pointer"
               >
-                <Store className="w-4 h-4" />
-                <span>Chủ Cửa Hàng</span>
+                {role === 'STORE_OWNER' && (
+                  <motion.div
+                    layoutId="active-register-role-pill"
+                    className="absolute inset-0 rounded-lg bg-white dark:bg-slate-800 border border-[#287DA8]/30 dark:border-sky-500/30 shadow-[0_2px_8px_rgba(40,125,168,0.12),0_1px_3px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] pointer-events-none"
+                    transition={{
+                      type: 'spring',
+                      stiffness: 240,
+                      damping: 24,
+                      mass: 0.7
+                    }}
+                  />
+                )}
+                <span className={`relative z-10 flex items-center gap-2 transition-colors duration-200 ${
+                  role === 'STORE_OWNER'
+                    ? 'text-[#287DA8] dark:text-sky-300 font-bold'
+                    : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
+                }`}>
+                  <Store className="w-4 h-4" />
+                  <span>Chủ Cửa Hàng</span>
+                </span>
               </button>
               <button
                 type="button"
                 onClick={() => setRole('CUSTOMER')}
-                className={`py-2 px-3 text-xs sm:text-sm rounded-lg flex items-center justify-center gap-2 transition-all ${
-                  role === 'CUSTOMER'
-                    ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold shadow-xs border border-slate-200/60 dark:border-slate-700'
-                    : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
-                }`}
+                className="relative py-2.5 px-3 text-xs sm:text-sm rounded-lg flex items-center justify-center gap-2 transition-colors outline-none select-none cursor-pointer"
               >
-                <User className="w-4 h-4" />
-                <span>Khách Hàng</span>
+                {role === 'CUSTOMER' && (
+                  <motion.div
+                    layoutId="active-register-role-pill"
+                    className="absolute inset-0 rounded-lg bg-white dark:bg-slate-800 border border-[#287DA8]/30 dark:border-sky-500/30 shadow-[0_2px_8px_rgba(40,125,168,0.12),0_1px_3px_rgba(0,0,0,0.06)] dark:shadow-[0_2px_8px_rgba(0,0,0,0.4)] pointer-events-none"
+                    transition={{
+                      type: 'spring',
+                      stiffness: 240,
+                      damping: 24,
+                      mass: 0.7
+                    }}
+                  />
+                )}
+                <span className={`relative z-10 flex items-center gap-2 transition-colors duration-200 ${
+                  role === 'CUSTOMER'
+                    ? 'text-[#287DA8] dark:text-sky-300 font-bold'
+                    : 'text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200'
+                }`}>
+                  <User className="w-4 h-4" />
+                  <span>Khách Hàng</span>
+                </span>
               </button>
             </div>
 
@@ -710,15 +744,15 @@ export const RegisterPage: React.FC = () => {
                 </div>
               )}
 
-              {/* Submit CTA Button: Solid Black / Slate-900 */}
+              {/* Submit CTA Button: Brand Blue #287DA8 */}
               <button
                 type="submit"
                 disabled={loading}
-                className="w-full py-3 px-4 mt-2 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-semibold text-sm transition-all disabled:opacity-50 active:scale-[0.99] flex items-center justify-center gap-2 shadow-xs"
+                className="w-full py-3.5 px-4 mt-2 rounded-xl bg-[#287DA8] hover:bg-[#206588] text-white font-semibold text-sm transition-all shadow-[0_4px_16px_rgba(40,125,168,0.25)] hover:shadow-[0_6px_20px_rgba(40,125,168,0.35)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287DA8] focus-visible:ring-offset-2 disabled:opacity-50 active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer"
               >
                 {loading ? (
                   <>
-                    <div className="w-4 h-4 border-2 border-white dark:border-slate-900 border-t-transparent rounded-full animate-spin" />
+                    <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
                     <span>ĐANG KHỞI TẠO TÀI KHOẢN...</span>
                   </>
                 ) : (
@@ -732,7 +766,7 @@ export const RegisterPage: React.FC = () => {
               Đã có tài khoản hệ thống?{' '}
               <Link
                 to="/login"
-                className="font-semibold text-slate-900 dark:text-white hover:underline ml-1"
+                className="font-bold text-[#287DA8] dark:text-sky-400 hover:text-[#206588] hover:underline ml-1 transition-colors"
               >
                 Đăng nhập ngay
               </Link>
