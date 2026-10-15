@@ -5,6 +5,8 @@ interface FptSmartButtonProps {
   className?: string;
   showCaption?: boolean;
   variant?: 'card' | 'minimal';
+  theme?: 'brand' | 'orange';
+  brandText?: string;
 }
 
 export const FptSmartButton: React.FC<FptSmartButtonProps> = ({
@@ -12,9 +14,13 @@ export const FptSmartButton: React.FC<FptSmartButtonProps> = ({
   className = '',
   showCaption,
   variant = 'card',
+  theme = 'brand',
+  brandText,
 }) => {
   const isMinimal = variant === 'minimal';
   const shouldShowCaption = showCaption !== undefined ? showCaption : !isMinimal;
+  const isBrandTheme = theme === 'brand';
+  const displayBrandText = brandText || (isBrandTheme ? 'Smart' : 'FPT');
   const [isDepressed, setIsDepressed] = useState(false);
   const [orderState, setOrderState] = useState<'idle' | 'processing' | 'success'>('idle');
   const cooldownRef = useRef(false);
@@ -107,14 +113,18 @@ export const FptSmartButton: React.FC<FptSmartButtonProps> = ({
         <div
           className={`relative ${
             isMinimal ? 'w-[260px] sm:w-[310px]' : 'w-[300px] sm:w-[370px]'
-          } aspect-[788/316] rounded-full transition-all duration-300 select-none shadow-[0_20px_45px_-12px_rgba(246,96,2,0.38),0_4px_16px_rgba(0,0,0,0.06)] bg-gradient-to-r from-[#FF6305] via-[#F66002] to-[#EE5900] p-[4px] sm:p-[6px] border-[3px] sm:border-[4px] border-[#FFA036]/90`}
+          } aspect-[788/316] rounded-full transition-all duration-300 select-none ${
+            isBrandTheme
+              ? 'shadow-[0_20px_45px_-12px_rgba(40,125,168,0.42),0_4px_16px_rgba(0,0,0,0.06)] bg-gradient-to-r from-[#287DA8] via-[#1E88E5] to-[#1565C0] p-[4px] sm:p-[6px] border-[3px] sm:border-[4px] border-[#60A5FA]/90'
+              : 'shadow-[0_20px_45px_-12px_rgba(246,96,2,0.38),0_4px_16px_rgba(0,0,0,0.06)] bg-gradient-to-r from-[#FF6305] via-[#F66002] to-[#EE5900] p-[4px] sm:p-[6px] border-[3px] sm:border-[4px] border-[#FFA036]/90'
+          }`}
         >
           {/* Inner Base */}
           <div className="relative w-full h-full rounded-full overflow-hidden flex items-center justify-between px-6 sm:px-8">
-            {/* Left: Bold White Italic FPT Typography */}
+            {/* Left: Bold White Italic Typography */}
             <div className="flex items-center select-none pl-1 sm:pl-2">
               <span className="text-white font-black italic tracking-wide text-4xl sm:text-5xl drop-shadow-[0_2px_4px_rgba(0,0,0,0.15)]">
-                FPT
+                {displayBrandText}
               </span>
             </div>
 
@@ -123,7 +133,7 @@ export const FptSmartButton: React.FC<FptSmartButtonProps> = ({
               <button
                 type="button"
                 onClick={handleKnobPress}
-                aria-label="Nhấn nút FPT để đặt hàng tức thì"
+                aria-label={`Nhấn nút ${displayBrandText} để đặt hàng tức thì`}
                 className={`relative w-[74px] h-[74px] sm:w-[92px] sm:h-[92px] rounded-full cursor-pointer outline-none transition-all duration-150 flex items-center justify-center ${
                   isDepressed
                     ? 'scale-95 shadow-[inset_0_4px_8px_rgba(0,0,0,0.15)]'
@@ -154,7 +164,7 @@ export const FptSmartButton: React.FC<FptSmartButtonProps> = ({
       {/* Minimalist Micro-Copy */}
       {shouldShowCaption && (
         <p className="text-xs text-slate-400 dark:text-slate-500 font-medium tracking-wide mt-6 text-center">
-          Nút bấm vật lý FPT • Chạm để đặt hàng tức thì
+          Nút bấm vật lý thông minh • Chạm để đặt hàng tức thì
         </p>
       )}
     </div>

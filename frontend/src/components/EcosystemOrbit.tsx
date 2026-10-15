@@ -271,19 +271,19 @@ export const EcosystemOrbit: React.FC = () => {
   };
 
   return (
-    <section id="categories" className="py-20 lg:py-28 bg-[#FAFAFA] border-b border-slate-200/80">
+    <section id="categories" className="py-20 lg:py-28 bg-[#FAFAFA]/75 dark:bg-[#09090B]/60 backdrop-blur-md border-b border-slate-200/80 dark:border-zinc-800/80">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-        
+
         {/* Section Header */}
         <div className="max-w-3xl mb-12 lg:mb-16 text-left">
-          <p className="font-mono text-xs uppercase tracking-widest text-slate-500 font-medium mb-3">
+          <p className="font-mono text-xs uppercase tracking-widest text-slate-500 dark:text-slate-400 font-medium mb-3">
             DANH MỤC NHU YẾU PHẨM
           </p>
-          <h2 className="text-3xl sm:text-4xl lg:text-[44px] font-extrabold tracking-tight text-slate-900 leading-tight">
+          <h2 className="text-3xl sm:text-4xl lg:text-[44px] font-extrabold tracking-tight text-slate-900 dark:text-white leading-tight">
             Những thứ gia đình bạn cần mỗi ngày, <br className="hidden sm:block" />
             chỉ cách đúng một nút bấm.
           </h2>
-          <p className="mt-4 text-base sm:text-lg text-slate-600 font-normal leading-relaxed">
+          <p className="mt-4 text-base sm:text-lg text-slate-600 dark:text-slate-300 font-normal leading-relaxed">
             Không cần tìm kiếm qua hàng trăm danh mục trên ứng dụng. Nút bấm được định danh trực tiếp cho loại mặt hàng bạn thường xuyên tiêu thụ nhất.
           </p>
         </div>
@@ -304,27 +304,24 @@ export const EcosystemOrbit: React.FC = () => {
                   key={cat.id}
                   onClick={() => handleSelectCategory(cat.id)}
                   onMouseEnter={() => handleSelectCategory(cat.id)}
-                  className={`w-full text-left p-5 rounded-2xl border transition-all duration-200 flex items-center justify-between group cursor-pointer ${
-                    isActive
+                  className={`w-full text-left p-5 rounded-2xl border transition-all duration-200 flex items-center justify-between group cursor-pointer ${isActive
                       ? 'bg-slate-900 text-white border-slate-900 shadow-md translate-x-1'
                       : 'bg-white hover:bg-slate-50 text-slate-900 border-slate-200/80'
-                  }`}
+                    }`}
                 >
                   <div className="flex items-center gap-4">
                     {/* Index Number */}
                     <span
-                      className={`font-mono text-xs font-semibold ${
-                        isActive ? 'text-slate-400' : 'text-slate-400'
-                      }`}
+                      className={`font-mono text-xs font-semibold ${isActive ? 'text-slate-400' : 'text-slate-400'
+                        }`}
                     >
                       {cat.number}
                     </span>
 
                     {/* Icon Badge */}
                     <div
-                      className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${
-                        isActive ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-700'
-                      }`}
+                      className={`w-10 h-10 rounded-xl flex items-center justify-center transition-colors ${isActive ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-700'
+                        }`}
                     >
                       <Icon className="w-5 h-5" strokeWidth={1.8} />
                     </div>
@@ -335,9 +332,8 @@ export const EcosystemOrbit: React.FC = () => {
                         {cat.name}
                       </h3>
                       <p
-                        className={`text-xs mt-0.5 ${
-                          isActive ? 'text-slate-300' : 'text-slate-500'
-                        }`}
+                        className={`text-xs mt-0.5 ${isActive ? 'text-slate-300' : 'text-slate-500'
+                          }`}
                       >
                         {cat.subtitle}
                       </p>
@@ -346,11 +342,10 @@ export const EcosystemOrbit: React.FC = () => {
 
                   {/* Indicator Arrow */}
                   <ArrowRight
-                    className={`w-4 h-4 transition-transform duration-200 ${
-                      isActive
+                    className={`w-4 h-4 transition-transform duration-200 ${isActive
                         ? 'text-white translate-x-1'
                         : 'text-slate-300 group-hover:text-slate-500 group-hover:translate-x-0.5'
-                    }`}
+                      }`}
                   />
                 </button>
               );
@@ -367,10 +362,10 @@ export const EcosystemOrbit: React.FC = () => {
           {/* RIGHT COLUMN: The Dynamic Preview Card */}
           <div className="lg:col-span-7">
             <div className="bg-white rounded-3xl border border-slate-200/80 shadow-[0_20px_40px_rgba(0,0,0,0.03)] p-6 sm:p-9 transition-all duration-300">
-              
+
               {/* Pure & Clean Image Canvas: Zero clutter, perfectly centered floating product image */}
               <div className="relative w-full h-72 sm:h-84 rounded-2xl bg-slate-50 border border-slate-100 flex items-center justify-center p-6 mb-6 overflow-hidden select-none">
-                
+
                 {/* Subtle Ambient Radial Glow */}
                 <div className="absolute w-52 h-52 rounded-full bg-slate-200/35 blur-2xl pointer-events-none" />
 
@@ -397,7 +392,7 @@ export const EcosystemOrbit: React.FC = () => {
 
               {/* Title & Micro-Metrics Banner */}
               <div className="space-y-3">
-                
+
                 {/* Headline: Large, bold text-slate-900 */}
                 <h3 className="text-2xl font-extrabold tracking-tight text-slate-900">
                   {currentCategory.headline}
@@ -429,11 +424,10 @@ export const EcosystemOrbit: React.FC = () => {
                           key={opt.name}
                           onMouseEnter={() => setActiveOptionIndex(idx)}
                           onClick={() => setActiveOptionIndex(idx)}
-                          className={`rounded-md px-3 py-1.5 text-[11px] font-semibold transition-all duration-200 cursor-pointer shadow-xs ${
-                            isActive
+                          className={`rounded-md px-3 py-1.5 text-[11px] font-semibold transition-all duration-200 cursor-pointer shadow-xs ${isActive
                               ? 'bg-slate-900 text-white border border-slate-900 shadow-sm'
                               : 'bg-white border border-slate-200 text-slate-700 hover:border-slate-400 hover:text-slate-900'
-                          }`}
+                            }`}
                         >
                           {opt.name}
                         </button>
