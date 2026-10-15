@@ -94,7 +94,8 @@ export const RegisterPage: React.FC = () => {
     usernameTimerRef.current = setTimeout(async () => {
       try {
         const res = await api.get(`/auth/check-username?username=${encodeURIComponent(trimmed)}`);
-        if (res.data.available) {
+        const isAvailable = res.data.available !== undefined ? Boolean(res.data.available) : !res.data.exists;
+        if (isAvailable) {
           setUsernameStatus({ available: true, message: 'Tên đăng nhập khả dụng' });
         } else {
           setUsernameStatus({ available: false, message: 'Tên đăng nhập này đã được sử dụng' });
@@ -133,7 +134,8 @@ export const RegisterPage: React.FC = () => {
     emailTimerRef.current = setTimeout(async () => {
       try {
         const res = await api.get(`/auth/check-email?email=${encodeURIComponent(trimmed)}`);
-        if (res.data.available) {
+        const isAvailable = res.data.available !== undefined ? Boolean(res.data.available) : !res.data.exists;
+        if (isAvailable) {
           setEmailStatus({ available: true, message: 'Email hợp lệ và khả dụng' });
         } else {
           setEmailStatus({ available: false, message: 'Email này đã được đăng ký tài khoản' });
