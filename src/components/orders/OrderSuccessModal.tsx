@@ -1,13 +1,15 @@
-import React from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { MapPin, X } from 'lucide-react';
+import { MapPin, X, Check, Copy, RotateCcw } from 'lucide-react';
 
 export interface OrderSuccessModalProps {
   isOpen: boolean;
   order: any;
   secondsRemaining: number;
   onClose: () => void;
-  onCancelOrder: (orderId: string) => void;
+  onCancelOrder: (orderId: string, orderNumber: string) => void;
+  onCancelledClosed?: (orderNumber: string) => void;
+  onReorder?: (deviceId?: string) => void;
 }
 
 export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
@@ -16,11 +18,93 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   secondsRemaining,
   onClose,
   onCancelOrder,
+  onCancelledClosed,
+  onReorder,
 }) => {
+  const [copied, setCopied] = useState(false);
+  const [isCancelled, setIsCancelled] = useState(false);
+  const autoCloseTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Reset cancellation state when a new order is opened
+  useEffect(() => {
+    if (isOpen) {
+      setIsCancelled(false);
+    } else {
+      if (autoCloseTimerRef.current) {
+        clearTimeout(autoCloseTimerRef.current);
+        autoCloseTimerRef.current = null;
+      }
+    }
+  }, [isOpen, order?.id]);
+
+  // Clean up timer on unmount
+  useEffect(() => {
+    return () => {
+      if (autoCloseTimerRef.current) {
+        clearTimeout(autoCloseTimerRef.current);
+      }
+    };
+  }, []);
+
   if (!order) return null;
 
   const totalCancelWindow = (order as any).cancelWindowSeconds || 60;
   const progressPercent = Math.max(0, Math.min(100, (secondsRemaining / totalCancelWindow) * 100));
+
+  const defaultAddress = 'Căn hộ 1204, Tháp Sapphire, Sunwah Pearl, 90 Nguyễn Hữu Cảnh, P. 22, Bình Thạnh';
+  const deliveryAddress = order.deliveryAddress || order.address || defaultAddress;
+
+  const formatPrice = (amount: number) => {
+    return `${amount.toLocaleString('vi-VN')} đ`;
+  };
+
+  const orderNumber = order.orderNumber || order.id?.slice(0, 8);
+
+  const handleCopy = () => {
+    if (orderNumber) {
+      navigator.clipboard.writeText(orderNumber);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    }
+  };
+
+  // Optimistic cancellation flow
+  const handleCancelClick = () => {
+    if (isCancelled) return;
+    setIsCancelled(true);
+    onCancelOrder(order.id, orderNumber);
+
+    // Auto-close after 2 seconds
+    autoCloseTimerRef.current = setTimeout(() => {
+      onClose();
+      if (onCancelledClosed) {
+        onCancelledClosed(orderNumber);
+      }
+    }, 2000);
+  };
+
+  const handleCloseClick = () => {
+    if (autoCloseTimerRef.current) {
+      clearTimeout(autoCloseTimerRef.current);
+      autoCloseTimerRef.current = null;
+    }
+    onClose();
+    if (isCancelled && onCancelledClosed) {
+      onCancelledClosed(orderNumber);
+    }
+  };
+
+  const handleReorderClick = () => {
+    if (autoCloseTimerRef.current) {
+      clearTimeout(autoCloseTimerRef.current);
+      autoCloseTimerRef.current = null;
+    }
+    onClose();
+    const devId = order.deviceId || order.items?.[0]?.deviceId;
+    if (onReorder) {
+      onReorder(devId);
+    }
+  };
 
   return (
     <AnimatePresence>
@@ -31,145 +115,185 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-md"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
           onClick={(e) => {
-            if (e.target === e.currentTarget) onClose();
+            if (e.target === e.currentTarget) handleCloseClick();
           }}
         >
-          {/* Modal Card - Single, continuous pure white canvas */}
+          {/* Modal Card */}
           <motion.div
             key="order-success-card"
-            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            initial={{ opacity: 0, scale: 0.95, y: 10 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 15 }}
-            transition={{ type: 'spring', damping: 25, stiffness: 400 }}
-            className="w-full max-w-md bg-white rounded-3xl shadow-2xl overflow-hidden border border-zinc-100/80 p-6 space-y-6 relative"
+            exit={{ opacity: 0, scale: 0.95, y: 10 }}
+            transition={{ type: 'spring', damping: 28, stiffness: 380 }}
+            className="w-full max-w-[420px] bg-white rounded-2xl shadow-2xl p-6 sm:p-7 relative border border-slate-100"
           >
-            {/* Top Close Button (Subtle Ghost) */}
+            {/* Top Close Button */}
             <button
-              onClick={onClose}
-              className="absolute top-5 right-5 p-1.5 rounded-full text-zinc-400 hover:text-zinc-700 hover:bg-zinc-100 transition-colors cursor-pointer"
+              onClick={handleCloseClick}
+              className="absolute top-4 right-4 p-1.5 rounded-lg text-slate-400 hover:text-slate-600 hover:bg-slate-100 transition-colors cursor-pointer"
               title="Đóng"
             >
               <X className="w-4 h-4" />
             </button>
 
-            {/* PART 2: Success Header (Minimalist & Animated Delight) */}
+            {/* Header: Checkmark or Cancelled State */}
             <div className="flex flex-col items-center text-center pt-1">
-              <motion.div
-                initial={{ scale: 0.8, opacity: 0 }}
-                animate={{ scale: [0.8, 1.06, 1], opacity: 1 }}
-                transition={{ duration: 0.45, ease: 'easeOut' }}
-                className="w-16 h-16 rounded-full bg-emerald-50 border border-emerald-100/80 flex items-center justify-center mb-3 shadow-inner"
+              <div
+                className={`w-12 h-12 rounded-full flex items-center justify-center mb-3 transition-colors duration-200 ${
+                  isCancelled
+                    ? 'bg-slate-100 text-slate-600'
+                    : 'bg-emerald-50 border border-emerald-100 text-emerald-500'
+                }`}
               >
-                <svg
-                  className="w-8 h-8 text-emerald-600"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth={2.5}
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <motion.path
-                    d="M20 6L9 17L4 12"
-                    initial={{ pathLength: 0 }}
-                    animate={{ pathLength: 1 }}
-                    transition={{ duration: 0.5, ease: 'easeOut', delay: 0.1 }}
-                  />
-                </svg>
-              </motion.div>
+                {isCancelled ? (
+                  <RotateCcw className="w-5 h-5 text-slate-600" />
+                ) : (
+                  <Check className="w-6 h-6 text-emerald-500 stroke-[2.5]" />
+                )}
+              </div>
 
-              <h3 className="text-2xl font-bold tracking-tight text-zinc-900">
-                Đặt hàng thành công
+              <h3 className="text-xl font-bold tracking-tight text-slate-900 transition-all duration-200">
+                {isCancelled ? 'Đã hủy đơn hàng' : 'Đặt hàng thành công'}
               </h3>
-              <p className="font-mono text-zinc-500 text-sm mt-0.5">
-                #{order.orderNumber || order.id?.slice(0, 8)}
-              </p>
+
+              {/* Order Number with Copy Icon */}
+              <button
+                type="button"
+                onClick={handleCopy}
+                className="inline-flex items-center gap-1.5 text-xs text-slate-400 hover:text-slate-600 transition-colors mt-1 cursor-pointer group"
+                title="Sao chép mã đơn hàng"
+              >
+                <span className="tabular-nums font-normal">#{orderNumber}</span>
+                {copied ? (
+                  <Check className="w-3.5 h-3.5 text-emerald-500" />
+                ) : (
+                  <Copy className="w-3.5 h-3.5 text-slate-400 group-hover:text-slate-600" />
+                )}
+              </button>
             </div>
 
-            {/* PART 3: Digital Receipt Layout */}
-            <div className="bg-zinc-50/50 border border-zinc-100 rounded-2xl p-4 space-y-3">
+            {/* Digital Receipt Container */}
+            <div
+              className={`bg-[#F8FAFC] rounded-xl p-4 space-y-2.5 mt-5 transition-opacity duration-200 ${
+                isCancelled ? 'opacity-50' : 'opacity-100'
+              }`}
+            >
               {/* Order Items */}
-              <div className="space-y-2">
-                {order.items && order.items.length > 0 ? (
-                  order.items.map((it: any, idx: number) => (
-                    <div
-                      key={it.id || it.productName || idx}
-                      className="flex justify-between items-center text-sm"
+              {order.items && order.items.length > 0 ? (
+                order.items.map((it: any, idx: number) => (
+                  <div
+                    key={it.id || it.productName || idx}
+                    className="flex justify-between items-center text-xs"
+                  >
+                    <span className="text-slate-600 font-normal truncate pr-3">
+                      {it.quantity}x {it.productName}
+                    </span>
+                    <span
+                      className={`tabular-nums font-semibold shrink-0 ${
+                        isCancelled
+                          ? 'line-through text-slate-400'
+                          : 'text-slate-900'
+                      }`}
                     >
-                      <span className="text-zinc-600 font-medium truncate pr-3">
-                        {it.quantity}× {it.productName}
-                      </span>
-                      <span className="font-mono font-semibold text-zinc-900 shrink-0">
-                        {(it.totalPrice || it.price * it.quantity)?.toLocaleString('vi-VN')} ₫
-                      </span>
-                    </div>
-                  ))
-                ) : (
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-zinc-600 font-medium">1× Đơn hàng Nút bấm</span>
-                    <span className="font-mono font-semibold text-zinc-900 shrink-0">
-                      {order.totalAmount?.toLocaleString('vi-VN')} ₫
+                      {formatPrice(it.totalPrice || it.price * it.quantity || 0)}
                     </span>
                   </div>
-                )}
-
-                {/* Total */}
-                <div className="flex justify-between items-center pt-2.5 border-t border-zinc-200/60 text-sm">
-                  <span className="font-medium text-zinc-900">Tổng thanh toán</span>
-                  <span className="font-mono font-bold text-base text-zinc-900">
-                    {order.totalAmount?.toLocaleString('vi-VN')} ₫
+                ))
+              ) : (
+                <div className="flex justify-between items-center text-xs">
+                  <span className="text-slate-600 font-normal">1x Đơn hàng Nút bấm</span>
+                  <span
+                    className={`tabular-nums font-semibold shrink-0 ${
+                      isCancelled
+                        ? 'line-through text-slate-400'
+                        : 'text-slate-900'
+                    }`}
+                  >
+                    {formatPrice(order.totalAmount || 0)}
                   </span>
                 </div>
+              )}
+
+              {/* Total Payment */}
+              <div className="flex justify-between items-center pt-1 text-xs">
+                <span className="font-semibold text-slate-900">Tổng thanh toán</span>
+                <span
+                  className={`tabular-nums font-bold ${
+                    isCancelled
+                      ? 'line-through text-slate-400'
+                      : 'text-slate-900'
+                  }`}
+                >
+                  {formatPrice(order.totalAmount || 0)}
+                </span>
               </div>
 
               {/* Delivery Address */}
-              {order.deliveryAddress && (
-                <div className="pt-2.5 border-t border-zinc-200/50 flex items-start gap-2 text-xs text-zinc-500">
-                  <MapPin className="w-3.5 h-3.5 text-zinc-400 shrink-0 mt-0.5" />
-                  <span className="line-clamp-2 leading-relaxed">
-                    {order.deliveryAddress}
-                  </span>
-                </div>
-              )}
+              <div className="pt-2.5 border-t border-slate-200/60 flex items-start gap-2 text-[11px] text-slate-500">
+                <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" />
+                <span className="leading-relaxed">
+                  {deliveryAddress}
+                </span>
+              </div>
             </div>
 
-            {/* PART 4: 60s Cancel UX & Actions */}
-            <div className="space-y-3 pt-1">
-              {secondsRemaining > 0 && (
-                <div className="space-y-2.5">
-                  {/* Sleek 2px progress bar shrinking over 60s */}
-                  <div className="w-full bg-zinc-100 h-[2px] rounded-full overflow-hidden">
-                    <motion.div
-                      className="bg-rose-500 h-full rounded-full origin-left"
-                      style={{ width: `${progressPercent}%` }}
-                      transition={{ duration: 1, ease: 'linear' }}
-                    />
-                  </div>
+            {/* Cancellation Grace Period (Hidden when cancelled) */}
+            {!isCancelled && secondsRemaining > 0 && (
+              <div className="space-y-2 mt-4">
+                {/* Thin shrinking progress bar */}
+                <div className="w-full bg-slate-100 h-[2px] rounded-full overflow-hidden">
+                  <div
+                    className="bg-[#E15241] h-full transition-all duration-1000 ease-linear rounded-full"
+                    style={{ width: `${progressPercent}%` }}
+                  />
+                </div>
 
-                  {/* Subtle Ghost Cancel Button */}
+                {/* Grace text & inline cancel link */}
+                <div className="flex items-center justify-between text-xs pt-0.5">
+                  <span className="text-slate-500 tabular-nums">
+                    Bạn có thể hủy đơn trong vòng {secondsRemaining} giây tới
+                  </span>
                   <button
-                    onClick={() => {
-                      onCancelOrder(order.id);
-                      onClose();
-                    }}
-                    className="w-full py-2.5 px-4 rounded-xl border border-rose-200 text-rose-500 hover:bg-rose-50 text-xs font-medium flex items-center justify-center gap-1.5 transition-colors cursor-pointer"
+                    type="button"
+                    onClick={handleCancelClick}
+                    className="text-[#E15241] font-medium hover:underline cursor-pointer border-b border-dashed border-[#E15241]/50 hover:border-solid text-xs transition-colors"
                   >
-                    <X className="w-3.5 h-3.5" />
-                    <span>Hủy đơn hàng ({secondsRemaining}s)</span>
+                    Hủy đơn hàng
                   </button>
                 </div>
-              )}
+              </div>
+            )}
 
-              {/* Primary Action Button */}
+            {/* Actions: Single button or 2-column actions if cancelled */}
+            {isCancelled ? (
+              <div className="grid grid-cols-2 gap-3 mt-5">
+                <button
+                  type="button"
+                  onClick={handleCloseClick}
+                  className="w-full py-2.5 px-4 rounded-lg bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs sm:text-sm font-semibold transition-all duration-150 active:scale-[0.97] cursor-pointer"
+                >
+                  Đóng
+                </button>
+                <button
+                  type="button"
+                  onClick={handleReorderClick}
+                  className="w-full py-2.5 px-4 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs sm:text-sm font-semibold transition-all duration-150 active:scale-[0.97] hover:shadow-md cursor-pointer shadow-xs flex items-center justify-center gap-1.5"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Đặt lại</span>
+                </button>
+              </div>
+            ) : (
               <button
-                onClick={onClose}
-                className="w-full py-3 px-4 rounded-xl bg-zinc-900 hover:bg-zinc-800 text-white text-sm font-semibold transition-all shadow-sm active:scale-[0.99] cursor-pointer"
+                type="button"
+                onClick={handleCloseClick}
+                className="w-full py-3 px-4 rounded-xl bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs sm:text-sm font-semibold transition-all duration-150 ease-out active:scale-[0.98] hover:shadow-md cursor-pointer shadow-xs mt-4"
               >
-                Đã hiểu — Theo dõi đơn hàng
+                Đã hiểu & Theo dõi đơn hàng
               </button>
-            </div>
+            )}
           </motion.div>
         </motion.div>
       )}
