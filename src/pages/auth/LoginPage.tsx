@@ -1,17 +1,21 @@
 import React, { useState } from 'react';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion } from 'framer-motion';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
-import { AlertCircle, Eye, EyeOff, ArrowLeft } from 'lucide-react';
+import { AlertCircle, Eye, EyeOff, ArrowLeft, CheckCircle2 } from 'lucide-react';
 import { FptSmartButton } from '../../components/hardware/FptSmartButton';
 
 export const LoginPage: React.FC = () => {
-  const [identifier, setIdentifier] = useState('store@smartorder.local');
-  const [password, setPassword] = useState('Password123!');
+  const location = useLocation();
+  const locationState = location.state as { email?: string; message?: string } | undefined;
+
+  const [identifier, setIdentifier] = useState(locationState?.email || 'store@smartorder.local');
+  const [password, setPassword] = useState(locationState?.email ? '' : 'Password123!');
   const [showPassword, setShowPassword] = useState(false);
   const [rememberMe, setRememberMe] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [successNotice, setSuccessNotice] = useState<string | null>(locationState?.message || null);
   const [loading, setLoading] = useState(false);
 
   // Field validation
@@ -52,6 +56,7 @@ export const LoginPage: React.FC = () => {
     if (emailErr || passErr) return;
 
     setError(null);
+    setSuccessNotice(null);
     setLoading(true);
 
     try {
@@ -94,6 +99,7 @@ export const LoginPage: React.FC = () => {
     setIdentifier(demoId);
     setPassword('Password123!');
     setError(null);
+    setSuccessNotice(null);
     setIdentifierTouched(false);
     setPasswordTouched(false);
   };
@@ -207,6 +213,17 @@ export const LoginPage: React.FC = () => {
                 );
               })}
             </div>
+
+            {/* Success Message Alert */}
+            {successNotice && !error && (
+              <div
+                role="status"
+                className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 rounded-xl flex items-center gap-2 text-xs text-emerald-700 dark:text-emerald-300 animate-in fade-in"
+              >
+                <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+                <span className="font-medium">{successNotice}</span>
+              </div>
+            )}
 
             {/* Error Message Alert */}
             {error && (
