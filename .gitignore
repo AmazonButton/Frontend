@@ -72,3 +72,4 @@ Desktop.ini
 # AI Agents & IDE metadata
 .gemini/
 .agents/
+*.skill
