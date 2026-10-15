@@ -11,8 +11,8 @@ export interface NavItem {
 
 export const NAV_ITEMS: NavItem[] = [
   { id: 'features', label: 'Tính năng', sectionId: 'features', href: '/#features' },
-  { id: 'pipeline', label: 'Quy trình', sectionId: 'product-story', href: '/#product-story' },
-  { id: 'categories', label: 'Nhu yếu phẩm', sectionId: 'categories', href: '/#categories' },
+  { id: 'partners', label: 'Đối tác', sectionId: 'partners', href: '/#partners' },
+  { id: 'categories', label: 'Nhu cầu nhóm', sectionId: 'categories', href: '/#categories' },
   { id: 'enterprise', label: 'Doanh nghiệp', sectionId: 'enterprise', href: '/#enterprise' }
 ];
 
@@ -35,7 +35,31 @@ export const HeaderNavigation: React.FC<HeaderNavigationProps> = ({
 
   const isLandingPage = location.pathname === '/';
 
-  // Track active section on scroll when on Landing Page
+  // Handle direct navigation with URL hash (e.g. /#partners)
+  useEffect(() => {
+    if (isLandingPage && location.hash) {
+      const hashId = location.hash.replace('#', '');
+      const item = NAV_ITEMS.find((n) => n.sectionId === hashId);
+      if (item) {
+        setActiveId(item.id);
+        const targetElement = document.getElementById(hashId);
+        if (targetElement) {
+          const timer = setTimeout(() => {
+            const headerOffset = 76;
+            const elementPosition = targetElement.getBoundingClientRect().top;
+            const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+            window.scrollTo({
+              top: Math.max(0, offsetPosition),
+              behavior: 'smooth'
+            });
+          }, 150);
+          return () => clearTimeout(timer);
+        }
+      }
+    }
+  }, [isLandingPage, location.hash]);
+
+  // Track active section on scroll when on Landing Page (ScrollSpy)
   useEffect(() => {
     if (!isLandingPage) {
       setActiveId('');
@@ -43,22 +67,30 @@ export const HeaderNavigation: React.FC<HeaderNavigationProps> = ({
     }
 
     const handleScroll = () => {
-      const scrollPosition = window.scrollY + 140; // Offset for sticky header
+      // Check if user has scrolled near bottom of page
+      if (window.innerHeight + window.scrollY >= document.documentElement.scrollHeight - 60) {
+        setActiveId(NAV_ITEMS[NAV_ITEMS.length - 1].id);
+        return;
+      }
+
+      const navbarOffset = 120; // Trigger line below sticky header
 
       for (let i = NAV_ITEMS.length - 1; i >= 0; i--) {
         const item = NAV_ITEMS[i];
         const element = document.getElementById(item.sectionId);
         if (element) {
-          const top = element.offsetTop;
-          if (scrollPosition >= top) {
+          const rect = element.getBoundingClientRect();
+          if (rect.top <= navbarOffset && rect.bottom > navbarOffset - 80) {
             setActiveId(item.id);
             return;
           }
         }
       }
 
-      // Default to first item if near top
-      setActiveId('features');
+      // Default to features if near top
+      if (window.scrollY < 200) {
+        setActiveId('features');
+      }
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -82,16 +114,16 @@ export const HeaderNavigation: React.FC<HeaderNavigationProps> = ({
 
     const targetElement = document.getElementById(item.sectionId);
     if (targetElement) {
-      const headerOffset = 70;
+      const headerOffset = 76;
       const elementPosition = targetElement.getBoundingClientRect().top;
       const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
 
       window.scrollTo({
-        top: offsetPosition,
+        top: Math.max(0, offsetPosition),
         behavior: 'smooth'
       });
 
-      // Update URL hash without page jump
+      // Update URL hash without jumping
       window.history.pushState(null, '', `#${item.sectionId}`);
     }
   };

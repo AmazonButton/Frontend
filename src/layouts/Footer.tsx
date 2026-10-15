@@ -39,8 +39,8 @@ export const Footer: React.FC = () => {
                   <span className="text-base font-bold tracking-tight text-slate-900 dark:text-white">
                     Smart Order Button
                   </span>
-                  <span className="text-[11px] font-mono text-slate-400 dark:text-slate-500">
-                    IoT Instant Commerce · v2.8
+                  <span className="text-[11px] text-slate-400 dark:text-slate-500 font-normal">
+                    IoT Instant Commerce · v2.0
                   </span>
                 </div>
               </Link>
@@ -49,7 +49,7 @@ export const Footer: React.FC = () => {
                 Hệ thống nút bấm thông minh một-chạm kết nối khách hàng trực tiếp với đại lý nước uống 20L, bình gas và hàng thiết yếu.
               </p>
 
-              <div className="flex items-center gap-3 text-xs font-mono text-slate-400 dark:text-slate-500 pt-1">
+              <div className="flex items-center gap-3 text-xs text-slate-400 dark:text-slate-500 pt-1 tabular-nums">
                 <span className="flex items-center gap-1.5 text-slate-600 dark:text-slate-300">
                   <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
                   MQTT Broker · Sẵn sàng
@@ -60,7 +60,7 @@ export const Footer: React.FC = () => {
 
             {/* Col 2: Solutions (Span 2 cols) */}
             <div className="lg:col-span-2 space-y-3.5">
-              <h4 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-900 dark:text-white">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white">
                 GIẢI PHÁP
               </h4>
               <ul className="space-y-2.5 text-sm">
@@ -94,7 +94,7 @@ export const Footer: React.FC = () => {
 
             {/* Col 3: Platform (Span 3 cols) */}
             <div className="lg:col-span-3 space-y-3.5">
-              <h4 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-900 dark:text-white">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white">
                 NỀN TẢNG
               </h4>
               <ul className="space-y-2.5 text-sm">
@@ -128,7 +128,7 @@ export const Footer: React.FC = () => {
 
             {/* Col 4: Newsletter & Contact (Span 3 cols) */}
             <div className="lg:col-span-3 space-y-3.5">
-              <h4 className="text-xs font-bold font-mono uppercase tracking-wider text-slate-900 dark:text-white">
+              <h4 className="text-xs font-bold uppercase tracking-wider text-slate-900 dark:text-white">
                 LIÊN HỆ & CẬP NHẬT
               </h4>
 
@@ -145,7 +145,7 @@ export const Footer: React.FC = () => {
                   />
                   <button
                     type="submit"
-                    className="p-2.5 rounded-xl bg-slate-900 hover:bg-slate-800 text-white dark:bg-white dark:hover:bg-slate-100 dark:text-slate-900 transition-all shrink-0 active:scale-95 shadow-sm"
+                    className="p-2.5 rounded-xl bg-[#287DA8] hover:bg-[#206588] text-white transition-all shrink-0 active:scale-95 shadow-sm"
                     title="Gửi"
                   >
                     <ArrowRight className="w-4 h-4" />
