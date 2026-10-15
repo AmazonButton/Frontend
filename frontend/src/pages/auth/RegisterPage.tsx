@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion } from 'framer-motion';
+import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import {
   Store,
@@ -13,6 +14,7 @@ import {
   Send,
   Loader2,
   ArrowLeft,
+  ArrowRight,
 } from 'lucide-react';
 import { FptSmartButton } from '../../components/hardware/FptSmartButton';
 import {
@@ -20,8 +22,18 @@ import {
   getPasswordScore,
 } from '../../components/auth/PasswordStrengthMeter';
 
+const getInitials = (name: string) => {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return 'SO';
+  if (parts.length === 1) return parts[0].substring(0, 2).toUpperCase();
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+};
+
 export const RegisterPage: React.FC = () => {
+  const { login } = useAuth();
+  const navigate = useNavigate();
   const [role, setRole] = useState<'STORE_OWNER' | 'CUSTOMER'>('STORE_OWNER');
+  const [registeredData, setRegisteredData] = useState<any>(null);
   const [fullName, setFullName] = useState('');
   const [username, setUsername] = useState('');
   const [email, setEmail] = useState('');
@@ -62,7 +74,6 @@ export const RegisterPage: React.FC = () => {
 
   const usernameTimerRef = useRef<NodeJS.Timeout | null>(null);
   const emailTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const navigate = useNavigate();
 
   // Username validation & debounce check
   useEffect(() => {
@@ -224,6 +235,7 @@ export const RegisterPage: React.FC = () => {
 
       if (res.data.success) {
         setRegisteredEmail(email.trim().toLowerCase());
+        setRegisteredData(res.data);
         setRegistrationSuccess(true);
       }
     } catch (err: any) {
@@ -239,101 +251,6 @@ export const RegisterPage: React.FC = () => {
   // Password score calculation for sleek 2px meter
   const passwordCriteria = checkPasswordCriteria(password);
   const passwordScore = getPasswordScore(passwordCriteria);
-
-  // Success State Screen
-  if (registrationSuccess) {
-    return (
-      <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4 sm:p-6 bg-[#FAFAFA] dark:bg-[#070A0F] transition-colors selection:bg-slate-900 selection:text-white">
-        <div className="w-full max-w-lg bg-white dark:bg-[#0B0F17] rounded-3xl p-8 sm:p-10 border border-slate-200/80 dark:border-slate-800 shadow-sm text-center animate-in fade-in zoom-in-95 duration-200">
-          <div className="w-14 h-14 rounded-2xl bg-slate-50 dark:bg-slate-900 text-slate-900 dark:text-white flex items-center justify-center mx-auto mb-4 border border-slate-200 dark:border-slate-800">
-            <CheckCircle2 className="w-7 h-7 text-emerald-500" />
-          </div>
-
-          <h2 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
-            Đăng Ký Thành Công
-          </h2>
-
-          <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 mt-2 leading-relaxed">
-            Hệ thống đã gửi liên kết xác thực tới hòm thư:{' '}
-            <strong className="text-slate-900 dark:text-white font-mono">{registeredEmail}</strong>.
-          </p>
-
-          {role === 'STORE_OWNER' ? (
-            <div className="my-5 p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-2xl text-left text-xs text-slate-600 dark:text-slate-300">
-              <div className="flex items-center gap-2 font-bold mb-1 text-slate-900 dark:text-white">
-                <Clock className="w-4 h-4 text-slate-500" />
-                <span>Xét Duyệt Trạm Đại Lý</span>
-              </div>
-              <p className="text-[11px] leading-relaxed text-slate-500 dark:text-slate-400">
-                Yêu cầu mở trạm cho cửa hàng <strong>"{storeName}"</strong> đã được chuyển tới Super Admin.
-                Sau khi kích hoạt email và nhận phê duyệt, bạn có thể bắt đầu phân phối nút bấm vật lý và quản lý kho hàng.
-              </p>
-            </div>
-          ) : (
-            <div className="my-5 p-4 bg-slate-50 dark:bg-slate-900/60 border border-slate-200/80 dark:border-slate-800 rounded-2xl text-left text-xs space-y-1.5 text-slate-500 dark:text-slate-400">
-              <div className="font-bold text-slate-900 dark:text-white mb-1.5">
-                Hướng dẫn kích hoạt:
-              </div>
-              <p className="text-[11px]">1. Mở email của bạn và kiểm tra thư mới (kể cả thư mục Spam/Rác).</p>
-              <p className="text-[11px]">2. Nhấp vào liên kết xác thực tài khoản để hoàn tất.</p>
-              <p className="text-[11px]">3. Đăng nhập và bắt đầu ghép nối nút bấm thông minh IoT.</p>
-            </div>
-          )}
-
-          {/* Resend verification block */}
-          <div className="pt-1 pb-4">
-            {resendMsg && (
-              <div
-                className={`mb-3 p-2.5 rounded-xl text-xs flex items-center justify-center gap-1.5 ${
-                  resendMsg.type === 'success'
-                    ? 'bg-emerald-50 dark:bg-emerald-950/30 text-emerald-700 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50'
-                    : 'bg-rose-50 dark:bg-rose-950/30 text-rose-700 dark:text-rose-400 border border-rose-200 dark:border-rose-800/50'
-                }`}
-              >
-                <span>{resendMsg.text}</span>
-              </div>
-            )}
-
-            <button
-              type="button"
-              disabled={resendCooldown > 0 || resendLoading}
-              onClick={handleResendVerification}
-              className="text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white hover:underline disabled:opacity-50 disabled:no-underline inline-flex items-center gap-1.5"
-            >
-              {resendLoading ? (
-                <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  <span>Đang gửi lại...</span>
-                </>
-              ) : resendCooldown > 0 ? (
-                <span>Gửi lại mã xác thực sau ({resendCooldown}s)</span>
-              ) : (
-                <>
-                  <Send className="w-3.5 h-3.5" />
-                  <span>Chưa nhận được email? Gửi lại ngay</span>
-                </>
-              )}
-            </button>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3 pt-2">
-            <Link
-              to="/login"
-              className="py-3 px-4 rounded-xl bg-slate-900 hover:bg-slate-800 dark:bg-white dark:hover:bg-slate-100 text-white dark:text-slate-900 font-semibold text-xs transition-colors text-center shadow-xs"
-            >
-              Về Trang Đăng Nhập
-            </Link>
-            <Link
-              to="/verify-email"
-              className="py-3 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-900 dark:text-white font-semibold text-xs transition-colors text-center"
-            >
-              Nhập Mã Xác Nhận
-            </Link>
-          </div>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center p-4 sm:p-6 lg:p-10 bg-gradient-to-b from-[#F0F6FA] via-white to-[#F8FAFC] dark:from-[#090D14] dark:via-[#0B0F17] dark:to-[#070A0F] transition-colors selection:bg-[#287DA8] selection:text-white relative overflow-hidden">
@@ -382,10 +299,121 @@ export const RegisterPage: React.FC = () => {
         </div>
 
         {/* ========================================================================= */}
-        {/* RIGHT PANEL: CLEAN FORM (Pure white, stark monochrome contrast)          */}
+        {/* RIGHT PANEL: CLEAN FORM / DESIGNER ONBOARDING                            */}
         {/* ========================================================================= */}
         <div className="lg:col-span-7 p-6 sm:p-10 lg:p-12 flex flex-col justify-center bg-white dark:bg-[#0B0F17]">
-          <div className="max-w-md w-full mx-auto space-y-5">
+          {registrationSuccess ? (
+            <motion.div
+              initial={{ opacity: 0, y: 14 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.35, ease: 'easeOut' }}
+              className="max-w-md w-full mx-auto space-y-6"
+            >
+              {/* Header Title */}
+              <div className="space-y-1.5">
+                <h1 className="text-2xl sm:text-3xl font-extrabold text-slate-900 dark:text-white tracking-tight">
+                  Chào mừng, {fullName || username}!
+                </h1>
+                <p className="text-xs sm:text-sm text-slate-500 dark:text-slate-400 leading-relaxed">
+                  Tài khoản <strong className="text-slate-800 dark:text-slate-200 font-medium">{role === 'STORE_OWNER' ? 'Chủ Cửa Hàng / Đại Lý' : 'Khách Hàng'}</strong> đã sẵn sàng hoạt động trên hệ sinh thái Smart Order IoT.
+                </p>
+              </div>
+
+              {/* Designer Identity Member Card */}
+              <div className="p-4 sm:p-5 rounded-2xl bg-gradient-to-br from-slate-50 via-white to-sky-50/40 dark:from-[#0d1526] dark:via-[#090e17] dark:to-sky-950/20 border border-slate-200/90 dark:border-slate-800 shadow-[0_4px_24px_rgba(40,125,168,0.06)] relative overflow-hidden">
+                <div className="absolute top-0 right-0 w-32 h-32 rounded-full bg-[#287DA8]/5 blur-2xl pointer-events-none" />
+
+                <div className="flex items-center gap-3.5 pb-3.5 border-b border-slate-200/70 dark:border-slate-800">
+                  <div className="w-11 h-11 rounded-xl bg-gradient-to-tr from-[#287DA8] to-sky-400 text-white font-bold text-sm flex items-center justify-center shadow-xs shrink-0 tracking-wider">
+                    {getInitials(fullName || username || 'SO')}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <h3 className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                        {fullName || username}
+                      </h3>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#287DA8]/10 text-[#287DA8] dark:text-sky-300 text-[10px] font-bold">
+                        {role === 'STORE_OWNER' ? <Store className="w-3 h-3" /> : <User className="w-3 h-3" />}
+                        {role === 'STORE_OWNER' ? 'Đại Lý Phân Phối' : 'Khách Hàng'}
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 dark:text-slate-400 font-mono truncate mt-0.5">
+                      @{username} • {registeredEmail}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-3 pt-3 text-xs">
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-0.5">
+                      {role === 'STORE_OWNER' ? 'Tên Cửa Hàng' : 'Số Điện Thoại'}
+                    </span>
+                    <span className="font-semibold text-slate-800 dark:text-slate-200 truncate block">
+                      {role === 'STORE_OWNER' ? (storeName || 'Đang cập nhật') : (phone || 'Chưa cập nhật')}
+                    </span>
+                  </div>
+                  <div>
+                    <span className="text-[10px] uppercase font-bold text-slate-400 tracking-wider block mb-0.5">
+                      Trạng Thái Tài Khoản
+                    </span>
+                    <span className="inline-flex items-center gap-1.5 font-semibold text-emerald-600 dark:text-emerald-400 text-xs">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                      Sẵn Sàng Hoạt Động
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Action Buttons */}
+              <div className="space-y-2.5 pt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const token = registeredData?.accessToken || registeredData?.token;
+                    const user = registeredData?.user || registeredData?.data?.user;
+                    const refreshToken = registeredData?.refreshToken;
+                    if (token && user) {
+                      login(token, user, refreshToken);
+                      if (['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role)) {
+                        navigate('/store/dashboard');
+                      } else {
+                        navigate('/customer/home');
+                      }
+                    } else {
+                      navigate('/login', {
+                        state: {
+                          email: registeredEmail,
+                          message: 'Đăng ký tài khoản thành công! Hãy nhập mật khẩu để đăng nhập.',
+                        },
+                      });
+                    }
+                  }}
+                  className="w-full py-3.5 px-5 rounded-xl bg-[#287DA8] hover:bg-[#206588] text-white font-semibold text-sm transition-all shadow-[0_4px_16px_rgba(40,125,168,0.28)] hover:shadow-[0_6px_22px_rgba(40,125,168,0.38)] active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer group"
+                >
+                  <span>{role === 'STORE_OWNER' ? 'Vào Bảng Quản Trị Cửa Hàng' : 'Bắt Đầu Mua Sắm & Đặt Hàng'}</span>
+                  <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                </button>
+
+                <div className="text-center pt-1">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      navigate('/login', {
+                        state: {
+                          email: registeredEmail,
+                          message: 'Đăng ký tài khoản thành công! Hãy nhập mật khẩu để đăng nhập.',
+                        },
+                      });
+                    }}
+                    className="text-xs font-medium text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white transition-colors underline-offset-4 hover:underline cursor-pointer"
+                  >
+                    Về Trang Đăng Nhập
+                  </button>
+                </div>
+              </div>
+            </motion.div>
+          ) : (
+            <div className="max-w-md w-full mx-auto space-y-5">
 
             {/* Header: Back Navigation & Bold Title */}
             <div>
@@ -775,6 +803,7 @@ export const RegisterPage: React.FC = () => {
             </div>
 
           </div>
+          )}
         </div>
 
       </div>
