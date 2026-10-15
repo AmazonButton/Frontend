@@ -1,5 +1,5 @@
 import React from 'react';
-import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
 import { Navbar } from './layouts/Navbar';
 import { Sidebar } from './layouts/Sidebar';
 import { Footer } from './layouts/Footer';
@@ -14,10 +14,12 @@ import { StoreDashboard } from './pages/store/StoreDashboard';
 import { StoreDevicesPage } from './pages/store/StoreDevicesPage';
 import { StoreDeviceTemplatesPage } from './pages/store/StoreDeviceTemplatesPage';
 import { StoreProductsPage } from './pages/store/StoreProductsPage';
+import { StoreAnalyticsPage } from './pages/store/StoreAnalyticsPage';
 import { CustomerHomePage } from './pages/customer/CustomerHomePage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminSecurityHubPage } from './pages/admin/AdminSecurityHubPage';
 import { QuickSetupPage } from './pages/QuickSetupPage';
+import { ProfilePage } from './pages/profile/ProfilePage';
 import { useAuth } from './context/AuthContext';
 import { Atmosphere3DBackground, AtmosphereVariant } from './components/3d/Atmosphere3DBackground';
 
@@ -51,12 +53,14 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
   return <>{children}</>;
 };
 
-// Store Shell Layout (with Sidebar)
-const StoreLayout: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+// Store Shell Layout (with persistent Sidebar)
+const StoreLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   return (
     <div className="flex min-h-[calc(100vh-4rem)] w-full bg-[#FBFBFC] dark:bg-zinc-950 relative z-10">
       <Sidebar />
-      <main className="flex-1 min-w-0 w-full p-4 sm:p-5 lg:p-6 overflow-x-hidden">{children}</main>
+      <main className="flex-1 min-w-0 w-full p-4 sm:p-5 lg:p-6 overflow-x-hidden">
+        {children || <Outlet />}
+      </main>
     </div>
   );
 };
@@ -87,7 +91,7 @@ export const App: React.FC = () => {
       {/* 36. Animated Background — Premium 3D Atmosphere */}
       <Atmosphere3DBackground variant={getAtmosphereVariant()} />
       <Navbar />
-      <div className="flex-1 relative z-10">
+      <div className={`flex-1 relative z-10 ${location.pathname === '/' ? '' : 'pt-16'}`}>
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/quick-setup" element={<QuickSetupPage />} />
@@ -98,54 +102,28 @@ export const App: React.FC = () => {
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/403" element={<ForbiddenPage />} />
 
-          {/* Store Routes */}
+          {/* Store Routes with Persistent Shared Sidebar */}
           <Route
-            path="/store/dashboard"
             element={
               <ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF']}>
-                <StoreLayout>
-                  <StoreDashboard />
-                </StoreLayout>
+                <StoreLayout />
               </ProtectedRoute>
             }
-          />
+          >
+            <Route path="/store" element={<Navigate to="/store/dashboard" replace />} />
+            <Route path="/store/dashboard" element={<StoreDashboard />} />
+            <Route path="/store/devices" element={<StoreDevicesPage />} />
+            <Route path="/store/device-templates" element={<StoreDeviceTemplatesPage />} />
+            <Route path="/store/products" element={<StoreProductsPage />} />
+            <Route path="/store/analytics" element={<StoreAnalyticsPage />} />
+          </Route>
+
+          {/* Standalone Store Profile Route (No Trạm Điều Hành sidebar) */}
           <Route
-            path="/store/devices"
+            path="/store/profile"
             element={
               <ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF']}>
-                <StoreLayout>
-                  <StoreDevicesPage />
-                </StoreLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/store/device-templates"
-            element={
-              <ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF']}>
-                <StoreLayout>
-                  <StoreDeviceTemplatesPage />
-                </StoreLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/store/products"
-            element={
-              <ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF']}>
-                <StoreLayout>
-                  <StoreProductsPage />
-                </StoreLayout>
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/store/analytics"
-            element={
-              <ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF']}>
-                <StoreLayout>
-                  <StoreDashboard />
-                </StoreLayout>
+                <ProfilePage />
               </ProtectedRoute>
             }
           />
@@ -156,6 +134,14 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute allowedRoles={['CUSTOMER']}>
                 <CustomerHomePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/customer/profile"
+            element={
+              <ProtectedRoute allowedRoles={['CUSTOMER']}>
+                <ProfilePage />
               </ProtectedRoute>
             }
           />
@@ -174,6 +160,24 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
                 <AdminSecurityHubPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/profile"
+            element={
+              <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+                <ProfilePage />
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Universal Authenticated Profile Route */}
+          <Route
+            path="/profile"
+            element={
+              <ProtectedRoute>
+                <ProfilePage />
               </ProtectedRoute>
             }
           />
