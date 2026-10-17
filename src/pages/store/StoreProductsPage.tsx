@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { api } from '../../services/api';
 import { Product } from '../../types';
 import {
@@ -51,6 +53,9 @@ export const StoreProductsPage: React.FC = () => {
   const [stock, setStock] = useState('100');
   const [imageUrl, setImageUrl] = useState('');
   const [submitLoading, setSubmitLoading] = useState(false);
+
+  // Universal body scroll lock & header submerge
+  useBodyScrollLock(showAddModal);
 
   const fetchProducts = async () => {
     try {
@@ -438,23 +443,29 @@ export const StoreProductsPage: React.FC = () => {
       </div>
 
       {/* Add Product Modal (Framer Motion pop-in physics) */}
-      <AnimatePresence>
-        {showAddModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+      {createPortal(
+        <AnimatePresence>
+          {showAddModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
-              transition={{ duration: 0.15 }}
+              transition={{ duration: 0.22, ease: 'easeOut' }}
               onClick={() => setShowAddModal(false)}
-              className="fixed inset-0 bg-zinc-900/20 backdrop-blur-sm"
+              className="fixed inset-0 bg-slate-950/75 backdrop-blur-sm cursor-pointer"
             />
             <motion.div
-              initial={{ opacity: 0, scale: 0.97, y: 10 }}
+              initial={{ opacity: 0, scale: 0.93, y: 16 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
-              exit={{ opacity: 0, scale: 0.97, y: 10 }}
-              transition={{ duration: 0.2, ease: 'easeOut' }}
-              className="relative z-10 w-full max-w-lg bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-2xl p-5 space-y-4"
+              exit={{ opacity: 0, scale: 0.95, y: 12 }}
+              transition={{
+                type: 'spring',
+                damping: 28,
+                stiffness: 350,
+                mass: 0.8,
+              }}
+              className="relative z-10 w-full max-w-lg bg-white dark:bg-zinc-900 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-2xl p-5 space-y-4 max-h-[90vh] overflow-y-auto"
             >
               <div className="flex items-center justify-between pb-3 border-b border-zinc-200 dark:border-zinc-800">
                 <div>
@@ -598,7 +609,9 @@ export const StoreProductsPage: React.FC = () => {
             </motion.div>
           </div>
         )}
-      </AnimatePresence>
+      </AnimatePresence>,
+      document.body
+    )}
     </div>
   );
 };

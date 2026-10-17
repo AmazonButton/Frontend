@@ -1,6 +1,9 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { api } from '../../services/api';
+import { toast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { subscribeToStore, getSocket } from '../../services/socket';
 import { Device, Product, FleetStats, DeviceTelemetry, DeviceAuditLog } from '../../types';
@@ -69,6 +72,33 @@ const tableRowVariants: Variants = {
     opacity: 1,
     y: 0,
     transition: { duration: 0.2, ease: 'easeOut' },
+  },
+};
+
+const modalBackdropVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: { opacity: 1, transition: { duration: 0.22, ease: 'easeOut' } },
+  exit: { opacity: 0, transition: { duration: 0.18, ease: 'easeIn' } },
+};
+
+const modalDialogVariants: Variants = {
+  hidden: { opacity: 0, scale: 0.93, y: 16 },
+  visible: {
+    opacity: 1,
+    scale: 1,
+    y: 0,
+    transition: {
+      type: 'spring',
+      damping: 28,
+      stiffness: 350,
+      mass: 0.8,
+    },
+  },
+  exit: {
+    opacity: 0,
+    scale: 0.95,
+    y: 12,
+    transition: { duration: 0.18, ease: 'easeIn' },
   },
 };
 
@@ -202,6 +232,20 @@ export const StoreDevicesPage: React.FC = () => {
   // Delete Confirmation Modal State (CRUD: Delete)
   const [deletingDevice, setDeletingDevice] = useState<Device | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
+
+  // Universal body scroll lock & header submerge whenever any modal is open on this page
+  const isAnyModalOpen = Boolean(
+    showWizard ||
+    assigningDevice ||
+    qrModalDevice ||
+    inspectDevice ||
+    showBulkModal ||
+    showCreateModal ||
+    editingDevice ||
+    deletingDevice ||
+    simulationResult
+  );
+  useBodyScrollLock(isAnyModalOpen);
 
   // Random ID / Serial Generators
   const generateRandomDeviceId = () => {
@@ -437,10 +481,10 @@ export const StoreDevicesPage: React.FC = () => {
       const res = await api.patch(`/devices/${deviceId}/extend-warranty`, { months });
       if (res.data.success) {
         await fetchData();
-        alert(`Đã gia hạn thành công nút [${deviceId}] thêm ${months} tháng!`);
+        toast.success(`Đã gia hạn thành công nút [${deviceId}] thêm ${months} tháng!`);
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể gia hạn');
+      toast.error(err.response?.data?.message || 'Không thể gia hạn');
     }
   };
 
@@ -454,7 +498,7 @@ export const StoreDevicesPage: React.FC = () => {
         fetchData();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Mô phỏng bấm nút thất bại');
+      toast.error(err.response?.data?.message || 'Mô phỏng bấm nút thất bại');
     } finally {
       setSimulatingDeviceId(null);
     }
@@ -466,11 +510,11 @@ export const StoreDevicesPage: React.FC = () => {
     try {
       const res = await api.post(`/devices/${device.deviceId}/re-pair`);
       if (res.data.success) {
-        alert('Đã sinh mã QR và token ghép nối mới!');
+        toast.success('Đã sinh mã QR và token ghép nối mới!');
         fetchData();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể tạo lại mã ghép nối');
+      toast.error(err.response?.data?.message || 'Không thể tạo lại mã ghép nối');
     }
   };
 
@@ -486,11 +530,12 @@ export const StoreDevicesPage: React.FC = () => {
         customName: assignCustomName || undefined,
       });
       if (res.data.success) {
+        toast.success(`Đã gán sản phẩm cho nút [${assigningDevice.deviceId}] thành công!`);
         setAssigningDevice(null);
         fetchData();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể gán sản phẩm');
+      toast.error(err.response?.data?.message || 'Không thể gán sản phẩm');
     } finally {
       setAssignLoading(false);
     }
@@ -1163,7 +1208,7 @@ export const StoreDevicesPage: React.FC = () => {
                                     handleOpenEditModal(device);
                                     setOpenMenuId(null);
                                   }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                                 >
                                   <Edit3 className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
                                   <span>Chỉnh sửa thông tin</span>
@@ -1177,7 +1222,7 @@ export const StoreDevicesPage: React.FC = () => {
                                     setAssignCustomName(device.customName || '');
                                     setOpenMenuId(null);
                                   }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                                 >
                                   <Tag className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
                                   <span>Đổi SKU sản phẩm</span>
@@ -1189,7 +1234,7 @@ export const StoreDevicesPage: React.FC = () => {
                                     setQrModalDevice(device);
                                     setOpenMenuId(null);
                                   }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                                 >
                                   <QrCode className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
                                   <span>Xem & In Mã QR</span>
@@ -1201,7 +1246,7 @@ export const StoreDevicesPage: React.FC = () => {
                                     handleInspect(device);
                                     setOpenMenuId(null);
                                   }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                                 >
                                   <Activity className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
                                   <span>Telemetry & Nhật ký</span>
@@ -1215,7 +1260,7 @@ export const StoreDevicesPage: React.FC = () => {
                                     handleUpdateBattery(device.deviceId, 100);
                                     setOpenMenuId(null);
                                   }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                                 >
                                   <Battery className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
                                   <span>Sạc pin đầy 100%</span>
@@ -1227,7 +1272,7 @@ export const StoreDevicesPage: React.FC = () => {
                                     handleExtendWarranty(device.deviceId, 12);
                                     setOpenMenuId(null);
                                   }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                                 >
                                   <Clock className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
                                   <span>Gia hạn (+1 năm)</span>
@@ -1239,7 +1284,7 @@ export const StoreDevicesPage: React.FC = () => {
                                     handleRepair(device);
                                     setOpenMenuId(null);
                                   }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                                 >
                                   <RefreshCw className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
                                   <span>Tái cấp Token ghép nối</span>
@@ -1251,7 +1296,7 @@ export const StoreDevicesPage: React.FC = () => {
                                     handleToggleStatus(device);
                                     setOpenMenuId(null);
                                   }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 transition-colors"
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                                 >
                                   <Power className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
                                   <span>{device.status === 'ACTIVE' ? 'Tạm dừng nút' : 'Kích hoạt lại'}</span>
@@ -1265,7 +1310,7 @@ export const StoreDevicesPage: React.FC = () => {
                                     setDeletingDevice(device);
                                     setOpenMenuId(null);
                                   }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center gap-2 transition-colors"
+                                  className="w-full px-3 py-1.5 text-left hover:bg-rose-50 dark:hover:bg-rose-950/40 text-rose-600 dark:text-rose-400 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
                                 >
                                   <Trash2 className="w-3.5 h-3.5" strokeWidth={1.5} />
                                   <span>Xóa thiết bị</span>
@@ -1288,11 +1333,32 @@ export const StoreDevicesPage: React.FC = () => {
       {/* ========================================================================= */}
       {/* 1. DEVICE SETUP & CONFIGURATION MODAL (CODE / QR / NEW)                   */}
       {/* ========================================================================= */}
-      {showWizard && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#0F172A] rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150 space-y-5">
-            {/* Wizard Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+      {createPortal(
+        <AnimatePresence>
+          {showWizard && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm cursor-pointer"
+                onClick={() => {
+                  setShowWizard(false);
+                  setFoundDeviceForConfig(null);
+                  setWizardError(null);
+                  setStoreCameraActive(false);
+                }}
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-[#0F172A] rounded-2xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5 max-h-[90vh] overflow-y-auto"
+              >
+                {/* Wizard Header */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div>
                 <h2 className="text-lg font-bold text-slate-900 dark:text-white">
                   Thêm & Cấu Hình Nút Bấm
@@ -1322,10 +1388,10 @@ export const StoreDevicesPage: React.FC = () => {
                   setWizardMode('PAIR_EXISTING');
                   setWizardError(null);
                 }}
-                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                   wizardMode === 'PAIR_EXISTING'
-                    ? 'bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-800 text-[#287DA8] shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Hash className="w-4 h-4" />
@@ -1337,10 +1403,10 @@ export const StoreDevicesPage: React.FC = () => {
                   setWizardMode('CREATE_NEW');
                   setWizardError(null);
                 }}
-                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
+                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer ${
                   wizardMode === 'CREATE_NEW'
-                    ? 'bg-white dark:bg-slate-800 text-sky-600 dark:text-sky-400 shadow-sm'
-                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900'
+                    ? 'bg-white dark:bg-slate-800 text-[#287DA8] shadow-sm'
+                    : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
                 }`}
               >
                 <Plus className="w-4 h-4" />
@@ -1430,16 +1496,16 @@ export const StoreDevicesPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => setStoreCameraActive(true)}
-                            className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5"
+                            className="px-4 py-2.5 rounded-xl border border-slate-200 dark:border-slate-800 hover:bg-slate-50 dark:hover:bg-slate-800 text-slate-700 dark:text-slate-300 font-bold text-xs flex items-center gap-1.5 cursor-pointer transition-colors"
                           >
-                            <Camera className="w-4 h-4 text-sky-500" />
+                            <Camera className="w-4 h-4 text-[#287DA8]" />
                             <span>Quét Camera QR</span>
                           </button>
                           <button
                             type="button"
                             onClick={() => handleStoreLookupCode()}
                             disabled={wizardLoading || !quickCodeInput.trim()}
-                            className="flex-1 py-2.5 rounded-xl bg-sky-600 hover:bg-sky-700 disabled:opacity-50 text-white font-bold text-xs shadow-sm flex items-center justify-center gap-2"
+                            className="flex-1 py-2.5 rounded-xl bg-[#287DA8] hover:bg-[#206588] disabled:opacity-50 text-white font-bold text-xs shadow-[0_2px_8px_rgba(40,125,168,0.25)] flex items-center justify-center gap-2 cursor-pointer transition-all"
                           >
                             {wizardLoading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <span>TÌM THIẾT BỊ NÀY</span>}
                           </button>
@@ -1706,7 +1772,7 @@ export const StoreDevicesPage: React.FC = () => {
                           setWizardError(null);
                           setWizardStep(2);
                         }}
-                        className="px-5 py-2.5 text-xs font-bold rounded-xl bg-sky-600 hover:bg-sky-700 text-white shadow-sm flex items-center space-x-1.5"
+                        className="px-5 py-2.5 text-xs font-bold rounded-xl bg-[#287DA8] hover:bg-[#206588] text-white shadow-[0_2px_8px_rgba(40,125,168,0.25)] flex items-center space-x-1.5 cursor-pointer transition-all"
                       >
                         <span>Tiếp tục xác nhận</span>
                         <ChevronRight className="w-4 h-4" />
@@ -1734,7 +1800,7 @@ export const StoreDevicesPage: React.FC = () => {
 
                       <div className="flex justify-between py-1.5 border-b border-slate-200/50 dark:border-slate-800">
                         <span className="text-slate-500">Mã Device ID:</span>
-                        <span className="font-mono font-bold text-sky-600">
+                        <span className="tabular-nums font-bold text-[#287DA8]">
                           {wizardForm.deviceId || '(Tự động sinh)'}
                         </span>
                       </div>
@@ -1763,33 +1829,52 @@ export const StoreDevicesPage: React.FC = () => {
                 )}
               </div>
             )}
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>,
+    document.body
+  )}
 
       {/* ========================================================================= */}
       {/* 2. QUICK ASSIGN / CHANGE PRODUCT MODAL                                    */}
       {/* ========================================================================= */}
-      {assigningDevice && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#0F172A] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 animate-in fade-in zoom-in-95 duration-200 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
+      {createPortal(
+        <AnimatePresence>
+          {assigningDevice && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="fixed inset-0 bg-slate-950/75 backdrop-blur-md cursor-pointer"
+                onClick={() => setAssigningDevice(null)}
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-[#0F172A] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 space-y-4 max-h-[90vh] overflow-y-auto"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
               <div className="flex items-center space-x-2">
-                <Tag className="w-5 h-5 text-cyan-500" />
+                <Tag className="w-5 h-5 text-[#287DA8]" />
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">
                   Đổi Ánh Xạ Sản Phẩm / SKU
                 </h3>
               </div>
               <button
                 onClick={() => setAssigningDevice(null)}
-                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Thiết bị: <strong className="font-mono text-cyan-500">{assigningDevice.deviceId}</strong> ({assigningDevice.customName || 'Không tên'}).
+              Thiết bị: <strong className="tabular-nums font-bold text-[#287DA8]">{assigningDevice.deviceId}</strong> ({assigningDevice.customName || 'Không tên'}).
               Khi đổi sản phẩm, lần bấm tiếp theo sẽ đặt sản phẩm mới ngay tức thì.
             </p>
 
@@ -1802,7 +1887,7 @@ export const StoreDevicesPage: React.FC = () => {
                   required
                   value={selectedProductId}
                   onChange={(e) => setSelectedProductId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-black/50 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                  className="w-full px-3.5 py-2.5 text-xs rounded-lg bg-slate-50 dark:bg-black/50 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
                 >
                   <option value="">-- Chọn sản phẩm --</option>
                   {products.map((p) => (
@@ -1822,7 +1907,7 @@ export const StoreDevicesPage: React.FC = () => {
                   placeholder="VD: Nút Gas Bếp Chính"
                   value={assignCustomName}
                   onChange={(e) => setAssignCustomName(e.target.value)}
-                  className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-black/50 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                  className="w-full px-3.5 py-2.5 text-xs rounded-lg bg-slate-50 dark:bg-black/50 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
                 />
               </div>
 
@@ -1830,39 +1915,58 @@ export const StoreDevicesPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setAssigningDevice(null)}
-                  className="px-4 py-2 text-xs font-semibold rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300"
+                  className="px-4 py-2 text-sm font-medium rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                 >
                   Hủy
                 </button>
                 <button
                   type="submit"
                   disabled={assignLoading}
-                  className="px-5 py-2 text-xs font-bold rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 shadow-md shadow-cyan-500/20"
+                  className="rounded-lg bg-[#287DA8] hover:bg-[#206588] text-white px-5 py-2 text-sm font-semibold shadow-[0_2px_8px_rgba(40,125,168,0.25)] hover:shadow-[0_4px_12px_rgba(40,125,168,0.35)] transition-all active:scale-[0.98] disabled:opacity-60 cursor-pointer"
                 >
                   {assignLoading ? 'Đang lưu...' : 'Lưu Ánh Xạ Mới'}
                 </button>
               </div>
             </form>
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>,
+    document.body
+  )}
 
       {/* ========================================================================= */}
       {/* 3. SECURE QR CODE PAIRING MODAL                                           */}
       {/* ========================================================================= */}
-      {qrModalDevice && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#0F172A] rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 animate-in fade-in zoom-in-95 duration-200 space-y-4 text-center">
-            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-white/5">
+      {createPortal(
+        <AnimatePresence>
+          {qrModalDevice && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="fixed inset-0 bg-slate-950/75 backdrop-blur-md cursor-pointer"
+                onClick={() => setQrModalDevice(null)}
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-[#0F172A] rounded-3xl max-w-sm w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 space-y-4 text-center max-h-[90vh] overflow-y-auto"
+              >
+                <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-white/5">
               <div className="flex items-center space-x-2">
-                <QrCode className="w-5 h-5 text-cyan-500" />
+                <QrCode className="w-5 h-5 text-[#287DA8]" />
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">
                   Tem QR Ghép Nối Thiết Bị
                 </h3>
               </div>
               <button
                 onClick={() => setQrModalDevice(null)}
-                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1876,7 +1980,7 @@ export const StoreDevicesPage: React.FC = () => {
 
               <div className="py-1 text-xs text-slate-600 font-medium">
                 Device
-                <p className="text-base font-mono font-black text-slate-950 tracking-tight">{qrModalDevice.deviceId}</p>
+                <p className="text-base tabular-nums font-black text-slate-950 tracking-tight">{qrModalDevice.deviceId}</p>
               </div>
 
               <div className="p-2 bg-white rounded-xl border border-slate-100 shadow-inner inline-block my-1.5">
@@ -1894,49 +1998,68 @@ export const StoreDevicesPage: React.FC = () => {
             </div>
 
             <p className="text-[11px] text-slate-500 dark:text-slate-400">
-              Payload: <span className="font-mono text-[10px] break-all">{qrModalDevice.qrPayload}</span>
+              Payload: <span className="tabular-nums text-[10px] break-all">{qrModalDevice.qrPayload}</span>
             </p>
 
             <div className="flex items-center justify-center gap-2 pt-2">
               <button
                 onClick={() => window.print()}
-                className="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold flex items-center space-x-1.5 shadow-md shadow-cyan-500/20"
+                className="px-4 py-2 rounded-lg bg-[#287DA8] hover:bg-[#206588] text-white text-xs font-semibold flex items-center space-x-1.5 shadow-[0_2px_8px_rgba(40,125,168,0.25)] hover:shadow-[0_4px_12px_rgba(40,125,168,0.35)] transition-all cursor-pointer"
               >
                 <Printer className="w-4 h-4" />
                 <span>In Tem Dán Hộp</span>
               </button>
               <button
                 onClick={() => setQrModalDevice(null)}
-                className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold"
+                className="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
               >
                 Đóng
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>,
+    document.body
+  )}
 
       {/* ========================================================================= */}
       {/* 4. TELEMETRY & AUDIT LOGS MODAL                                           */}
       {/* ========================================================================= */}
-      {inspectDevice && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#0F172A] rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 animate-in fade-in zoom-in-95 duration-200 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
+      {createPortal(
+        <AnimatePresence>
+          {inspectDevice && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="fixed inset-0 bg-slate-950/75 backdrop-blur-md cursor-pointer"
+                onClick={() => setInspectDevice(null)}
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-[#0F172A] rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 space-y-4 max-h-[90vh] overflow-y-auto"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
               <div>
                 <div className="flex items-center gap-2">
-                  <Activity className="w-5 h-5 text-cyan-500" />
+                  <Activity className="w-5 h-5 text-[#287DA8]" />
                   <h3 className="text-base font-bold text-slate-900 dark:text-white">
                     Thông Số Telemetry & Nhật Ký Kiểm Toán
                   </h3>
                 </div>
-                <p className="text-xs font-mono text-slate-500 dark:text-slate-400 mt-0.5">
+                <p className="text-xs tabular-nums text-slate-500 dark:text-slate-400 mt-0.5">
                   Device: {inspectDevice.deviceId} ({inspectDevice.customName || 'Smart Button'})
                 </p>
               </div>
               <button
                 onClick={() => setInspectDevice(null)}
-                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white"
+                className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1946,20 +2069,20 @@ export const StoreDevicesPage: React.FC = () => {
             <div className="flex border-b border-slate-200 dark:border-white/10 text-xs font-bold">
               <button
                 onClick={() => setActiveTab('telemetry')}
-                className={`pb-2.5 px-4 transition-colors ${
+                className={`pb-2.5 px-4 transition-colors cursor-pointer ${
                   activeTab === 'telemetry'
-                    ? 'border-b-2 border-cyan-500 text-cyan-600 dark:text-cyan-400'
-                    : 'text-slate-500'
+                    ? 'border-b-2 border-[#287DA8] text-[#287DA8]'
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                 }`}
               >
                 Lịch Sử Telemetry Phần Cứng ({telemetries.length})
               </button>
               <button
                 onClick={() => setActiveTab('audit')}
-                className={`pb-2.5 px-4 transition-colors ${
+                className={`pb-2.5 px-4 transition-colors cursor-pointer ${
                   activeTab === 'audit'
-                    ? 'border-b-2 border-cyan-500 text-cyan-600 dark:text-cyan-400'
-                    : 'text-slate-500'
+                    ? 'border-b-2 border-[#287DA8] text-[#287DA8]'
+                    : 'text-slate-500 hover:text-slate-700 dark:hover:text-slate-300'
                 }`}
               >
                 Nhật Ký Đổi Cấu Hình (Audit Logs) ({auditLogs.length})
@@ -1968,7 +2091,7 @@ export const StoreDevicesPage: React.FC = () => {
 
             {/* Tab 1: Telemetry */}
             {activeTab === 'telemetry' && (
-              <div className="max-h-72 overflow-y-auto space-y-2 font-mono text-xs">
+              <div className="max-h-72 overflow-y-auto space-y-2 tabular-nums text-xs">
                 {telemetries.length === 0 ? (
                   <p className="text-slate-400 py-6 text-center">Chưa có bản tin telemetry nào được gửi.</p>
                 ) : (
@@ -1994,7 +2117,7 @@ export const StoreDevicesPage: React.FC = () => {
                           <td className="py-2 text-slate-600 dark:text-slate-300">
                             {t.voltageMv} mV
                           </td>
-                          <td className="py-2 text-cyan-600 dark:text-cyan-400">
+                          <td className="py-2 text-[#287DA8] font-semibold">
                             {t.wifiRSSI} dBm
                           </td>
                           <td className="py-2 text-slate-500">{t.bootReason}</td>
@@ -2019,7 +2142,7 @@ export const StoreDevicesPage: React.FC = () => {
                         className="p-3 rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200/60 dark:border-white/5 space-y-1"
                       >
                         <div className="flex items-center justify-between text-[11px]">
-                          <span className="font-mono font-bold text-cyan-500">{log.action}</span>
+                          <span className="tabular-nums font-bold text-[#287DA8]">{log.action}</span>
                           <span className="text-slate-400 font-mono">
                             {new Date(log.createdAt).toLocaleString('vi-VN')}
                           </span>
@@ -2049,17 +2172,36 @@ export const StoreDevicesPage: React.FC = () => {
                 Đóng
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>,
+    document.body
+  )}
 
       {/* ========================================================================= */}
       {/* 5. BULK CSV IMPORT MODAL                                                  */}
       {/* ========================================================================= */}
-      {showBulkModal && (
-        <div className="fixed inset-0 bg-slate-950/70 backdrop-blur-md z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#0F172A] rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 animate-in fade-in zoom-in-95 duration-200 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
+      {createPortal(
+        <AnimatePresence>
+          {showBulkModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="fixed inset-0 bg-slate-950/75 backdrop-blur-md cursor-pointer"
+                onClick={() => setShowBulkModal(false)}
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-[#0F172A] rounded-3xl max-w-2xl w-full p-6 shadow-2xl border border-slate-200 dark:border-white/10 space-y-4 max-h-[90vh] overflow-y-auto"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-white/5">
               <div className="flex items-center space-x-2">
                 <FileSpreadsheet className="w-5 h-5 text-emerald-500" />
                 <h3 className="text-base font-bold text-slate-900 dark:text-white">
@@ -2075,7 +2217,7 @@ export const StoreDevicesPage: React.FC = () => {
             </div>
 
             <p className="text-xs text-slate-500 dark:text-slate-400">
-              Định dạng CSV hỗ trợ: <code className="text-cyan-500 font-mono">deviceId,serialNumber,macAddress,customName,productSku</code>.
+              Định dạng CSV hỗ trợ: <code className="text-[#287DA8] font-semibold tabular-nums">deviceId,serialNumber,macAddress,customName,productSku</code>.
               Hệ thống sẽ kiểm tra trùng Device ID, trùng MAC và gán SKU tự động.
             </p>
 
@@ -2084,14 +2226,14 @@ export const StoreDevicesPage: React.FC = () => {
                 rows={5}
                 value={csvText}
                 onChange={(e) => setCsvText(e.target.value)}
-                className="w-full p-3 font-mono text-xs rounded-xl bg-slate-50 dark:bg-black/50 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                className="w-full p-3 tabular-nums text-xs rounded-xl bg-slate-50 dark:bg-black/50 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
               />
               <button
                 type="button"
                 onClick={handleParseCsv}
-                className="mt-2 px-3.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-200 flex items-center gap-1.5"
+                className="mt-2 px-3.5 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold hover:bg-slate-200 flex items-center gap-1.5 cursor-pointer transition-colors"
               >
-                <Search className="w-3.5 h-3.5 text-blue-600 dark:text-cyan-400" />
+                <Search className="w-3.5 h-3.5 text-[#287DA8]" />
                 <span>Phân Tích & Kiểm Tra Tính Hợp Lệ</span>
               </button>
             </div>
@@ -2120,7 +2262,7 @@ export const StoreDevicesPage: React.FC = () => {
                   Xem trước dữ liệu ({bulkPreview.length} dòng):
                 </div>
                 <div className="max-h-40 overflow-y-auto border border-slate-200 dark:border-white/10 rounded-xl">
-                  <table className="w-full text-left text-[11px] font-mono">
+                  <table className="w-full text-left text-[11px] tabular-nums">
                     <thead className="bg-slate-50 dark:bg-slate-900 text-slate-500 border-b border-slate-200 dark:border-white/10">
                       <tr>
                         <th className="p-2">Device ID</th>
@@ -2135,7 +2277,7 @@ export const StoreDevicesPage: React.FC = () => {
                           <td className="p-2 font-bold text-slate-900 dark:text-white">{r.deviceId}</td>
                           <td className="p-2 text-slate-500">{r.macAddress || '-'}</td>
                           <td className="p-2 text-slate-700 dark:text-slate-300">{r.customName || '-'}</td>
-                          <td className="p-2 text-cyan-600 dark:text-cyan-400">{r.productSku || '-'}</td>
+                          <td className="p-2 text-[#287DA8] font-semibold">{r.productSku || '-'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -2161,285 +2303,315 @@ export const StoreDevicesPage: React.FC = () => {
                 {bulkLoading ? 'Đang nhập...' : `Xác Nhận Nhập ${bulkPreview.length} Nút Bấm`}
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>,
+    document.body
+  )}
       {/* ========================================================================= */}
       {/* CRUD: 1. CREATE DEVICE MODAL                                              */}
       {/* ========================================================================= */}
-      {showCreateModal && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#0F172A] rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150 space-y-5">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center border border-cyan-500/20">
-                  <Plus className="w-5 h-5" />
-                </div>
-                <div>
-                  <h2 className="text-base font-bold text-slate-900 dark:text-white">
-                    Tạo Nút Bấm IoT Mới
-                  </h2>
-                  <p className="text-xs text-slate-500 dark:text-slate-400">
-                    Thêm thiết bị Smart Order Button vào hạm đội của cửa hàng
-                  </p>
-                </div>
-              </div>
-              <button
+      {createPortal(
+        <AnimatePresence>
+          {showCreateModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm cursor-pointer"
                 onClick={() => setShowCreateModal(false)}
-                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600"
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-[#0F172A] rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5 max-h-[90vh] overflow-y-auto"
               >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {createError && (
-              <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-xs text-rose-600 dark:text-rose-400 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 flex-shrink-0" />
-                <span>{createError}</span>
-              </div>
-            )}
-
-            <form onSubmit={handleCreateDeviceSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Mã Thiết Bị (Device ID) *
-                  </label>
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      required
-                      value={createForm.deviceId}
-                      onChange={(e) =>
-                        setCreateForm({ ...createForm, deviceId: e.target.value.toUpperCase() })
-                      }
-                      className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
-                      placeholder="SOB-000101"
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCreateForm({ ...createForm, deviceId: generateRandomDeviceId() })
-                      }
-                      className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500"
-                      title="Sinh mã ngẫu nhiên"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Số Serial Phần Cứng *
-                  </label>
-                  <div className="flex gap-1.5">
-                    <input
-                      type="text"
-                      required
-                      value={createForm.serialNumber}
-                      onChange={(e) =>
-                        setCreateForm({ ...createForm, serialNumber: e.target.value })
-                      }
-                      className="w-full px-3 py-2 text-xs font-mono rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
-                      placeholder="ESP32-XXXX"
-                    />
-                    <button
-                      type="button"
-                      onClick={() =>
-                        setCreateForm({ ...createForm, serialNumber: generateRandomSerialNumber() })
-                      }
-                      className="p-2 rounded-xl bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 text-slate-500"
-                      title="Sinh serial ngẫu nhiên"
-                    >
-                      <RefreshCw className="w-3.5 h-3.5" />
-                    </button>
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Tên Nút Bấm Hiển Thị *
-                  </label>
-                  <input
-                    type="text"
-                    required
-                    value={createForm.customName}
-                    onChange={(e) => setCreateForm({ ...createForm, customName: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
-                    placeholder="VD: Nút Lavie Bếp B1"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Địa chỉ MAC (Tùy chọn)
-                  </label>
-                  <input
-                    type="text"
-                    value={createForm.macAddress}
-                    onChange={(e) => setCreateForm({ ...createForm, macAddress: e.target.value })}
-                    className="w-full px-3 py-2 text-xs font-mono rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
-                    placeholder="24:6F:28:AB:CD:12"
-                  />
-                </div>
-              </div>
-
-              {/* Product Mapping & Quantity */}
-              <div className="p-3.5 rounded-2xl bg-cyan-500/5 dark:bg-cyan-500/10 border border-cyan-500/20 space-y-3">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-600 dark:text-cyan-400">
-                  <Tag className="w-3.5 h-3.5" />
-                  <span>Ánh Xạ Sản Phẩm Đặt Hàng Nhanh (1 Chạm)</span>
-                </div>
-
-                <div className="grid grid-cols-3 gap-3">
-                  <div className="col-span-2">
-                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                      Sản phẩm được giao
-                    </label>
-                    <select
-                      value={createForm.productId}
-                      onChange={(e) => setCreateForm({ ...createForm, productId: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
-                    >
-                      <option value="">-- Chưa gán sản phẩm --</option>
-                      {products.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} - {p.price.toLocaleString()} ₫ ({p.unit})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
                   <div>
-                    <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
-                      Số lượng mặc định
-                    </label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={99}
-                      value={createForm.defaultQuantity}
-                      onChange={(e) =>
-                        setCreateForm({ ...createForm, defaultQuantity: Number(e.target.value) || 1 })
-                      }
-                      className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30 text-center"
-                    />
+                    <h2 className="text-base font-bold text-slate-900 dark:text-white">
+                      Tạo Nút Bấm IoT Mới
+                    </h2>
+                    <p className="text-xs text-slate-500 dark:text-slate-400">
+                      Thêm thiết bị Smart Order Button vào hạm đội của cửa hàng
+                    </p>
                   </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Vị Trí Lắp Đặt
-                  </label>
-                  <input
-                    type="text"
-                    value={createForm.location}
-                    onChange={(e) => setCreateForm({ ...createForm, location: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
-                    placeholder="VD: Phòng Bếp Tầng 2"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Mô Tả / Ghi Chú
-                  </label>
-                  <input
-                    type="text"
-                    value={createForm.description}
-                    onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
-                    placeholder="Ghi chú thêm..."
-                  />
-                </div>
-              </div>
-
-              {/* Status, Battery & Expiration Configuration */}
-              <div className="grid grid-cols-3 gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-slate-800">
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Trạng Thái Ban Đầu
-                  </label>
-                  <select
-                    value={createForm.status}
-                    onChange={(e) => setCreateForm({ ...createForm, status: e.target.value })}
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                  <button
+                    onClick={() => setShowCreateModal(false)}
+                    className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
                   >
-                    <option value="ACTIVE">Hoạt Động (ACTIVE)</option>
-                    <option value="READY_FOR_CUSTOMER">Sẵn Sàng Giao Khách</option>
-                    <option value="DISABLED">Tạm Dừng (DISABLED)</option>
-                  </select>
+                    <X className="w-5 h-5" />
+                  </button>
                 </div>
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Dung Lượng Pin (%)
-                  </label>
-                  <input
-                    type="number"
-                    min={0}
-                    max={100}
-                    value={createForm.batteryLevel}
-                    onChange={(e) => setCreateForm({ ...createForm, batteryLevel: Number(e.target.value) })}
-                    className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30 text-center"
-                  />
-                </div>
+                {createError && (
+                  <div className="p-3 rounded-xl bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-xs text-rose-600 dark:text-rose-400 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 flex-shrink-0" />
+                    <span>{createError}</span>
+                  </div>
+                )}
 
-                <div>
-                  <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
-                    Thời Hạn Sử Dụng
-                  </label>
-                  <input
-                    type="date"
-                    value={createForm.expiresAt}
-                    onChange={(e) => setCreateForm({ ...createForm, expiresAt: e.target.value })}
-                    className="w-full px-3 py-2 text-xs font-mono rounded-xl bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
-                  />
-                </div>
-              </div>
+                <form onSubmit={handleCreateDeviceSubmit} className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Mã Thiết Bị (Device ID) *
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          required
+                          value={createForm.deviceId}
+                          onChange={(e) =>
+                            setCreateForm({ ...createForm, deviceId: e.target.value.toUpperCase() })
+                          }
+                          className="w-full pl-3 pr-9 py-2 text-xs tabular-nums font-bold rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                          placeholder="SOB-000101"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCreateForm({ ...createForm, deviceId: generateRandomDeviceId() })
+                          }
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#287DA8] dark:hover:text-[#287DA8] p-1 transition-colors cursor-pointer"
+                          title="Sinh mã ngẫu nhiên"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
 
-              <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-700"
-                >
-                  Hủy Bỏ
-                </button>
-                <button
-                  type="submit"
-                  disabled={createLoading}
-                  className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold shadow-md shadow-cyan-500/25 flex items-center space-x-1.5"
-                >
-                  {createLoading ? (
-                    <span>Đang tạo nút...</span>
-                  ) : (
-                    <>
-                      <Plus className="w-4 h-4" />
-                      <span>Xác Nhận Tạo Nút Bấm</span>
-                    </>
-                  )}
-                </button>
-              </div>
-            </form>
-          </div>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Số Serial Phần Cứng *
+                      </label>
+                      <div className="relative">
+                        <input
+                          type="text"
+                          required
+                          value={createForm.serialNumber}
+                          onChange={(e) =>
+                            setCreateForm({ ...createForm, serialNumber: e.target.value })
+                          }
+                          className="w-full pl-3 pr-9 py-2 text-xs tabular-nums rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                          placeholder="ESP32-XXXX"
+                        />
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCreateForm({ ...createForm, serialNumber: generateRandomSerialNumber() })
+                          }
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-[#287DA8] dark:hover:text-[#287DA8] p-1 transition-colors cursor-pointer"
+                          title="Sinh serial ngẫu nhiên"
+                        >
+                          <RefreshCw className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Tên Nút Bấm Hiển Thị *
+                      </label>
+                      <input
+                        type="text"
+                        required
+                        value={createForm.customName}
+                        onChange={(e) => setCreateForm({ ...createForm, customName: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                        placeholder="VD: Nút Lavie Bếp B1"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Địa chỉ MAC (Tùy chọn)
+                      </label>
+                      <input
+                        type="text"
+                        value={createForm.macAddress}
+                        onChange={(e) => setCreateForm({ ...createForm, macAddress: e.target.value })}
+                        className="w-full px-3 py-2 text-xs tabular-nums rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                        placeholder="24:6F:28:AB:CD:12"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Product Mapping & Quantity (Flat layout, single divider) */}
+                  <div className="border-t border-slate-100 dark:border-slate-800 pt-4 space-y-3">
+                    <div className="flex items-center gap-1.5 text-xs font-bold text-slate-700 dark:text-slate-300">
+                      <Tag className="w-3.5 h-3.5 text-[#287DA8]" />
+                      <span>Ánh Xạ Sản Phẩm Đặt Hàng Nhanh (1 Chạm)</span>
+                    </div>
+
+                    <div className="grid grid-cols-3 gap-3">
+                      <div className="col-span-2">
+                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                          Sản phẩm được giao
+                        </label>
+                        <select
+                          value={createForm.productId}
+                          onChange={(e) => setCreateForm({ ...createForm, productId: e.target.value })}
+                          className="w-full px-3 py-2 pr-10 truncate text-xs rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                        >
+                          <option value="">-- Chưa gán sản phẩm --</option>
+                          {products.map((p) => (
+                            <option key={p.id} value={p.id}>
+                              {p.name} - {p.price.toLocaleString()} ₫ ({p.unit})
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div>
+                        <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
+                          Số lượng mặc định
+                        </label>
+                        <input
+                          type="number"
+                          min={1}
+                          max={99}
+                          value={createForm.defaultQuantity}
+                          onChange={(e) =>
+                            setCreateForm({ ...createForm, defaultQuantity: Number(e.target.value) || 1 })
+                          }
+                          className="w-full px-3 py-2 text-xs tabular-nums font-bold rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 text-left transition-all"
+                        />
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Vị Trí Lắp Đặt
+                      </label>
+                      <input
+                        type="text"
+                        value={createForm.location}
+                        onChange={(e) => setCreateForm({ ...createForm, location: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                        placeholder="VD: Phòng Bếp Tầng 2"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Mô Tả / Ghi Chú
+                      </label>
+                      <input
+                        type="text"
+                        value={createForm.description}
+                        onChange={(e) => setCreateForm({ ...createForm, description: e.target.value })}
+                        className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                        placeholder="Ghi chú thêm..."
+                      />
+                    </div>
+                  </div>
+
+                  {/* Status, Battery & Expiration Configuration (Flat layout, single divider) */}
+                  <div className="grid grid-cols-3 gap-3 border-t border-slate-100 dark:border-slate-800 pt-4">
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Trạng Thái Ban Đầu
+                      </label>
+                      <select
+                        value={createForm.status}
+                        onChange={(e) => setCreateForm({ ...createForm, status: e.target.value })}
+                        className="w-full px-3 py-2 pr-10 truncate text-xs font-semibold rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                      >
+                        <option value="ACTIVE">Đang hoạt động</option>
+                        <option value="READY_FOR_CUSTOMER">Sẵn Sàng Giao Khách</option>
+                        <option value="DISABLED">Tạm Dừng (DISABLED)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Dung Lượng Pin (%)
+                      </label>
+                      <input
+                        type="number"
+                        min={0}
+                        max={100}
+                        value={createForm.batteryLevel}
+                        onChange={(e) => setCreateForm({ ...createForm, batteryLevel: Number(e.target.value) })}
+                        className="w-full px-3 py-2 text-xs tabular-nums font-bold rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 text-left transition-all"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
+                        Thời Hạn Sử Dụng
+                      </label>
+                      <input
+                        type="date"
+                        value={createForm.expiresAt}
+                        onChange={(e) => setCreateForm({ ...createForm, expiresAt: e.target.value })}
+                        className="w-full px-3 py-2 text-xs tabular-nums rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
+                    <button
+                      type="button"
+                      onClick={() => setShowCreateModal(false)}
+                      className="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
+                    >
+                      Hủy Bỏ
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={createLoading}
+                      className="rounded-lg bg-[#287DA8] hover:bg-[#206588] text-white px-5 py-2 text-sm font-semibold shadow-[0_2px_8px_rgba(40,125,168,0.25)] hover:shadow-[0_4px_12px_rgba(40,125,168,0.35)] transition-all active:scale-[0.98] disabled:opacity-60 flex items-center justify-center cursor-pointer"
+                    >
+                      {createLoading ? (
+                        <span>Đang tạo nút...</span>
+                      ) : (
+                        <span>Xác Nhận Tạo Nút Bấm</span>
+                      )}
+                    </button>
+                  </div>
+                </form>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>,
+    document.body
+  )}
 
       {/* ========================================================================= */}
       {/* CRUD: 2. EDIT DEVICE MODAL                                                */}
       {/* ========================================================================= */}
-      {editingDevice && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#0F172A] rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 animate-in fade-in zoom-in-95 duration-150 space-y-5">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+      {createPortal(
+        <AnimatePresence>
+          {editingDevice && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm cursor-pointer"
+                onClick={() => setEditingDevice(null)}
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-[#0F172A] rounded-3xl max-w-xl w-full p-6 shadow-2xl border border-slate-200 dark:border-slate-800 space-y-5 max-h-[90vh] overflow-y-auto"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2.5">
-                <div className="w-9 h-9 rounded-xl bg-cyan-500/10 text-cyan-500 flex items-center justify-center border border-cyan-500/20">
+                <div className="w-9 h-9 rounded-xl bg-[#287DA8]/10 text-[#287DA8] flex items-center justify-center border border-[#287DA8]/20">
                   <Edit3 className="w-5 h-5" />
                 </div>
                 <div>
@@ -2447,7 +2619,7 @@ export const StoreDevicesPage: React.FC = () => {
                     <h2 className="text-base font-bold text-slate-900 dark:text-white">
                       Chỉnh Sửa Nút Bấm
                     </h2>
-                    <span className="font-mono text-xs px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold">
+                    <span className="text-xs px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 font-bold tabular-nums">
                       {editingDevice.deviceId}
                     </span>
                   </div>
@@ -2458,7 +2630,7 @@ export const StoreDevicesPage: React.FC = () => {
               </div>
               <button
                 onClick={() => setEditingDevice(null)}
-                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600"
+                className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-slate-800 text-slate-400 hover:text-slate-600 transition-colors cursor-pointer"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -2482,7 +2654,7 @@ export const StoreDevicesPage: React.FC = () => {
                     required
                     value={editForm.customName}
                     onChange={(e) => setEditForm({ ...editForm, customName: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                    className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
                     placeholder="VD: Nút Nước Bếp"
                   />
                 </div>
@@ -2494,9 +2666,9 @@ export const StoreDevicesPage: React.FC = () => {
                   <select
                     value={editForm.status}
                     onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                    className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
                   >
-                    <option value="ACTIVE">Hoạt Động (ACTIVE)</option>
+                    <option value="ACTIVE">Đang hoạt động</option>
                     <option value="DISABLED">Tạm Dừng (DISABLED)</option>
                     <option value="UNCLAIMED">Chưa Kích Hoạt (UNCLAIMED)</option>
                   </select>
@@ -2504,8 +2676,8 @@ export const StoreDevicesPage: React.FC = () => {
               </div>
 
               {/* Product Mapping & Quantity */}
-              <div className="p-3.5 rounded-2xl bg-cyan-500/5 dark:bg-cyan-500/10 border border-cyan-500/20 space-y-3">
-                <div className="flex items-center gap-1.5 text-xs font-bold text-cyan-600 dark:text-cyan-400">
+              <div className="p-3.5 rounded-2xl bg-[#287DA8]/5 dark:bg-[#287DA8]/10 border border-[#287DA8]/20 space-y-3">
+                <div className="flex items-center gap-1.5 text-xs font-bold text-[#287DA8]">
                   <Tag className="w-3.5 h-3.5" />
                   <span>Sản Phẩm Đang Ánh Xạ</span>
                 </div>
@@ -2518,7 +2690,7 @@ export const StoreDevicesPage: React.FC = () => {
                     <select
                       value={editForm.productId}
                       onChange={(e) => setEditForm({ ...editForm, productId: e.target.value })}
-                      className="w-full px-3 py-2 text-xs rounded-xl bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                      className="w-full px-3 py-2 pr-10 truncate text-xs rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
                     >
                       <option value="">-- Không gán sản phẩm --</option>
                       {products.map((p) => (
@@ -2541,7 +2713,7 @@ export const StoreDevicesPage: React.FC = () => {
                       onChange={(e) =>
                         setEditForm({ ...editForm, defaultQuantity: Number(e.target.value) || 1 })
                       }
-                      className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30 text-center"
+                      className="w-full px-3 py-2 text-xs tabular-nums font-bold rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 text-center transition-all"
                     />
                   </div>
                 </div>
@@ -2556,7 +2728,7 @@ export const StoreDevicesPage: React.FC = () => {
                     type="text"
                     value={editForm.location}
                     onChange={(e) => setEditForm({ ...editForm, location: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                    className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
                     placeholder="VD: Phòng Bếp Tầng 2"
                   />
                 </div>
@@ -2569,7 +2741,7 @@ export const StoreDevicesPage: React.FC = () => {
                     type="text"
                     value={editForm.description}
                     onChange={(e) => setEditForm({ ...editForm, description: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                    className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
                     placeholder="Ghi chú..."
                   />
                 </div>
@@ -2587,7 +2759,7 @@ export const StoreDevicesPage: React.FC = () => {
                     max={100}
                     value={editForm.batteryLevel}
                     onChange={(e) => setEditForm({ ...editForm, batteryLevel: Number(e.target.value) })}
-                    className="w-full px-3 py-2 text-xs font-mono font-bold rounded-xl bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30 text-center"
+                    className="w-full px-3 py-2 text-xs tabular-nums font-bold rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 text-center transition-all"
                   />
                 </div>
 
@@ -2599,7 +2771,7 @@ export const StoreDevicesPage: React.FC = () => {
                     type="date"
                     value={editForm.expiresAt}
                     onChange={(e) => setEditForm({ ...editForm, expiresAt: e.target.value })}
-                    className="w-full px-3 py-2 text-xs font-mono rounded-xl bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-cyan-500/30"
+                    className="w-full px-3 py-2 text-xs tabular-nums rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
                   />
                 </div>
               </div>
@@ -2608,30 +2780,49 @@ export const StoreDevicesPage: React.FC = () => {
                 <button
                   type="button"
                   onClick={() => setEditingDevice(null)}
-                  className="px-4 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-semibold hover:bg-slate-200 dark:hover:bg-slate-700"
+                  className="px-4 py-2 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-sm font-medium hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors cursor-pointer"
                 >
                   Hủy Bỏ
                 </button>
                 <button
                   type="submit"
                   disabled={editLoading}
-                  className="px-5 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 text-xs font-bold shadow-md shadow-cyan-500/25 flex items-center space-x-1.5"
+                  className="rounded-lg bg-[#287DA8] hover:bg-[#206588] text-white px-5 py-2 text-sm font-semibold shadow-[0_2px_8px_rgba(40,125,168,0.25)] hover:shadow-[0_4px_12px_rgba(40,125,168,0.35)] transition-all active:scale-[0.98] disabled:opacity-60 flex items-center justify-center cursor-pointer"
                 >
                   {editLoading ? 'Đang lưu...' : 'Lưu Thay Đổi'}
                 </button>
               </div>
             </form>
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>,
+    document.body
+  )}
 
       {/* ========================================================================= */}
       {/* CRUD: 3. DELETE DEVICE CONFIRMATION MODAL                                 */}
       {/* ========================================================================= */}
-      {deletingDevice && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#0F172A] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-rose-500/30 animate-in fade-in zoom-in-95 duration-150 space-y-4">
-            <div className="flex items-center gap-3">
+      {createPortal(
+        <AnimatePresence>
+          {deletingDevice && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm cursor-pointer"
+                onClick={() => setDeletingDevice(null)}
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-[#0F172A] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-rose-500/30 space-y-4 max-h-[90vh] overflow-y-auto"
+              >
+                <div className="flex items-center gap-3">
               <div className="w-10 h-10 rounded-2xl bg-rose-500/10 text-rose-500 flex items-center justify-center border border-rose-500/20 flex-shrink-0">
                 <AlertTriangle className="w-5 h-5 text-rose-500" />
               </div>
@@ -2697,17 +2888,36 @@ export const StoreDevicesPage: React.FC = () => {
                 )}
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>,
+    document.body
+  )}
 
       {/* ========================================================================= */}
       {/* SIMULATION RESULT MODAL (REAL-TIME ORDER CREATED VIA BUTTON EVENT)       */}
       {/* ========================================================================= */}
-      {simulationResult && (
-        <div className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-[#0F172A] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-indigo-500/30 animate-in fade-in zoom-in-95 duration-150 space-y-4">
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
+      {createPortal(
+        <AnimatePresence>
+          {simulationResult && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="fixed inset-0 bg-slate-950/80 backdrop-blur-sm cursor-pointer"
+                onClick={() => setSimulationResult(null)}
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-[#0F172A] rounded-3xl max-w-md w-full p-6 shadow-2xl border border-indigo-500/30 space-y-4 max-h-[90vh] overflow-y-auto"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-slate-800">
               <div className="flex items-center gap-2.5">
                 <div className="w-10 h-10 rounded-2xl bg-indigo-500/10 text-indigo-500 flex items-center justify-center border border-indigo-500/20">
                   <Play className="w-5 h-5 text-indigo-500" />
@@ -2768,9 +2978,12 @@ export const StoreDevicesPage: React.FC = () => {
                 Đóng
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>,
+    document.body
+  )}
 
       {/* Apple-Style AirPods White Device Pairing Modal */}
       <WhiteDeviceAirPodsModal
