@@ -74,13 +74,55 @@ class ApiService {
     return headers;
   }
 
+  /// Auto refresh token khi nhận 401
+  Future<bool> _tryRefreshToken() async {
+    final prefs = await SharedPreferences.getInstance();
+    final refreshToken = prefs.getString('smart_order_refresh_token');
+    if (refreshToken == null || refreshToken.isEmpty) return false;
+
+    try {
+      final url = Uri.parse('$apiUrl/auth/refresh');
+      final response = await http.post(
+        url,
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({'refreshToken': refreshToken}),
+      ).timeout(const Duration(seconds: 10));
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        final decoded = jsonDecode(utf8.decode(response.bodyBytes));
+        if (decoded['success'] == true && decoded['accessToken'] != null) {
+          await prefs.setString('smart_order_token', decoded['accessToken']);
+          if (decoded['refreshToken'] != null) {
+            await prefs.setString('smart_order_refresh_token', decoded['refreshToken']);
+          }
+          return true;
+        }
+      }
+    } catch (e) {
+      debugPrint('⚠️ Token refresh failed: $e');
+    }
+    return false;
+  }
+
   Future<ApiResponse> get(String endpoint) async {
     try {
       final headers = await _getHeaders();
       final url = Uri.parse('$apiUrl$endpoint');
-      final response = await http.get(url, headers: headers).timeout(
+      var response = await http.get(url, headers: headers).timeout(
             const Duration(seconds: 10),
           );
+
+      // Auto refresh token on 401
+      if (response.statusCode == 401 && !endpoint.contains('/auth/')) {
+        final refreshed = await _tryRefreshToken();
+        if (refreshed) {
+          final newHeaders = await _getHeaders();
+          response = await http.get(url, headers: newHeaders).timeout(
+                const Duration(seconds: 10),
+              );
+        }
+      }
+
       return _handleResponse(response);
     } catch (e) {
       return ApiResponse(
@@ -99,13 +141,27 @@ class ApiService {
     try {
       final headers = await _getHeaders(extraHeaders);
       final url = Uri.parse('$apiUrl$endpoint');
-      final response = await http
+      var response = await http
           .post(
             url,
             headers: headers,
             body: body != null ? jsonEncode(body) : null,
           )
           .timeout(const Duration(seconds: 12));
+
+      // Auto refresh token on 401
+      if (response.statusCode == 401 && !endpoint.contains('/auth/')) {
+        final refreshed = await _tryRefreshToken();
+        if (refreshed) {
+          final newHeaders = await _getHeaders(extraHeaders);
+          response = await http.post(
+            url,
+            headers: newHeaders,
+            body: body != null ? jsonEncode(body) : null,
+          ).timeout(const Duration(seconds: 12));
+        }
+      }
+
       return _handleResponse(response);
     } catch (e) {
       return ApiResponse(
@@ -120,13 +176,60 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       final url = Uri.parse('$apiUrl$endpoint');
-      final response = await http
+      var response = await http
           .put(
             url,
             headers: headers,
             body: body != null ? jsonEncode(body) : null,
           )
           .timeout(const Duration(seconds: 12));
+
+      if (response.statusCode == 401 && !endpoint.contains('/auth/')) {
+        final refreshed = await _tryRefreshToken();
+        if (refreshed) {
+          final newHeaders = await _getHeaders();
+          response = await http.put(
+            url,
+            headers: newHeaders,
+            body: body != null ? jsonEncode(body) : null,
+          ).timeout(const Duration(seconds: 12));
+        }
+      }
+
+      return _handleResponse(response);
+    } catch (e) {
+      return ApiResponse(
+        success: false,
+        message: 'Lỗi kết nối máy chủ ($baseUrl): $e',
+        statusCode: 500,
+      );
+    }
+  }
+
+  Future<ApiResponse> patch(String endpoint, [Map<String, dynamic>? body]) async {
+    try {
+      final headers = await _getHeaders();
+      final url = Uri.parse('$apiUrl$endpoint');
+      var response = await http
+          .patch(
+            url,
+            headers: headers,
+            body: body != null ? jsonEncode(body) : null,
+          )
+          .timeout(const Duration(seconds: 12));
+
+      if (response.statusCode == 401 && !endpoint.contains('/auth/')) {
+        final refreshed = await _tryRefreshToken();
+        if (refreshed) {
+          final newHeaders = await _getHeaders();
+          response = await http.patch(
+            url,
+            headers: newHeaders,
+            body: body != null ? jsonEncode(body) : null,
+          ).timeout(const Duration(seconds: 12));
+        }
+      }
+
       return _handleResponse(response);
     } catch (e) {
       return ApiResponse(
@@ -141,9 +244,20 @@ class ApiService {
     try {
       final headers = await _getHeaders();
       final url = Uri.parse('$apiUrl$endpoint');
-      final response = await http.delete(url, headers: headers).timeout(
+      var response = await http.delete(url, headers: headers).timeout(
             const Duration(seconds: 12),
           );
+
+      if (response.statusCode == 401 && !endpoint.contains('/auth/')) {
+        final refreshed = await _tryRefreshToken();
+        if (refreshed) {
+          final newHeaders = await _getHeaders();
+          response = await http.delete(url, headers: newHeaders).timeout(
+                const Duration(seconds: 12),
+              );
+        }
+      }
+
       return _handleResponse(response);
     } catch (e) {
       return ApiResponse(
@@ -167,6 +281,7 @@ class ApiService {
       } else {
         return ApiResponse(
           success: false,
+          data: decoded is Map<String, dynamic> ? decoded : null,
           message: decoded is Map<String, dynamic>
               ? (decoded['message'] ?? 'Yêu cầu thất bại (${response.statusCode})')
               : 'Lỗi: ${response.statusCode}',

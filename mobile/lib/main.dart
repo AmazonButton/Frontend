@@ -6,6 +6,8 @@ import 'providers/device_provider.dart';
 import 'providers/order_provider.dart';
 import 'providers/smart_supply_provider.dart';
 import 'screens/main_navigation.dart';
+import 'screens/login_screen.dart';
+import 'screens/splash_screen.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -25,7 +27,7 @@ class SmartOrderApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => SmartSupplyProvider()..fetchAllHouseholdData()),
       ],
       child: MaterialApp(
-        title: 'Smart Order Button',
+        title: 'SmartSupply — IoT Household Platform',
         debugShowCheckedModeBanner: false,
         theme: ThemeData(
           useMaterial3: true,
@@ -37,7 +39,7 @@ class SmartOrderApp extends StatelessWidget {
           ),
           scaffoldBackgroundColor: AppColors.background,
           fontFamily: 'Roboto',
-          cardTheme: CardTheme(
+          cardTheme: CardThemeData(
             color: AppColors.surface,
             elevation: 0,
             shape: RoundedRectangleBorder(
@@ -63,7 +65,7 @@ class SmartOrderApp extends StatelessWidget {
           ),
           scaffoldBackgroundColor: AppColors.darkBackground,
           fontFamily: 'Roboto',
-          cardTheme: CardTheme(
+          cardTheme: CardThemeData(
             color: AppColors.darkSurface,
             elevation: 0,
             shape: RoundedRectangleBorder(
@@ -91,29 +93,47 @@ class AuthGate extends StatelessWidget {
   Widget build(BuildContext context) {
     final auth = context.watch<AuthProvider>();
 
+    // Loading → Show Splash Screen
     if (auth.loading) {
-      return const Scaffold(
-        backgroundColor: AppColors.darkBackground,
-        body: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('🔘', style: TextStyle(fontSize: 48)),
-              SizedBox(height: 16),
-              CircularProgressIndicator(color: AppColors.primary),
-              SizedBox(height: 12),
-              Text(
-                'Đang khởi động Smart Order...',
-                style: TextStyle(color: AppColors.textMuted, fontSize: 13),
-              ),
-            ],
-          ),
-        ),
-      );
+      return const SplashScreen();
     }
 
-    // Luôn mở thẳng giao diện chính MainNavigation!
-    // Người dùng có thể cấu hình nút và đặt hàng ngay lập tức!
-    return const MainNavigation();
+    // Not authenticated → Show Login Screen
+    if (!auth.isAuthenticated) {
+      return const LoginScreen();
+    }
+
+    // Authenticated → Route based on user role
+    return _buildRoleBasedNavigation(auth);
+  }
+
+  Widget _buildRoleBasedNavigation(AuthProvider auth) {
+    final role = auth.user?.role ?? 'CUSTOMER';
+
+    switch (role) {
+      case 'CUSTOMER':
+        // Customer: 5-Tab Navigation (Home/Insights/Devices/Orders/Household)
+        return const MainNavigation();
+
+      case 'STORE_OWNER':
+      case 'STORE_MANAGER':
+      case 'STORE_STAFF':
+        // Store: Hiện tại dùng Customer layout, sau này sẽ tạo StoreNavigation
+        // TODO: Phase 3 — StoreMainNavigation
+        return const MainNavigation();
+
+      case 'SUPER_ADMIN':
+        // Admin: Hiện tại dùng Customer layout, sau này sẽ tạo AdminNavigation
+        // TODO: Phase 4 — AdminMainNavigation
+        return const MainNavigation();
+
+      case 'TECHNICIAN':
+        // Technician: Hiện tại dùng Customer layout
+        // TODO: Phase 4 — TechnicianNavigation
+        return const MainNavigation();
+
+      default:
+        return const LoginScreen();
+    }
   }
 }
