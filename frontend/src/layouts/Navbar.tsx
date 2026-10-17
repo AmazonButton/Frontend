@@ -7,6 +7,7 @@ import { useSound } from '../context/OrderSoundContext';
 import { LogOut, Shield, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X } from 'lucide-react';
 import { WhiteDeviceAirPodsModal } from '../components/devices/WhiteDeviceAirPodsModal';
 import { HeaderNavigation } from '../components/common/HeaderNavigation';
+import { LogoutConfirmModal } from '../components/common/LogoutConfirmModal';
 
 export const Navbar: React.FC = () => {
   const { user, logout } = useAuth();
@@ -16,8 +17,16 @@ export const Navbar: React.FC = () => {
   const location = useLocation();
 
   const [showAirPodsModal, setShowAirPodsModal] = useState(false);
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+
+  // Auto-dismiss logout modal if route goes to login or user is logged out
+  useEffect(() => {
+    if (showLogoutModal && (location.pathname === '/login' || !user)) {
+      setShowLogoutModal(false);
+    }
+  }, [location.pathname, user, showLogoutModal]);
 
   useEffect(() => {
     const handleScroll = () => {
@@ -31,6 +40,36 @@ export const Navbar: React.FC = () => {
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
+
+  // Sync user avatar with ProfilePage storage and realtime event
+  const [userAvatar, setUserAvatar] = useState<string | null>(() => {
+    if (!user) return null;
+    const uid = user.id || 'store-owner';
+    return localStorage.getItem(`sob_avatar_${uid}`) || (user as any)?.avatar || null;
+  });
+
+  useEffect(() => {
+    const syncAvatar = (e?: any) => {
+      if (e?.detail !== undefined) {
+        setUserAvatar(e.detail);
+        return;
+      }
+      if (!user) {
+        setUserAvatar(null);
+        return;
+      }
+      const uid = user.id || 'store-owner';
+      setUserAvatar(localStorage.getItem(`sob_avatar_${uid}`) || (user as any)?.avatar || null);
+    };
+
+    syncAvatar();
+    window.addEventListener('sob_avatar_updated', syncAvatar);
+    window.addEventListener('storage', syncAvatar);
+    return () => {
+      window.removeEventListener('sob_avatar_updated', syncAvatar);
+      window.removeEventListener('storage', syncAvatar);
+    };
+  }, [user]);
 
   const isActive = (path: string) => location.pathname === path;
 
@@ -74,7 +113,8 @@ export const Navbar: React.FC = () => {
 
   return (
     <header
-      className={`fixed top-0 left-0 w-full z-50 transition-all duration-300 ease-in-out ${
+      data-navbar="true"
+      className={`fixed top-0 left-0 w-full z-30 transition-[background-color,border-color,box-shadow] duration-200 ease-in-out ${
         isScrolled
           ? 'bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shadow-md border-b border-slate-200/80 dark:border-zinc-800'
           : 'bg-transparent border-b border-transparent backdrop-blur-sm'
@@ -265,13 +305,22 @@ export const Navbar: React.FC = () => {
                 className="flex items-center gap-2.5 group cursor-pointer"
                 title="Nhấn để xem và chỉnh sửa hồ sơ cá nhân"
               >
-                {/* User Avatar with Initials & Micro-animation */}
+                {/* User Avatar with Image / Initials & Micro-animation */}
                 <motion.div
                   whileHover={{ scale: 1.06 }}
                   whileTap={{ scale: 0.95 }}
-                  className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-semibold text-xs shadow-sm shrink-0 ring-2 ring-transparent group-hover:ring-[#0E6BA8]/40 transition-all"
+                  className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-semibold text-xs shadow-sm shrink-0 ring-2 ring-transparent group-hover:ring-[#0E6BA8]/40 transition-all overflow-hidden"
                 >
-                  {getInitials(user.fullName)}
+                  {userAvatar ? (
+                    <img
+                      src={userAvatar}
+                      alt={user.fullName}
+                      className="w-full h-full object-cover"
+                      onError={() => setUserAvatar(null)}
+                    />
+                  ) : (
+                    getInitials(user.fullName)
+                  )}
                 </motion.div>
 
                 {/* User Name & Role Info */}
@@ -294,10 +343,8 @@ export const Navbar: React.FC = () => {
 
               {/* Logout Button */}
               <button
-                onClick={() => {
-                  logout();
-                  navigate('/login');
-                }}
+                type="button"
+                onClick={() => setShowLogoutModal(true)}
                 className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors ml-1 cursor-pointer"
                 title="Đăng xuất"
               >
@@ -365,6 +412,18 @@ export const Navbar: React.FC = () => {
       <WhiteDeviceAirPodsModal
         isOpen={showAirPodsModal}
         onClose={() => setShowAirPodsModal(false)}
+      />
+
+      {/* Designer Logout Confirmation Modal */}
+      <LogoutConfirmModal
+        isOpen={showLogoutModal && !!user}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={async () => {
+          setShowLogoutModal(false);
+          await logout();
+          navigate('/login');
+        }}
+        user={user}
       />
     </header>
   );
