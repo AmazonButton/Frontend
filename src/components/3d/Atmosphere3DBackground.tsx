@@ -16,7 +16,7 @@ export const Atmosphere3DBackground: React.FC<Atmosphere3DBackgroundProps> = ({
   return (
     <div
       aria-hidden="true"
-      className={`fixed inset-0 pointer-events-none z-0 overflow-hidden transition-colors duration-500 bg-[#FBFBFC] dark:bg-[#08080A] ${className}`}
+      className={`fixed inset-0 pointer-events-none -z-10 overflow-hidden transition-colors duration-500 bg-[#FBFBFC] dark:bg-[#08080A] ${className}`}
     >
       {/* 1. Signature Horizon Lighting Beams */}
       <div className="absolute -top-[140px] left-1/2 -translate-x-1/2 w-[1100px] h-[520px] rounded-full bg-gradient-to-b from-blue-500/10 via-cyan-500/5 to-transparent dark:from-sky-500/15 dark:via-blue-600/5 dark:to-transparent blur-[120px] pointer-events-none" />

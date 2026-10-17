@@ -32,6 +32,7 @@ import {
 import confetti from 'canvas-confetti';
 import { STORE_CATALOG_PRODUCTS, StoreCatalogItem, getStoreCatalog } from '../../data/storeProductsData';
 import { api } from '../../services/api';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 
 // Utility to play authentic Apple-style connection chime via Web Audio API
 const playAppleConnectChime = () => {
@@ -351,39 +352,36 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     }
   };
 
-  // Lock background scroll when modal is open
-  useEffect(() => {
-    if (isOpen) {
-      const prevOverflow = document.body.style.overflow;
-      document.body.style.overflow = 'hidden';
-      return () => {
-        document.body.style.overflow = prevOverflow;
-      };
-    }
-  }, [isOpen]);
-
-  if (!isOpen) return null;
+  // Universal lock background scroll when modal is open
+  useBodyScrollLock(isOpen);
 
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-zinc-900/40 backdrop-blur-md transition-all">
-          {/* Backdrop click to close */}
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+          {/* Backdrop click to close with smooth fade */}
           <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0"
+            transition={{ duration: 0.25, ease: [0.16, 1, 0.3, 1] }}
+            className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm cursor-pointer"
             onClick={onClose}
           />
 
-          {/* Apple-style Modal Container */}
+          {/* Apple-style Modal Container with silky spring physics */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.9, y: 20 }}
+            initial={{ opacity: 0, scale: 0.92, y: 22 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.9, y: 20 }}
-            transition={{ type: "spring", damping: 25, stiffness: 400 }}
-            className="relative z-10 w-full sm:max-w-md max-h-[90vh] overflow-y-auto bg-white rounded-3xl ring-1 ring-black/5 shadow-2xl"
+            exit={{ opacity: 0, scale: 0.94, y: 16 }}
+            transition={{
+              type: 'spring',
+              damping: 28,
+              stiffness: 320,
+              mass: 0.8,
+            }}
+            className="relative z-10 w-full sm:max-w-md max-h-[90vh] overflow-y-auto overscroll-contain bg-white rounded-3xl ring-1 ring-black/5 shadow-2xl"
+            data-scrollable="true"
           >
             {/* Top Handle bar (iOS sheet handle) */}
             <div className="pt-3 pb-1 flex justify-center sm:hidden">
@@ -563,22 +561,34 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
                   )}
                 </div>
 
-                {/* Category Filter Chips */}
-                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs">
-                  {['Tất cả', 'Nước uống', 'Gas', 'Gạo', 'Nhu yếu phẩm'].map((cat) => (
-                    <button
-                      key={cat}
-                      type="button"
-                      onClick={() => setSelectedCategory(cat)}
-                      className={`px-3 py-1.5 rounded-xl font-medium whitespace-nowrap transition-all ${
-                        selectedCategory === cat
-                          ? 'bg-zinc-900 text-white shadow-xs'
-                          : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200'
-                      }`}
-                    >
-                      {cat}
-                    </button>
-                  ))}
+                {/* Category Filter Chips with Fluid Animated Sliding Pill */}
+                <div className="flex items-center gap-1.5 overflow-x-auto pb-1 no-scrollbar text-xs relative">
+                  {['Tất cả', 'Nước uống', 'Gas', 'Gạo', 'Nhu yếu phẩm'].map((cat) => {
+                    const isSelected = selectedCategory === cat;
+                    return (
+                      <motion.button
+                        key={cat}
+                        whileTap={{ scale: 0.94 }}
+                        whileHover={{ scale: 1.02 }}
+                        type="button"
+                        onClick={() => setSelectedCategory(cat)}
+                        className={`relative px-3 py-1.5 rounded-xl font-medium whitespace-nowrap transition-colors cursor-pointer select-none ${
+                          isSelected
+                            ? 'text-white font-semibold'
+                            : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 hover:text-zinc-900'
+                        }`}
+                      >
+                        {isSelected && (
+                          <motion.div
+                            layoutId="whiteAirPodsCategoryIndicator"
+                            className="absolute inset-0 bg-zinc-900 rounded-xl shadow-xs"
+                            transition={{ type: 'spring', stiffness: 450, damping: 30 }}
+                          />
+                        )}
+                        <span className="relative z-10">{cat}</span>
+                      </motion.button>
+                    );
+                  })}
                 </div>
 
                 {/* Binding Error Alert */}
