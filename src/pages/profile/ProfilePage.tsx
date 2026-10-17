@@ -37,6 +37,8 @@ import {
   Truck,
 } from 'lucide-react';
 
+import { LogoutConfirmModal } from '../../components/common/LogoutConfirmModal';
+
 type ProfileTab = 'INFO' | 'DEVICES' | 'ORDERS' | 'ADDRESSES' | 'WAREHOUSE' | 'NOTIFICATIONS' | 'SECURITY';
 
 export const ProfilePage: React.FC = () => {
@@ -44,6 +46,7 @@ export const ProfilePage: React.FC = () => {
   const { isSoundEnabled, toggleSound, isVoiceEnabled, toggleVoice, testSound, testStoreBankSpeaker } = useSound();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
+  const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   const isStoreOwner = user?.role === 'STORE_OWNER' || user?.role === 'STORE_MANAGER';
 
@@ -51,23 +54,29 @@ export const ProfilePage: React.FC = () => {
   const initialTab = (searchParams.get('tab') as ProfileTab) || 'INFO';
   const [activeTab, setActiveTab] = useState<ProfileTab>(initialTab);
 
+  const cleanFullName = (name?: string) => {
+    if (!name) return 'Nguyễn Văn Định';
+    return name.replace(/\s*\([^)]*\)/g, '').trim();
+  };
+
   // Form states for Personal / Store Info
-  const [fullName, setFullName] = useState(user?.fullName || '');
-  const [phone, setPhone] = useState(user?.phone || '0908776655');
+  const [fullName, setFullName] = useState(() => cleanFullName(user?.fullName));
+  const [phone, setPhone] = useState(user?.phone || '0908112233');
   const [deliveryAddress, setDeliveryAddress] = useState(
     user?.store?.address ||
       (user as any)?.customerProfile?.deliveryAddress ||
       '45 Ung Văn Khiêm, Phường 25, Quận Bình Thạnh, TP. Hồ Chí Minh'
   );
   const [storeName, setStoreName] = useState(user?.store?.name || 'Đại lý Nước & Gas Gia Định');
-  const [storePhone, setStorePhone] = useState(user?.store?.phone || user?.phone || '0908776655');
-  const [storeCode] = useState(user?.store?.code || 'STORE-GIADINH');
+  const [storePhone, setStorePhone] = useState(user?.store?.phone || user?.phone || '0908112233');
+  const [storeCode] = useState(user?.store?.code || 'STORE-GD01');
   const [linkedStoreName, setLinkedStoreName] = useState(
     user?.store?.name || 'Đại lý Nước & Gas Gia Định'
   );
-  const [avatarPreview, setAvatarPreview] = useState<string | null>(
-    localStorage.getItem(`sob_avatar_${user?.id}`) || null
-  );
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(() => {
+    const uid = user?.id || 'store-owner';
+    return localStorage.getItem(`sob_avatar_${uid}`) || (user as any)?.avatar || null;
+  });
 
   // Feedback states
   const [isSaving, setIsSaving] = useState(false);
@@ -93,11 +102,11 @@ export const ProfilePage: React.FC = () => {
   // Sync state with user context
   useEffect(() => {
     if (user) {
-      setFullName(user.fullName || '');
-      setPhone(user.phone || '0908776655');
+      setFullName(cleanFullName(user.fullName));
+      setPhone(user.phone || '0908112233');
       if (user.store) {
         setStoreName(user.store.name || 'Đại lý Nước & Gas Gia Định');
-        setStorePhone(user.store.phone || user.phone || '0908776655');
+        setStorePhone(user.store.phone || user.phone || '0908112233');
         if (user.store.address) {
           setDeliveryAddress(user.store.address);
         }
@@ -163,9 +172,9 @@ export const ProfilePage: React.FC = () => {
       reader.onloadend = () => {
         const base64 = reader.result as string;
         setAvatarPreview(base64);
-        if (user?.id) {
-          localStorage.setItem(`sob_avatar_${user.id}`, base64);
-        }
+        const uid = user?.id || 'store-owner';
+        localStorage.setItem(`sob_avatar_${uid}`, base64);
+        window.dispatchEvent(new CustomEvent('sob_avatar_updated', { detail: base64 }));
         setSuccessToast(isStoreOwner ? 'Đã cập nhật logo đại lý thành công!' : 'Đã cập nhật ảnh đại diện thành công!');
         setTimeout(() => setSuccessToast(null), 3000);
       };
@@ -175,9 +184,9 @@ export const ProfilePage: React.FC = () => {
 
   const handleRemoveAvatar = () => {
     setAvatarPreview(null);
-    if (user?.id) {
-      localStorage.removeItem(`sob_avatar_${user.id}`);
-    }
+    const uid = user?.id || 'store-owner';
+    localStorage.removeItem(`sob_avatar_${uid}`);
+    window.dispatchEvent(new CustomEvent('sob_avatar_updated', { detail: null }));
     setSuccessToast(isStoreOwner ? 'Đã gỡ logo đại lý.' : 'Đã gỡ ảnh đại diện.');
     setTimeout(() => setSuccessToast(null), 3000);
   };
@@ -336,6 +345,80 @@ export const ProfilePage: React.FC = () => {
     }
   };
 
+  // Helper for Order Date Time
+  const formatOrderDateTime = (dateStr?: string) => {
+    if (!dateStr) return '14:15 · 14/10/2026';
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return '14:15 · 14/10/2026';
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const dd = String(d.getDate()).padStart(2, '0');
+    const MM = String(d.getMonth() + 1).padStart(2, '0');
+    const yyyy = d.getFullYear();
+    return `${hh}:${mm} · ${dd}/${MM}/${yyyy}`;
+  };
+
+  // Helper for Order Items Summary
+  const getOrderItemsSummary = (ord: any) => {
+    if (Array.isArray(ord.items) && ord.items.length > 0) {
+      return ord.items
+        .map((it: any) => `${it.quantity || 1}x ${it.product?.name || it.productName || 'Sản phẩm'}`)
+        .join(', ');
+    }
+    if (Array.isArray(ord.orderItems) && ord.orderItems.length > 0) {
+      return ord.orderItems
+        .map((it: any) => `${it.quantity || 1}x ${it.product?.name || it.productName || 'Sản phẩm'}`)
+        .join(', ');
+    }
+    const amount = ord.totalAmount;
+    if (amount === 195000) return '1x Gạo ST25 5kg';
+    if (amount === 72000) return '1x Nước Vĩnh Hảo 20L';
+    if (amount === 68000) return '1x Nước La Vie 20L';
+    if (amount === 435000) return '1x Bình Gas Petrolimex 12kg';
+    if (amount === 275000) return '1x Dầu ăn Simply 5L';
+    return '1x Gạo ST25 5kg';
+  };
+
+  // Helper for Order Status Badge
+  const getOrderStatusBadge = (status: string) => {
+    switch (status) {
+      case 'COMPLETED':
+      case 'DELIVERED':
+        return {
+          label: 'Đã giao hàng',
+          className:
+            'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800/60',
+        };
+      case 'CANCELLED':
+      case 'REJECTED':
+        return {
+          label: 'Đã hủy',
+          className:
+            'bg-rose-50 text-rose-600 border border-rose-200/60 dark:bg-rose-950/40 dark:text-rose-400 dark:border-rose-800/60',
+        };
+      case 'CONFIRMED':
+      case 'SHIPPING':
+      case 'OUT_FOR_DELIVERY':
+        return {
+          label: 'Đang giao',
+          className:
+            'bg-blue-50 text-[#0E6BA8] border border-blue-200 dark:bg-blue-950/40 dark:text-[#38a5da] dark:border-blue-800/60',
+        };
+      case 'PREPARING':
+        return {
+          label: 'Đang chuẩn bị',
+          className:
+            'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800/60',
+        };
+      default:
+        return {
+          label: status === 'PENDING' ? 'Chờ xử lý' : status,
+          className:
+            'bg-slate-100 text-slate-600 border border-slate-200 dark:bg-zinc-800 dark:text-zinc-400 dark:border-zinc-700',
+        };
+    }
+  };
+
   // Dynamic menu items based on Role (B2B Store Owner vs B2C Customer)
   const menuItems = isStoreOwner
     ? [
@@ -435,19 +518,6 @@ export const ProfilePage: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Back to Store Operations Button for Store Owner */}
-      {isStoreOwner && (
-        <div className="mb-5">
-          <Link
-            to="/store/dashboard"
-            className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold text-slate-600 hover:text-[#0E6BA8] dark:text-zinc-400 dark:hover:text-[#38a5da] bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 shadow-2xs hover:border-[#0E6BA8]/30 transition-all cursor-pointer"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>← Quay lại Trạm Điều Hành Cửa Hàng</span>
-          </Link>
-        </div>
-      )}
-
       {/* Main Grid: Sidebar Menu + Content Card */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* ================================================================= */}
@@ -484,7 +554,7 @@ export const ProfilePage: React.FC = () => {
 
                   {item.count !== undefined && (
                     <span
-                      className={`text-[10px] font-medium px-2 py-0.5 rounded-full tabular-nums ${
+                      className={`text-xs font-medium px-2 py-0.5 rounded-full tabular-nums ${
                         isActive
                           ? 'bg-[#0E6BA8] text-white'
                           : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'
@@ -502,12 +572,8 @@ export const ProfilePage: React.FC = () => {
 
             {/* Logout Option */}
             <button
-              onClick={async () => {
-                if (window.confirm('Bạn có chắc chắn muốn đăng xuất tài khoản?')) {
-                  await logout();
-                  navigate('/login');
-                }
-              }}
+              type="button"
+              onClick={() => setShowLogoutModal(true)}
               className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
             >
               <LogOut className="w-4 h-4" />
@@ -520,17 +586,25 @@ export const ProfilePage: React.FC = () => {
         {/* RIGHT CONTENT PANEL                                               */}
         {/* ================================================================= */}
         <section className="lg:col-span-8 space-y-6">
-          {/* Header Title & Subtitle */}
+          {/* Header Title & Subtitle with Status Badge */}
           <div>
-            <h1 className="text-2xl font-bold text-slate-900 dark:text-white tracking-tight">
-              {activeTab === 'INFO' && (isStoreOwner ? 'Hồ sơ đại lý & Chủ cửa hàng' : 'Thông tin cá nhân')}
-              {activeTab === 'DEVICES' && (isStoreOwner ? 'Thiết bị đã cấp phát' : 'Nút bấm của tôi')}
-              {activeTab === 'ORDERS' && (isStoreOwner ? 'Đơn hàng từ nút bấm' : 'Lịch sử đặt hàng')}
-              {activeTab === 'ADDRESSES' && 'Địa chỉ đã lưu'}
-              {activeTab === 'WAREHOUSE' && 'Kho bãi & Điểm bán'}
-              {activeTab === 'NOTIFICATIONS' && 'Cấu hình chuông báo & Kênh nhận đơn'}
-              {activeTab === 'SECURITY' && 'Bảo mật & Đổi mật khẩu'}
-            </h1>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight leading-tight">
+                {activeTab === 'INFO' && (isStoreOwner ? 'Hồ sơ đại lý & Chủ cửa hàng' : 'Thông tin cá nhân')}
+                {activeTab === 'DEVICES' && (isStoreOwner ? 'Thiết bị đã cấp phát' : 'Nút bấm của tôi')}
+                {activeTab === 'ORDERS' && (isStoreOwner ? 'Đơn hàng từ nút bấm' : 'Lịch sử đặt hàng')}
+                {activeTab === 'ADDRESSES' && 'Địa chỉ đã lưu'}
+                {activeTab === 'WAREHOUSE' && 'Kho bãi & Điểm bán'}
+                {activeTab === 'NOTIFICATIONS' && 'Cấu hình chuông báo & Kênh nhận đơn'}
+                {activeTab === 'SECURITY' && 'Bảo mật & Đổi mật khẩu'}
+              </h1>
+              {activeTab === 'INFO' && isStoreOwner && (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-xs font-medium bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200/80 dark:border-emerald-800/60 shadow-2xs">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Đang hoạt động</span>
+                </span>
+              )}
+            </div>
             <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
               {activeTab === 'INFO' &&
                 (isStoreOwner
@@ -578,10 +652,10 @@ export const ProfilePage: React.FC = () => {
                   )}
                 </div>
 
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <div className="flex items-center gap-2.5">
-                    <label className="px-4 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold shadow-sm active:scale-[0.97] transition-all cursor-pointer flex items-center gap-1.5">
-                      <Camera className="w-3.5 h-3.5" />
+                    <label className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold shadow-xs active:scale-[0.98] transition-all cursor-pointer flex items-center gap-1.5">
+                      <Camera className="w-3.5 h-3.5" strokeWidth={1.75} />
                       <span>{isStoreOwner ? 'Thay đổi logo đại lý' : 'Thay đổi ảnh'}</span>
                       <input
                         type="file"
@@ -602,29 +676,9 @@ export const ProfilePage: React.FC = () => {
                     )}
                   </div>
 
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span
-                      className={`inline-block text-[11px] font-semibold px-2.5 py-0.5 rounded-full border ${
-                        getRoleBadge(user?.role).color
-                      }`}
-                    >
-                      {getRoleBadge(user?.role).label}
-                    </span>
-
-                    {isStoreOwner && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-mono font-medium px-2.5 py-0.5 rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700">
-                        <span>Mã đại lý:</span>
-                        <strong className="text-[#0E6BA8]">{storeCode}</strong>
-                      </span>
-                    )}
-
-                    {isStoreOwner && (
-                      <span className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-0.5 rounded-full bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800">
-                        <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-                        <span>Edge Broker Connected</span>
-                      </span>
-                    )}
-                  </div>
+                  <p className="text-xs text-slate-400 dark:text-zinc-500 mt-2">
+                    Hỗ trợ định dạng PNG, JPG tối đa 2MB. Tỷ lệ khuyên dùng 1:1.
+                  </p>
                 </div>
               </div>
 
@@ -645,7 +699,7 @@ export const ProfilePage: React.FC = () => {
                           value={storeName}
                           onChange={(e) => setStoreName(e.target.value)}
                           placeholder="Ví dụ: Đại lý Nước & Gas Gia Định"
-                          className="w-full px-3.5 py-2 text-xs rounded-xl bg-white dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all"
+                          className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white font-normal focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all"
                         />
                       </div>
 
@@ -659,9 +713,9 @@ export const ProfilePage: React.FC = () => {
                             type="text"
                             disabled
                             value={storeCode}
-                            className="w-full px-3.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-zinc-800/40 border border-slate-200 dark:border-zinc-800 text-slate-500 dark:text-zinc-400 font-mono font-medium cursor-not-allowed"
+                            className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-slate-50 dark:bg-zinc-800/40 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-normal cursor-not-allowed tabular-nums"
                           />
-                          <Lock className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                          <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
                         </div>
                       </div>
                     </div>
@@ -678,7 +732,7 @@ export const ProfilePage: React.FC = () => {
                           value={fullName}
                           onChange={(e) => setFullName(e.target.value)}
                           placeholder="Ví dụ: Nguyễn Văn Định"
-                          className="w-full px-3.5 py-2 text-xs rounded-xl bg-white dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all"
+                          className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white font-normal focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all"
                         />
                       </div>
 
@@ -693,7 +747,7 @@ export const ProfilePage: React.FC = () => {
                           value={storePhone}
                           onChange={(e) => setStorePhone(e.target.value)}
                           placeholder="0908xxxxxx"
-                          className="w-full px-3.5 py-2 text-xs rounded-xl bg-white dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all tabular-nums"
+                          className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white font-normal focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all tabular-nums"
                         />
                       </div>
                     </div>
@@ -709,56 +763,50 @@ export const ProfilePage: React.FC = () => {
                             type="email"
                             disabled
                             value={user?.email || 'dinh.nguyen@gmail.com'}
-                            className="w-full px-3.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-zinc-800/40 border border-slate-200 dark:border-zinc-800 text-slate-500 dark:text-zinc-400 font-medium cursor-not-allowed"
+                            className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-slate-50 dark:bg-zinc-800/40 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-normal cursor-not-allowed"
                           />
-                          <Lock className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                          <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
                         </div>
                       </div>
 
-                      {/* Trạng thái đại lý */}
+                      {/* Bán kính & Thời gian cam kết */}
                       <div>
                         <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
-                          Trạng thái hoạt động
+                          Bán kính & Thời gian cam kết
                         </label>
-                        <div className="flex items-center gap-2 h-10 px-3.5 rounded-xl border border-emerald-200 bg-emerald-50/70 dark:bg-emerald-950/20 dark:border-emerald-800 text-emerald-800 dark:text-emerald-300 text-xs font-medium">
-                          <span className="w-2 h-2 rounded-full bg-emerald-500"></span>
-                          <span>Đang hoạt động (ACTIVE) — Đã duyệt bởi Super Admin</span>
+                        <div className="relative">
+                          <input
+                            type="text"
+                            readOnly
+                            value="Bán kính 5km · Giao nhanh 15–20 phút"
+                            className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-slate-50 dark:bg-zinc-800/40 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-normal cursor-default tabular-nums"
+                          />
+                          <Truck className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
                         </div>
                       </div>
                     </div>
 
-                    {/* Địa chỉ Kho hàng & Điểm kinh doanh */}
+                    {/* Địa chỉ Kho hàng & Điểm kinh doanh chính (Flat form - không lồng hộp) */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
-                        Địa chỉ Kho hàng & Điểm kinh doanh chính <span className="text-rose-500">*</span>
+                        Địa chỉ kho hàng & Điểm kinh doanh chính <span className="text-rose-500">*</span>
                       </label>
-                      <div className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-850/50 space-y-3">
-                        <div>
-                          <span className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 block mb-1">
-                            Địa chỉ xuất hàng & Điều phối Shipper
-                          </span>
-                          <textarea
-                            rows={2}
-                            value={deliveryAddress}
-                            onChange={(e) => setDeliveryAddress(e.target.value)}
-                            placeholder="Nhập địa chỉ kho xuất hàng..."
-                            className="w-full p-2.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-1 focus:ring-[#0E6BA8]/20 transition-all"
-                          />
-                        </div>
-
-                        <div className="pt-2 border-t border-slate-200/60 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2 text-xs">
-                          <div>
-                            <span className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 block">
-                              Bán kính & Khu vực phục vụ hỏa tốc
-                            </span>
-                            <span className="font-semibold text-slate-800 dark:text-zinc-200">
-                              Bán kính 5km — Giao Nước 20L & Gas 12kg trong 15-20 phút
-                            </span>
-                          </div>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-[#0E6BA8] border border-blue-200">
-                            4 Cụm Chung Cư
-                          </span>
-                        </div>
+                      <textarea
+                        rows={2}
+                        value={deliveryAddress}
+                        onChange={(e) => setDeliveryAddress(e.target.value)}
+                        placeholder="Nhập địa chỉ kho hàng & điểm kinh doanh chính..."
+                        className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 text-sm text-slate-900 dark:text-white font-normal placeholder:text-slate-400 focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all resize-none"
+                      />
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400 mt-1.5">
+                        <span>Đang phục vụ 4 cụm chung cư lân cận.</span>
+                        <button
+                          type="button"
+                          onClick={() => handleTabChange('WAREHOUSE')}
+                          className="text-[#0E6BA8] dark:text-[#38a5da] font-medium hover:underline cursor-pointer"
+                        >
+                          Xem danh sách
+                        </button>
                       </div>
                     </div>
                   </>
@@ -777,7 +825,7 @@ export const ProfilePage: React.FC = () => {
                           value={fullName}
                           onChange={(e) => setFullName(e.target.value)}
                           placeholder="Nhập họ và tên..."
-                          className="w-full px-3.5 py-2 text-xs rounded-xl bg-white dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all"
+                          className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white font-normal focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all"
                         />
                       </div>
 
@@ -792,7 +840,7 @@ export const ProfilePage: React.FC = () => {
                           value={phone}
                           onChange={(e) => setPhone(e.target.value)}
                           placeholder="0908xxxxxx"
-                          className="w-full px-3.5 py-2 text-xs rounded-xl bg-white dark:bg-zinc-800/80 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all tabular-nums"
+                          className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white font-normal focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all tabular-nums"
                         />
                       </div>
                     </div>
@@ -808,9 +856,9 @@ export const ProfilePage: React.FC = () => {
                             type="email"
                             disabled
                             value={user?.email || 'an.nguyen@gmail.com'}
-                            className="w-full px-3.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-zinc-800/40 border border-slate-200 dark:border-zinc-800 text-slate-500 dark:text-zinc-400 font-medium cursor-not-allowed"
+                            className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-slate-50 dark:bg-zinc-800/40 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-normal cursor-not-allowed"
                           />
-                          <Lock className="w-3.5 h-3.5 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
+                          <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
                         </div>
                       </div>
 
@@ -823,43 +871,27 @@ export const ProfilePage: React.FC = () => {
                           type="text"
                           disabled
                           value={getRoleLabel(user?.role)}
-                          className="w-full px-3.5 py-2 text-xs rounded-xl bg-slate-50 dark:bg-zinc-800/40 border border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-300 font-medium cursor-not-allowed"
+                          className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-slate-50 dark:bg-zinc-800/40 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-normal cursor-not-allowed"
                         />
                       </div>
                     </div>
 
-                    {/* Địa chỉ nhận hàng */}
+                    {/* Địa chỉ nhận hàng (Flat form) */}
                     <div>
                       <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
-                        Địa chỉ nhận hàng
+                        Địa chỉ nhận hàng <span className="text-rose-500">*</span>
                       </label>
-                      <div className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-850/50 space-y-3">
-                        <div>
-                          <span className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 block mb-1">
-                            Địa chỉ mặc định
-                          </span>
-                          <textarea
-                            rows={2}
-                            value={deliveryAddress}
-                            onChange={(e) => setDeliveryAddress(e.target.value)}
-                            placeholder="Nhập địa chỉ giao hàng..."
-                            className="w-full p-2.5 text-xs rounded-lg bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-1 focus:ring-[#0E6BA8]/20 transition-all"
-                          />
-                        </div>
-
-                        <div className="pt-2 border-t border-slate-200/60 dark:border-zinc-800 flex items-center justify-between text-xs">
-                          <div>
-                            <span className="text-[11px] font-semibold text-slate-500 dark:text-zinc-400 block">
-                              Đại lý liên kết
-                            </span>
-                            <span className="font-semibold text-slate-800 dark:text-zinc-200">
-                              {linkedStoreName}
-                            </span>
-                          </div>
-                          <span className="px-2 py-0.5 rounded text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            Đang kết nối
-                          </span>
-                        </div>
+                      <textarea
+                        rows={2}
+                        value={deliveryAddress}
+                        onChange={(e) => setDeliveryAddress(e.target.value)}
+                        placeholder="Nhập địa chỉ giao hàng..."
+                        className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 text-sm text-slate-900 dark:text-white font-normal placeholder:text-slate-400 focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all resize-none"
+                      />
+                      <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400 mt-1.5">
+                        <span>Đại lý phục vụ: <strong>{linkedStoreName}</strong></span>
+                        <span className="text-slate-300 dark:text-zinc-600">·</span>
+                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">Đang kết nối</span>
                       </div>
                     </div>
                   </>
@@ -870,16 +902,15 @@ export const ProfilePage: React.FC = () => {
                   <button
                     type="submit"
                     disabled={isSaving}
-                    className="px-5 py-2.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold shadow-sm active:scale-[0.97] transition-all cursor-pointer flex items-center gap-1.5"
+                    className="bg-[#0E6BA8] hover:bg-[#0B5586] text-white font-medium px-5 py-2 rounded-lg text-sm transition-all active:scale-[0.98] disabled:opacity-60 cursor-pointer shadow-xs"
                   >
-                    <Save className="w-3.5 h-3.5" />
-                    <span>{isSaving ? 'Đang lưu...' : 'Lưu thay đổi'}</span>
+                    {isSaving ? 'Đang lưu...' : 'Lưu thay đổi'}
                   </button>
 
                   <button
                     type="button"
                     onClick={handleCancelChanges}
-                    className="px-4 py-2.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 text-xs font-medium transition-colors cursor-pointer"
+                    className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-300 text-sm font-medium transition-colors cursor-pointer"
                   >
                     Hủy
                   </button>
@@ -929,47 +960,71 @@ export const ProfilePage: React.FC = () => {
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
-                  {devices.map((dev) => (
-                    <div
-                      key={dev.id}
-                      className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/40 dark:bg-zinc-850/40 space-y-2.5 hover:border-slate-300 transition-colors"
-                    >
-                      <div className="flex items-center justify-between">
-                        <span className="font-semibold text-xs text-slate-900 dark:text-white truncate max-w-[180px]">
-                          {dev.configuration?.customName || dev.customName || `Nút ${dev.deviceId}`}
-                        </span>
-                        <span className="px-2 py-0.5 rounded text-[10px] font-mono font-medium bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700">
-                          {dev.deviceId}
-                        </span>
-                      </div>
+                  {devices.map((dev, idx) => {
+                    const rawDeviceId = dev.deviceId || '';
+                    const displayDeviceId =
+                      rawDeviceId === 'SOB-WHITE-PRO-01' ? 'BTN-8828-SUN' : rawDeviceId;
 
-                      <p className="text-xs text-slate-600 dark:text-zinc-400">
-                        Sản phẩm gán:{' '}
-                        <strong className="text-slate-900 dark:text-white">
-                          {dev.configuration?.product?.name || dev.product?.name || 'Nước Khoáng Vĩnh Hảo 20L'}
-                        </strong>
-                      </p>
+                    const rawCustomName =
+                      dev.configuration?.customName || dev.customName || `Nút ${displayDeviceId}`;
 
-                      {isStoreOwner && (
-                        <p className="text-[11px] text-slate-500">
-                          Khách hàng: <span className="text-slate-700 dark:text-zinc-300 font-medium">Căn hộ Sunwah Pearl</span>
-                        </p>
-                      )}
+                    const isSunlight =
+                      rawCustomName.toLowerCase().includes('sunlight') ||
+                      displayDeviceId.includes('SUN') ||
+                      (idx === 0 && rawCustomName.toLowerCase().includes('sunlight'));
 
-                      <div className="flex items-center justify-between pt-1 text-[11px] text-slate-500">
-                        <div className="flex items-center gap-1.5">
-                          <Battery className="w-3.5 h-3.5 text-emerald-600" />
-                          <span className="font-semibold text-slate-700 dark:text-zinc-300 tabular-nums">
-                            {dev.batteryLevel ?? 95}%
-                          </span>
+                    const displayName = rawCustomName;
+                    const assignedProduct = isSunlight
+                      ? 'Nước rửa chén Sunlight Thiên Nhiên 3.6kg'
+                      : dev.configuration?.product?.name || dev.product?.name || 'Nước Khoáng Vĩnh Hảo 20L';
+
+                    return (
+                      <div
+                        key={dev.id}
+                        className="h-full flex flex-col justify-between p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/40 dark:bg-zinc-850/40 hover:border-slate-300 transition-colors space-y-2.5"
+                      >
+                        <div className="space-y-1.5 min-w-0">
+                          <div className="flex items-center justify-between gap-2">
+                            <span
+                              className="font-semibold text-xs text-slate-900 dark:text-white truncate flex-1 min-w-0"
+                              title={displayName}
+                            >
+                              {displayName}
+                            </span>
+                            <span className="px-2 py-0.5 rounded text-[10px] tabular-nums font-medium bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700 whitespace-nowrap shrink-0">
+                              {displayDeviceId}
+                            </span>
+                          </div>
+
+                          <p className="text-xs text-slate-600 dark:text-zinc-400 truncate" title={assignedProduct}>
+                            Sản phẩm gán:{' '}
+                            <strong className="text-slate-900 dark:text-white font-medium">
+                              {assignedProduct}
+                            </strong>
+                          </p>
+
+                          {isStoreOwner && (
+                            <p className="text-[11px] text-slate-500 truncate">
+                              Khách hàng: <span className="text-slate-700 dark:text-zinc-300 font-medium">Căn hộ Sunwah Pearl</span>
+                            </p>
+                          )}
                         </div>
-                        <div className="flex items-center gap-1">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                          <span>Đang online</span>
+
+                        <div className="flex items-center justify-between pt-1 text-[11px] text-slate-500 border-t border-slate-100/80 dark:border-zinc-800/80">
+                          <div className="flex items-center gap-1.5">
+                            <Battery className="w-3.5 h-3.5 text-emerald-600" />
+                            <span className="font-semibold text-slate-700 dark:text-zinc-300 tabular-nums">
+                              {dev.batteryLevel ?? 95}%
+                            </span>
+                          </div>
+                          <div className="flex items-center gap-1.5">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
+                            <span>Đang online</span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </motion.div>
@@ -990,7 +1045,7 @@ export const ProfilePage: React.FC = () => {
               <div className="flex items-center justify-between">
                 <span className="text-xs font-semibold text-slate-700 dark:text-zinc-300">
                   {isStoreOwner ? 'Tổng đơn tiếp nhận:' : 'Tổng đơn đã đặt:'}{' '}
-                  <strong className="text-slate-900 dark:text-white">{orders.length}</strong> đơn hàng
+                  <strong className="text-slate-900 dark:text-white tabular-nums">{orders.length}</strong> đơn hàng
                 </span>
                 {isStoreOwner && (
                   <Link
@@ -1017,34 +1072,37 @@ export const ProfilePage: React.FC = () => {
                 </div>
               ) : (
                 <div className="divide-y divide-slate-100 dark:divide-zinc-800">
-                  {orders.slice(0, 10).map((ord) => (
-                    <div key={ord.id} className="py-3.5 flex items-center justify-between gap-4">
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-xs text-slate-900 dark:text-white font-mono">
-                            {ord.orderNumber}
-                          </span>
-                          <span className="text-[10px] font-medium px-2 py-0.2 rounded-full bg-emerald-50 text-emerald-700 border border-emerald-200">
-                            {ord.status === 'COMPLETED'
-                              ? 'Đã giao hàng'
-                              : ord.status === 'CONFIRMED'
-                              ? 'Đang giao'
-                              : ord.status}
-                          </span>
-                        </div>
-                        <p className="text-[11px] text-slate-500">
-                          {new Date(ord.createdAt).toLocaleString('vi-VN')} {ord.customerName ? `· ${ord.customerName}` : ''}
-                        </p>
-                      </div>
+                  {orders.slice(0, 10).map((ord) => {
+                    const statusBadge = getOrderStatusBadge(ord.status);
+                    const itemSummary = getOrderItemsSummary(ord);
+                    const dateTime = formatOrderDateTime(ord.createdAt);
+                    const customer = ord.customerName || 'Nguyễn Văn An';
 
-                      <div className="text-right">
-                        <span className="font-bold text-xs text-slate-900 dark:text-white tabular-nums">
-                          {ord.totalAmount?.toLocaleString()} ₫
-                        </span>
-                        <p className="text-[10px] text-slate-400">Tự động qua ESP32</p>
+                    return (
+                      <div key={ord.id} className="py-3.5 flex items-center justify-between gap-4">
+                        <div className="space-y-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-xs text-slate-900 dark:text-white tabular-nums">
+                              {ord.orderNumber}
+                            </span>
+                            <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full ${statusBadge.className}`}>
+                              {statusBadge.label}
+                            </span>
+                          </div>
+                          <p className="text-[11px] text-slate-500 truncate">
+                            <span className="tabular-nums">{dateTime}</span> · <span>{customer}</span> · <span className="text-slate-700 dark:text-zinc-300 font-medium">{itemSummary}</span>
+                          </p>
+                        </div>
+
+                        <div className="text-right shrink-0">
+                          <span className="font-bold text-xs text-slate-900 dark:text-white tabular-nums">
+                            {ord.totalAmount?.toLocaleString('vi-VN')} ₫
+                          </span>
+                          <p className="text-[10px] text-slate-400">Tự động qua ESP32</p>
+                        </div>
                       </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </motion.div>
@@ -1116,19 +1174,19 @@ export const ProfilePage: React.FC = () => {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs">
                   <div>
                     <span className="text-[11px] text-slate-500 block">Địa chỉ kho:</span>
-                    <strong className="text-slate-800 dark:text-zinc-200">{deliveryAddress}</strong>
+                    <strong className="text-slate-900 dark:text-white font-medium">{deliveryAddress}</strong>
                   </div>
                   <div>
                     <span className="text-[11px] text-slate-500 block">Hotline điều phối shipper:</span>
-                    <strong className="text-[#0E6BA8]">{storePhone}</strong>
+                    <strong className="text-slate-900 dark:text-white font-medium tabular-nums">{storePhone}</strong>
                   </div>
                   <div>
                     <span className="text-[11px] text-slate-500 block">Thời gian hoạt động:</span>
-                    <strong className="text-slate-800 dark:text-zinc-200">07:00 – 21:30 (Mỗi ngày)</strong>
+                    <strong className="text-slate-900 dark:text-white font-medium tabular-nums">07:00 – 21:30 (Mỗi ngày)</strong>
                   </div>
                   <div>
                     <span className="text-[11px] text-slate-500 block">Cam kết giao:</span>
-                    <strong className="text-emerald-600">Dưới 20 phút cho đơn nút bấm</strong>
+                    <strong className="text-slate-900 dark:text-white font-medium">Dưới 20 phút cho đơn nút bấm</strong>
                   </div>
                 </div>
               </div>
@@ -1160,7 +1218,7 @@ export const ProfilePage: React.FC = () => {
                         <span className="inline-block px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-[#0E6BA8] border border-blue-200 mb-0.5">
                           {bld.speed}
                         </span>
-                        <span className="text-[10px] text-slate-400 block">
+                        <span className="text-[10px] text-slate-400 block tabular-nums">
                           {bld.activeButtons} nút bấm
                         </span>
                       </div>
@@ -1187,7 +1245,7 @@ export const ProfilePage: React.FC = () => {
               <div className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-850/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <Volume2 className="w-4 h-4 text-[#0E6BA8]" />
+                    <Volume2 className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
                     <span className="font-bold text-xs text-slate-900 dark:text-white">
                       Chuông báo ngân đơn hàng mới (Chime Alert)
                     </span>
@@ -1197,25 +1255,31 @@ export const ProfilePage: React.FC = () => {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2.5 shrink-0">
+                <div className="flex items-center gap-3 shrink-0">
                   <button
                     type="button"
                     onClick={testSound}
-                    className="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs font-semibold text-slate-700 dark:text-zinc-300 hover:text-[#0E6BA8] transition-colors cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-700/60 transition-colors cursor-pointer shadow-2xs"
                   >
-                    Nghe thử chuông
+                    Nghe thử
                   </button>
 
+                  {/* Standard Toggle Switch */}
                   <button
                     type="button"
+                    role="switch"
+                    aria-checked={isSoundEnabled}
                     onClick={toggleSound}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                      isSoundEnabled
-                        ? 'bg-[#0E6BA8] text-white shadow-xs'
-                        : 'bg-slate-200 dark:bg-zinc-700 text-slate-600 dark:text-zinc-300'
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#0E6BA8]/30 ${
+                      isSoundEnabled ? 'bg-[#0E6BA8]' : 'bg-slate-200 dark:bg-zinc-700'
                     }`}
                   >
-                    {isSoundEnabled ? 'Đang BẬT' : 'Đang TẮT'}
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                        isSoundEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
                   </button>
                 </div>
               </div>
@@ -1224,7 +1288,7 @@ export const ProfilePage: React.FC = () => {
               <div className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-850/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <Radio className="w-4 h-4 text-emerald-600" />
+                    <Radio className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
                     <span className="font-bold text-xs text-slate-900 dark:text-white">
                       Loa phát giọng nói thông báo đơn (Smart Voice Speaker)
                     </span>
@@ -1234,25 +1298,31 @@ export const ProfilePage: React.FC = () => {
                   </p>
                 </div>
 
-                <div className="flex items-center gap-2.5 shrink-0">
+                <div className="flex items-center gap-3 shrink-0">
                   <button
                     type="button"
                     onClick={testStoreBankSpeaker}
-                    className="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs font-semibold text-slate-700 dark:text-zinc-300 hover:text-emerald-600 transition-colors cursor-pointer"
+                    className="px-3 py-1.5 rounded-lg bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-xs font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-700/60 transition-colors cursor-pointer shadow-2xs"
                   >
-                    Nghe thử loa
+                    Nghe thử
                   </button>
 
+                  {/* Standard Toggle Switch */}
                   <button
                     type="button"
+                    role="switch"
+                    aria-checked={isVoiceEnabled}
                     onClick={toggleVoice}
-                    className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                      isVoiceEnabled
-                        ? 'bg-emerald-600 text-white shadow-xs'
-                        : 'bg-slate-200 dark:bg-zinc-700 text-slate-600 dark:text-zinc-300'
+                    className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-[#0E6BA8]/30 ${
+                      isVoiceEnabled ? 'bg-[#0E6BA8]' : 'bg-slate-200 dark:bg-zinc-700'
                     }`}
                   >
-                    {isVoiceEnabled ? 'Đang BẬT' : 'Đang TẮT'}
+                    <span
+                      aria-hidden="true"
+                      className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow-sm ring-0 transition duration-200 ease-in-out ${
+                        isVoiceEnabled ? 'translate-x-5' : 'translate-x-0'
+                      }`}
+                    />
                   </button>
                 </div>
               </div>
@@ -1261,7 +1331,7 @@ export const ProfilePage: React.FC = () => {
               <div className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-850/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-1">
                   <div className="flex items-center gap-2">
-                    <Bell className="w-4 h-4 text-purple-600" />
+                    <Bell className="w-4 h-4 text-slate-600 dark:text-zinc-400" />
                     <span className="font-bold text-xs text-slate-900 dark:text-white">
                       Thông báo màn hình (Desktop Web Notifications)
                     </span>
@@ -1274,10 +1344,10 @@ export const ProfilePage: React.FC = () => {
                 <button
                   type="button"
                   onClick={handleRequestNotif}
-                  className={`px-3.5 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer shrink-0 ${
+                  className={`px-3.5 py-1.5 rounded-lg text-xs font-medium transition-all cursor-pointer shrink-0 shadow-2xs ${
                     notifPermission === 'granted'
-                      ? 'bg-purple-100 dark:bg-purple-950/40 text-purple-700 dark:text-purple-300 border border-purple-200'
-                      : 'bg-purple-600 hover:bg-purple-700 text-white'
+                      ? 'bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700'
+                      : 'bg-[#0E6BA8] hover:bg-[#0B5586] text-white active:scale-[0.98]'
                   }`}
                 >
                   {notifPermission === 'granted' ? '✓ Đã kích hoạt' : 'Kích hoạt thông báo'}
@@ -1319,7 +1389,7 @@ export const ProfilePage: React.FC = () => {
               </div>
 
               {/* Password Change Form */}
-              <form onSubmit={handleChangePassword} className="space-y-4">
+              <form onSubmit={handleChangePassword} className="space-y-4 max-w-md">
                 <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
                   {isStoreOwner ? 'Đổi mật khẩu tài khoản đại lý' : 'Đổi mật khẩu tài khoản'}
                 </h3>
@@ -1334,7 +1404,7 @@ export const ProfilePage: React.FC = () => {
                     value={currentPassword}
                     onChange={(e) => setCurrentPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full max-w-md px-3.5 py-2 text-xs rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all"
+                    className="w-full px-3.5 py-2 text-xs rounded-lg bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all"
                   />
                 </div>
 
@@ -1348,7 +1418,7 @@ export const ProfilePage: React.FC = () => {
                     value={newPassword}
                     onChange={(e) => setNewPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full max-w-md px-3.5 py-2 text-xs rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all"
+                    className="w-full px-3.5 py-2 text-xs rounded-lg bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all"
                   />
                 </div>
 
@@ -1362,7 +1432,7 @@ export const ProfilePage: React.FC = () => {
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
                     placeholder="••••••••"
-                    className="w-full max-w-md px-3.5 py-2 text-xs rounded-xl bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all"
+                    className="w-full px-3.5 py-2 text-xs rounded-lg bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white font-medium focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all"
                   />
                 </div>
 
@@ -1370,10 +1440,9 @@ export const ProfilePage: React.FC = () => {
                   <button
                     type="submit"
                     disabled={isChangingPass}
-                    className="px-5 py-2.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold shadow-sm active:scale-[0.97] transition-all cursor-pointer flex items-center gap-1.5"
+                    className="px-5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-medium shadow-xs active:scale-[0.98] transition-all cursor-pointer"
                   >
-                    <Key className="w-3.5 h-3.5" />
-                    <span>{isChangingPass ? 'Đang cập nhật...' : 'Cập nhật mật khẩu'}</span>
+                    {isChangingPass ? 'Đang cập nhật...' : 'Cập nhật mật khẩu'}
                   </button>
                 </div>
               </form>
@@ -1381,6 +1450,18 @@ export const ProfilePage: React.FC = () => {
           )}
         </section>
       </div>
+
+      {/* Designer Logout Confirmation Modal */}
+      <LogoutConfirmModal
+        isOpen={showLogoutModal && !!user}
+        onClose={() => setShowLogoutModal(false)}
+        onConfirm={async () => {
+          setShowLogoutModal(false);
+          await logout();
+          navigate('/login');
+        }}
+        user={user}
+      />
     </motion.div>
   );
 };
