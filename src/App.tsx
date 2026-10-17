@@ -56,7 +56,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
 // Store Shell Layout (with persistent Sidebar)
 const StoreLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] w-full bg-[#FBFBFC] dark:bg-zinc-950 relative z-10">
+    <div className="flex min-h-[calc(100vh-4rem)] w-full bg-[#FBFBFC] dark:bg-zinc-950 relative">
       <Sidebar />
       <main className="flex-1 min-w-0 w-full p-4 sm:p-5 lg:p-6 overflow-x-hidden">
         {children || <Outlet />}
@@ -91,7 +91,7 @@ export const App: React.FC = () => {
       {/* 36. Animated Background — Premium 3D Atmosphere */}
       <Atmosphere3DBackground variant={getAtmosphereVariant()} />
       <Navbar />
-      <div className={`flex-1 relative z-10 ${location.pathname === '/' ? '' : 'pt-16'}`}>
+      <div className={`flex-1 relative ${location.pathname === '/' ? '' : 'pt-16'}`}>
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/quick-setup" element={<QuickSetupPage />} />

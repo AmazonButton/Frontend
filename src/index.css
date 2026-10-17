@@ -28,6 +28,27 @@
   body {
     @apply bg-[#F8FAFC] dark:bg-[#0C0F17] text-[#0F172A] dark:text-[#F8FAFC] font-sans antialiased transition-colors duration-200;
   }
+
+  /* Prevent background page from moving or scrolling when any popup/modal is open */
+  html.modal-open-locked,
+  body.modal-open-locked {
+    overflow: hidden !important;
+    overscroll-behavior: none !important;
+    touch-action: none;
+  }
+
+  /* Universal: Whenever any modal/popup is open, header must lie underneath the backdrop */
+  html.modal-open-locked header,
+  body.modal-open-locked header,
+  html.modal-open-locked [data-navbar="true"],
+  body.modal-open-locked [data-navbar="true"],
+  body:has([class*="fixed"][class*="inset-0"]:not([class*="pointer-events-none"]):not([class*="-z-"])) header,
+  html:has([class*="fixed"][class*="inset-0"]:not([class*="pointer-events-none"]):not([class*="-z-"])) header,
+  body:has([role="dialog"]) header,
+  body:has([data-modal="true"]) header {
+    z-index: 0 !important;
+    pointer-events: none !important;
+  }
 }
 
 /* Modern High-End Precision Engineering Grid */
