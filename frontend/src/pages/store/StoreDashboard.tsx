@@ -1,5 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { motion, type Variants } from 'framer-motion';
+import { createPortal } from 'react-dom';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { api } from '../../services/api';
 import { subscribeToStore, getSocket } from '../../services/socket';
 import { useAuth } from '../../context/AuthContext';
@@ -46,6 +48,7 @@ export const StoreDashboard: React.FC = () => {
 
   // Inventory state with exact number input & image upload
   const [showInventoryModal, setShowInventoryModal] = useState<boolean>(false);
+  useBodyScrollLock(showInventoryModal);
   const [inventoryList, setInventoryList] = useState<StoreCatalogItem[]>(() => getStoreCatalog());
   const [inventorySearch, setInventorySearch] = useState<string>('');
   const [inventoryCategory, setInventoryCategory] = useState<string>('Tất cả');
@@ -497,15 +500,16 @@ export const StoreDashboard: React.FC = () => {
               {showChart ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
             </button>
 
-            <button
+            <motion.button
               type="button"
+              whileTap={{ scale: 0.95 }}
               onClick={() => setShowInventoryModal(true)}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 hover:bg-[#287DA8]/5 text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] border border-zinc-200 dark:border-zinc-700 hover:border-[#287DA8]/40 text-xs font-medium transition-all cursor-pointer"
+              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 hover:bg-[#287DA8]/5 text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] border border-zinc-200 dark:border-zinc-700 hover:border-[#287DA8]/40 text-xs font-medium transition-all cursor-pointer shadow-2xs"
             >
               <Boxes className="w-3.5 h-3.5" />
               Kho Hàng
               <span className="font-mono text-zinc-400 dark:text-zinc-600">({inventoryList.length})</span>
-            </button>
+            </motion.button>
 
             <button
               type="button"
@@ -868,13 +872,32 @@ export const StoreDashboard: React.FC = () => {
       </div>
 
       {/* ── Inventory Modal (Redesigned: Minimalist, Airy, Border-b List, Tabular Nums) ── */}
-      {showInventoryModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 sm:p-6 bg-slate-900/40 backdrop-blur-xs">
-          <div className="fixed inset-0" onClick={() => setShowInventoryModal(false)} />
-          <div className="relative z-10 w-full max-w-4xl bg-white dark:bg-[#0B0F17] rounded-xl border border-slate-200/80 dark:border-zinc-800 shadow-[0_20px_50px_rgba(0,0,0,0.12)] p-0 max-h-[88vh] flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
-
-            {/* 1. Modal Header */}
-            <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-zinc-800/80 bg-white dark:bg-[#0B0F17] shrink-0">
+      {createPortal(
+        <AnimatePresence>
+          {showInventoryModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 sm:p-6 overscroll-contain">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="fixed inset-0 bg-slate-900/60 backdrop-blur-sm cursor-pointer"
+                onClick={() => setShowInventoryModal(false)}
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.93, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 12 }}
+                transition={{
+                  type: 'spring',
+                  damping: 28,
+                  stiffness: 350,
+                  mass: 0.8,
+                }}
+                className="relative z-10 w-full max-w-4xl bg-white dark:bg-[#0B0F17] rounded-xl border border-slate-200/80 dark:border-zinc-800 shadow-[0_20px_50px_rgba(0,0,0,0.12)] p-0 max-h-[88vh] flex flex-col overflow-hidden"
+              >
+                {/* 1. Modal Header */}
+                <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-zinc-800/80 bg-white dark:bg-[#0B0F17] shrink-0">
               <div className="flex items-center gap-2.5">
                 <h3 className="text-base font-semibold text-[#0F172A] dark:text-zinc-100 tracking-tight">
                   Quản Lý Kho Hàng
@@ -1234,9 +1257,12 @@ export const StoreDashboard: React.FC = () => {
                 Đóng
               </button>
             </div>
-          </div>
+          </motion.div>
         </div>
       )}
+    </AnimatePresence>,
+    document.body
+  )}
     </div>
   );
 };
