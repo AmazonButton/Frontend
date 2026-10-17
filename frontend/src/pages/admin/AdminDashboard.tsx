@@ -1,6 +1,42 @@
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { motion, type Variants } from 'framer-motion';
+import { createPortal } from 'react-dom';
+import { motion, AnimatePresence, type Variants } from 'framer-motion';
+
+const modalBackdropVariants: Variants = {
+  hidden: { opacity: 0 },
+  visible: {
+    opacity: 1,
+    transition: { duration: 0.24, ease: [0.16, 1, 0.3, 1] },
+  },
+  exit: {
+    opacity: 0,
+    transition: { duration: 0.18, ease: 'easeOut' },
+  },
+};
+
+const modalDialogVariants: Variants = {
+  hidden: { opacity: 0, scale: 0.93, y: 20 },
+  visible: {
+    opacity: 1,
+    scale: 1,
+    y: 0,
+    transition: {
+      type: 'spring',
+      damping: 28,
+      stiffness: 320,
+      mass: 0.8,
+    },
+  },
+  exit: {
+    opacity: 0,
+    scale: 0.94,
+    y: 14,
+    transition: { duration: 0.18, ease: 'easeOut' },
+  },
+};
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { api } from '../../services/api';
+import { toast } from '../../context/ToastContext';
 import { Store, AuditLog } from '../../types';
 import {
   Shield,
@@ -373,6 +409,15 @@ export const AdminDashboard: React.FC = () => {
     description: '',
   });
 
+  // Universal body scroll lock & header submerge whenever any modal is open
+  const isAnyAdminModalOpen = Boolean(
+    rejectingStoreId ||
+    showBatchModal ||
+    showAllocateModal ||
+    showAddProductModal
+  );
+  useBodyScrollLock(isAnyAdminModalOpen);
+
   // =========================================================================
   // 4.2.3 IoT Telemetry & Battery Monitoring State
   // =========================================================================
@@ -526,11 +571,11 @@ export const AdminDashboard: React.FC = () => {
     try {
       const res = await api.post(`/admin/stores/${storeId}/approve`);
       if (res.data.success) {
-        alert(res.data.message);
+        toast.success(res.data.message || 'Đã phê duyệt cửa hàng');
         fetchAdminData();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể phê duyệt');
+      toast.error(err.response?.data?.message || 'Không thể phê duyệt');
     }
   };
 
@@ -543,12 +588,13 @@ export const AdminDashboard: React.FC = () => {
         reason: rejectReason,
       });
       if (res.data.success) {
+        toast.info('Đã từ chối đơn đăng ký cửa hàng');
         setRejectingStoreId(null);
         setRejectReason('');
         fetchAdminData();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể từ chối');
+      toast.error(err.response?.data?.message || 'Không thể từ chối');
     }
   };
 
@@ -561,12 +607,12 @@ export const AdminDashboard: React.FC = () => {
         prefix: batchPrefix.trim().toUpperCase(),
       });
       if (res.data.success) {
-        alert(res.data.message);
+        toast.success(res.data.message || 'Tạo lô nút bấm thành công');
         setShowBatchModal(false);
         fetchAdminData();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể tạo lô nút bấm');
+      toast.error(err.response?.data?.message || 'Không thể tạo lô nút bấm');
     } finally {
       setIsProcessingBatch(false);
     }
@@ -575,11 +621,11 @@ export const AdminDashboard: React.FC = () => {
   const handleAllocateDevices = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!selectedStoreId) {
-      alert('Vui lòng chọn cửa hàng cần cấp phát nút');
+      toast.warning('Vui lòng chọn cửa hàng cần cấp phát nút');
       return;
     }
     if (selectedDeviceIds.length === 0) {
-      alert('Vui lòng tick chọn ít nhất 1 nút bấm từ kho');
+      toast.warning('Vui lòng tick chọn ít nhất 1 nút bấm từ kho');
       return;
     }
 
@@ -590,13 +636,13 @@ export const AdminDashboard: React.FC = () => {
         deviceIds: selectedDeviceIds,
       });
       if (res.data.success) {
-        alert(res.data.message);
         setShowAllocateModal(false);
         setSelectedDeviceIds([]);
+        toast.success(res.data.message || 'Cấp phát nút bấm thành công!');
         fetchAdminData();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể cấp phát nút');
+      toast.error(err.response?.data?.message || 'Không thể cấp phát nút');
     } finally {
       setIsProcessingBatch(false);
     }
@@ -640,7 +686,7 @@ export const AdminDashboard: React.FC = () => {
     };
     setCatalogProducts((prev) => [newProd, ...prev]);
     setShowAddProductModal(false);
-    alert(`Đã thêm sản phẩm "${newProd.name}" vào Danh mục gốc thành công!`);
+    toast.success(`Đã thêm sản phẩm "${newProd.name}" vào Danh mục gốc thành công!`);
   };
 
   // Delete product from master catalog
@@ -1484,7 +1530,7 @@ export const AdminDashboard: React.FC = () => {
                     <td className="py-2 px-3 text-right whitespace-nowrap">
                       <div className="flex items-center justify-end gap-1">
                         <button
-                          onClick={() => alert(`Chỉnh sửa: ${prod.name}`)}
+                          onClick={() => toast.info(`Chức năng chỉnh sửa "${prod.name}" đang được chuẩn bị.`)}
                           className="p-1 rounded text-zinc-400 hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer"
                           title="Chỉnh sửa sản phẩm"
                         >
@@ -1815,303 +1861,379 @@ export const AdminDashboard: React.FC = () => {
       </main>
 
       {/* ========================================================================= */}
-      {/* MODALS                                                                    */}
+      {/* MODALS (With AnimatePresence & Apple/Stripe-Grade Spring Animation)       */}
       {/* ========================================================================= */}
-      {/* Reject Store Modal */}
-      {rejectingStoreId && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-xl max-w-md w-full p-5 shadow-2xl border border-zinc-200 dark:border-zinc-800 animate-in fade-in zoom-in-95 duration-200">
-            <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Từ Chối Phê Duyệt Cửa Hàng</h3>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-              Bắt buộc phải nhập lý do từ chối để hệ thống gửi thông báo cho chủ cơ sở.
-            </p>
-
-            <form onSubmit={handleReject} className="space-y-3 mt-4">
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                  Lý do từ chối
-                </label>
-                <textarea
-                  required
-                  rows={3}
-                  value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
-                  placeholder="VD: Không cung cấp được giấy phép kinh doanh..."
-                  className="w-full px-3 py-2 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-900"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-1">
-                <button
-                  type="button"
-                  onClick={() => setRejectingStoreId(null)}
-                  className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 text-xs font-medium text-white bg-rose-600 hover:bg-rose-700 active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
-                >
-                  Xác Nhận Từ Chối
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Batch Generate Modal */}
-      {showBatchModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-xl max-w-md w-full p-5 shadow-2xl border border-zinc-200 dark:border-zinc-800 animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center space-x-3 mb-3">
-              <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white flex items-center justify-center">
-                <PlusCircle className="w-4 h-4" />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo Lô Nút Bấm Trống Mới</h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">Tự động sinh mã ID, Serial, Secret và QR Code vào kho</p>
-              </div>
-            </div>
-
-            <form onSubmit={handleBatchGenerate} className="space-y-3 mt-3">
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Số lượng nút cần tạo</label>
-                <input
-                  type="number"
-                  min={1}
-                  max={500}
-                  required
-                  value={batchCount}
-                  onChange={(e) => setBatchCount(Number(e.target.value))}
-                  className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white font-mono focus:outline-none focus:border-zinc-900"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Tiền tố mã định danh (Prefix)</label>
-                <input
-                  type="text"
-                  required
-                  value={batchPrefix}
-                  onChange={(e) => setBatchPrefix(e.target.value.toUpperCase())}
-                  placeholder="BTN"
-                  className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white font-mono font-medium focus:outline-none focus:border-zinc-900"
-                />
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  disabled={isProcessingBatch}
-                  onClick={() => setShowBatchModal(false)}
-                  className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  disabled={isProcessingBatch}
-                  className="px-4 py-1.5 text-xs font-medium text-white bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
-                >
-                  {isProcessingBatch ? 'Đang tạo...' : 'Xác Nhận Tạo Lô Nút'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* Allocate to Store Modal */}
-      {showAllocateModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-xl max-w-lg w-full p-5 shadow-2xl border border-zinc-200 dark:border-zinc-800 animate-in fade-in zoom-in-95 duration-200">
-            <div className="flex items-center space-x-3 mb-3">
-              <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white flex items-center justify-center">
-                <Send className="w-4 h-4" />
-              </div>
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Cấp Phát Nút Cho Cửa Hàng</h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                  Ủy quyền phân phối <strong>{selectedDeviceIds.length}</strong> nút bấm đã chọn
+      {/* 1. Reject Store Modal */}
+      {createPortal(
+        <AnimatePresence>
+          {rejectingStoreId && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                onClick={() => setRejectingStoreId(null)}
+                className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm cursor-pointer"
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl max-w-md w-full p-5 shadow-2xl border border-zinc-200 dark:border-zinc-800"
+              >
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Từ Chối Phê Duyệt Cửa Hàng</h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
+                  Bắt buộc phải nhập lý do từ chối để hệ thống gửi thông báo cho chủ cơ sở.
                 </p>
-              </div>
-            </div>
 
-            <form onSubmit={handleAllocateDevices} className="space-y-3 mt-3">
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                  Chọn Cửa Hàng nhận bàn giao nút
-                </label>
-                <select
-                  required
-                  value={selectedStoreId}
-                  onChange={(e) => setSelectedStoreId(e.target.value)}
-                  className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-900"
-                >
-                  <option value="">-- Chọn Cửa Hàng --</option>
-                  {allStores.map((store) => (
-                    <option key={store.id} value={store.id}>
-                      {store.name} ({store.code}) - {store.ownerName}
-                    </option>
-                  ))}
-                </select>
-              </div>
+                <form onSubmit={handleReject} className="space-y-3 mt-4">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                      Lý do từ chối
+                    </label>
+                    <textarea
+                      required
+                      rows={3}
+                      value={rejectReason}
+                      onChange={(e) => setRejectReason(e.target.value)}
+                      placeholder="VD: Không cung cấp được giấy phép kinh doanh..."
+                      className="w-full px-3 py-2 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-900"
+                    />
+                  </div>
 
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                  Danh sách mã nút bấm sẽ cấp ({selectedDeviceIds.length} nút)
-                </label>
-                <div className="max-h-36 overflow-y-auto p-2 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg flex flex-wrap gap-1.5 font-mono text-[11px]">
-                  {selectedDeviceIds.map((id) => (
-                    <span
-                      key={id}
-                      className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 font-medium"
+                  <div className="flex justify-end gap-2 pt-1">
+                    <button
+                      type="button"
+                      onClick={() => setRejectingStoreId(null)}
+                      className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
                     >
-                      {id}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  disabled={isProcessingBatch}
-                  onClick={() => setShowAllocateModal(false)}
-                  className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  disabled={isProcessingBatch}
-                  className="px-4 py-1.5 text-xs font-medium text-white bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
-                >
-                  {isProcessingBatch ? 'Đang bàn giao...' : 'Xác Nhận Bàn Giao'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+                      Hủy
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 text-xs font-medium text-white bg-rose-600 hover:bg-rose-700 active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
+                    >
+                      Xác Nhận Từ Chối
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
       )}
 
-      {/* Add Master Product Modal */}
-      {showAddProductModal && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <div className="bg-white dark:bg-zinc-900 rounded-xl max-w-lg w-full p-5 shadow-2xl border border-zinc-200 dark:border-zinc-800 animate-in fade-in zoom-in-95 duration-200 max-h-[90vh] overflow-y-auto">
-            <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
-              Thêm Mặt Hàng Gốc Mới (Master Catalog)
-            </h3>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-              Hàng hóa gốc sẽ xuất hiện trong kho cho các cư dân gán vào nút bấm
-            </p>
-
-            <form onSubmit={handleAddProduct} className="space-y-3 mt-3">
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                  Tên sản phẩm:
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={newProductForm.name}
-                  onChange={(e) => setNewProductForm({ ...newProductForm, name: e.target.value })}
-                  placeholder="VD: Nước Mắm Nam Ngư Đệ Nhị 900ml"
-                  className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-100"
-                />
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                    Nhóm danh mục:
-                  </label>
-                  <select
-                    value={newProductForm.category}
-                    onChange={(e) => setNewProductForm({ ...newProductForm, category: e.target.value as any })}
-                    className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-zinc-900"
-                  >
-                    <option value="Nước mắm">Nước mắm</option>
-                    <option value="Nước uống">Nước uống</option>
-                    <option value="Gas">Gas</option>
-                    <option value="Gạo">Gạo</option>
-                    <option value="Dầu ăn & Gia vị">Dầu ăn & Gia vị</option>
-                    <option value="Nhu yếu phẩm">Nhu yếu phẩm</option>
-                  </select>
+      {/* 2. Batch Generate Modal */}
+      {createPortal(
+        <AnimatePresence>
+          {showBatchModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                onClick={() => setShowBatchModal(false)}
+                className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm cursor-pointer"
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl max-w-md w-full p-5 shadow-2xl border border-zinc-200 dark:border-zinc-800"
+              >
+                <div className="flex items-center space-x-3 mb-3">
+                  <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white flex items-center justify-center">
+                    <PlusCircle className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo Lô Nút Bấm Trống Mới</h3>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">Tự động sinh mã ID, Serial, Secret và QR Code vào kho</p>
+                  </div>
                 </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                    Thương hiệu:
-                  </label>
-                  <input
-                    type="text"
-                    value={newProductForm.brand}
-                    onChange={(e) => setNewProductForm({ ...newProductForm, brand: e.target.value })}
-                    placeholder="VD: Nam Ngư"
-                    className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-zinc-900"
-                  />
-                </div>
-              </div>
 
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                    Giá niêm yết (VNĐ):
-                  </label>
-                  <input
-                    type="number"
-                    required
-                    value={newProductForm.price}
-                    onChange={(e) => setNewProductForm({ ...newProductForm, price: Number(e.target.value) })}
-                    className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono focus:outline-none focus:border-zinc-900"
-                  />
-                </div>
-                <div>
-                  <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                    Quy cách:
-                  </label>
-                  <input
-                    type="text"
-                    value={newProductForm.unit}
-                    onChange={(e) => setNewProductForm({ ...newProductForm, unit: e.target.value })}
-                    placeholder="VD: Chai 900ml"
-                    className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-zinc-900"
-                  />
-                </div>
-              </div>
+                <form onSubmit={handleBatchGenerate} className="space-y-3 mt-3">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Số lượng nút cần tạo</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={500}
+                      required
+                      value={batchCount}
+                      onChange={(e) => setBatchCount(Number(e.target.value))}
+                      className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white font-mono focus:outline-none focus:border-zinc-900"
+                    />
+                  </div>
 
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                  Đường dẫn ảnh sản phẩm (Image URL):
-                </label>
-                <input
-                  type="text"
-                  value={newProductForm.imageUrl}
-                  onChange={(e) => setNewProductForm({ ...newProductForm, imageUrl: e.target.value })}
-                  className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono focus:outline-none focus:border-zinc-900"
-                />
-              </div>
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Tiền tố mã định danh (Prefix)</label>
+                    <input
+                      type="text"
+                      required
+                      value={batchPrefix}
+                      onChange={(e) => setBatchPrefix(e.target.value.toUpperCase())}
+                      placeholder="BTN"
+                      className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white font-mono font-medium focus:outline-none focus:border-zinc-900"
+                    />
+                  </div>
 
-              <div className="flex justify-end gap-2 pt-2">
-                <button
-                  type="button"
-                  onClick={() => setShowAddProductModal(false)}
-                  className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-                >
-                  Hủy
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-1.5 text-xs font-medium text-white bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
-                >
-                  Lưu Vào Danh Mục Gốc
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      disabled={isProcessingBatch}
+                      onClick={() => setShowBatchModal(false)}
+                      className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isProcessingBatch}
+                      className="px-4 py-1.5 text-xs font-medium text-white bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
+                    >
+                      {isProcessingBatch ? 'Đang tạo...' : 'Xác Nhận Tạo Lô Nút'}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* 3. Allocate to Store Modal */}
+      {createPortal(
+        <AnimatePresence>
+          {showAllocateModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                onClick={() => setShowAllocateModal(false)}
+                className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm cursor-pointer"
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl max-w-lg w-full p-5 shadow-2xl border border-zinc-200 dark:border-zinc-800"
+              >
+                <div className="flex items-center space-x-3 mb-3">
+                  <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white flex items-center justify-center">
+                    <Send className="w-4 h-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Cấp Phát Nút Cho Cửa Hàng</h3>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
+                      Ủy quyền phân phối <strong>{selectedDeviceIds.length}</strong> nút bấm đã chọn
+                    </p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleAllocateDevices} className="space-y-3 mt-3">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                      Chọn Cửa Hàng nhận bàn giao nút
+                    </label>
+                    <select
+                      required
+                      value={selectedStoreId}
+                      onChange={(e) => setSelectedStoreId(e.target.value)}
+                      className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-900"
+                    >
+                      <option value="">-- Chọn Cửa Hàng --</option>
+                      {allStores.map((store) => (
+                        <option key={store.id} value={store.id}>
+                          {store.name} ({store.code}) - {store.ownerName}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                      Danh sách mã nút bấm sẽ cấp ({selectedDeviceIds.length} nút)
+                    </label>
+                    <div className="max-h-36 overflow-y-auto p-2 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg flex flex-wrap gap-1.5 font-mono text-[11px]">
+                      {selectedDeviceIds.map((id) => (
+                        <span
+                          key={id}
+                          className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 font-medium"
+                        >
+                          {id}
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      disabled={isProcessingBatch}
+                      onClick={() => setShowAllocateModal(false)}
+                      className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isProcessingBatch}
+                      className="px-4 py-1.5 text-xs font-medium text-white bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
+                    >
+                      {isProcessingBatch ? 'Đang bàn giao...' : 'Xác Nhận Bàn Giao'}
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* 4. Add Master Product Modal */}
+      {createPortal(
+        <AnimatePresence>
+          {showAddProductModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                onClick={() => setShowAddProductModal(false)}
+                className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm cursor-pointer"
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl max-w-lg w-full p-5 shadow-2xl border border-zinc-200 dark:border-zinc-800 max-h-[90vh] overflow-y-auto"
+              >
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">
+                  Thêm Mặt Hàng Gốc Mới (Master Catalog)
+                </h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  Hàng hóa gốc sẽ xuất hiện trong kho cho các cư dân gán vào nút bấm
+                </p>
+
+                <form onSubmit={handleAddProduct} className="space-y-3 mt-3">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                      Tên sản phẩm:
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      value={newProductForm.name}
+                      onChange={(e) => setNewProductForm({ ...newProductForm, name: e.target.value })}
+                      placeholder="VD: Nước Mắm Nam Ngư Đệ Nhị 900ml"
+                      className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-100"
+                    />
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                        Nhóm danh mục:
+                      </label>
+                      <select
+                        value={newProductForm.category}
+                        onChange={(e) => setNewProductForm({ ...newProductForm, category: e.target.value as any })}
+                        className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-zinc-900"
+                      >
+                        <option value="Nước mắm">Nước mắm</option>
+                        <option value="Nước uống">Nước uống</option>
+                        <option value="Gas">Gas</option>
+                        <option value="Gạo">Gạo</option>
+                        <option value="Dầu ăn & Gia vị">Dầu ăn & Gia vị</option>
+                        <option value="Nhu yếu phẩm">Nhu yếu phẩm</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                        Thương hiệu:
+                      </label>
+                      <input
+                        type="text"
+                        value={newProductForm.brand}
+                        onChange={(e) => setNewProductForm({ ...newProductForm, brand: e.target.value })}
+                        placeholder="VD: Nam Ngư"
+                        className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-zinc-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                        Giá niêm yết (VNĐ):
+                      </label>
+                      <input
+                        type="number"
+                        required
+                        value={newProductForm.price}
+                        onChange={(e) => setNewProductForm({ ...newProductForm, price: Number(e.target.value) })}
+                        className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono focus:outline-none focus:border-zinc-900"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                        Quy cách:
+                      </label>
+                      <input
+                        type="text"
+                        value={newProductForm.unit}
+                        onChange={(e) => setNewProductForm({ ...newProductForm, unit: e.target.value })}
+                        placeholder="VD: Chai 900ml"
+                        className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-zinc-900"
+                      />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                      Đường dẫn ảnh sản phẩm (Image URL):
+                    </label>
+                    <input
+                      type="text"
+                      value={newProductForm.imageUrl}
+                      onChange={(e) => setNewProductForm({ ...newProductForm, imageUrl: e.target.value })}
+                      className="w-full px-3 py-1.5 text-xs rounded-lg bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 font-mono focus:outline-none focus:border-zinc-900"
+                    />
+                  </div>
+
+                  <div className="flex justify-end gap-2 pt-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowAddProductModal(false)}
+                      className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Hủy
+                    </button>
+                    <button
+                      type="submit"
+                      className="px-4 py-1.5 text-xs font-medium text-white bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
+                    >
+                      Lưu Vào Danh Mục Gốc
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
       )}
     </div>
   );

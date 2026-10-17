@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { MapPin, X, Check, Copy, RotateCcw } from 'lucide-react';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 
 export interface OrderSuccessModalProps {
   isOpen: boolean;
@@ -21,6 +23,9 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   onCancelledClosed,
   onReorder,
 }) => {
+  // Lock background body scroll whenever modal is open
+  useBodyScrollLock(isOpen);
+
   const [copied, setCopied] = useState(false);
   const [isCancelled, setIsCancelled] = useState(false);
   const autoCloseTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -106,7 +111,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
     }
   };
 
-  return (
+  return createPortal(
     <AnimatePresence>
       {isOpen && (
         <motion.div
@@ -114,8 +119,8 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
-          transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40 backdrop-blur-sm"
+          transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+          className="fixed inset-0 z-[100] flex items-center justify-center p-4 bg-slate-950/65 backdrop-blur-sm overscroll-contain"
           onClick={(e) => {
             if (e.target === e.currentTarget) handleCloseClick();
           }}
@@ -123,10 +128,10 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
           {/* Modal Card */}
           <motion.div
             key="order-success-card"
-            initial={{ opacity: 0, scale: 0.95, y: 10 }}
+            initial={{ opacity: 0, scale: 0.93, y: 20 }}
             animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 10 }}
-            transition={{ type: 'spring', damping: 28, stiffness: 380 }}
+            exit={{ opacity: 0, scale: 0.94, y: 14 }}
+            transition={{ type: 'spring', damping: 28, stiffness: 320, mass: 0.8 }}
             className="w-full max-w-[420px] bg-white rounded-2xl shadow-2xl p-6 sm:p-7 relative border border-slate-100"
           >
             {/* Top Close Button */}
@@ -297,6 +302,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
           </motion.div>
         </motion.div>
       )}
-    </AnimatePresence>
+    </AnimatePresence>,
+    document.body
   );
 };

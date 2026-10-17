@@ -1,16 +1,19 @@
 import React, { useState, useEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useSound } from '../../context/OrderSoundContext';
 import { subscribeToCustomer, getSocket } from '../../services/socket';
 import { Device, Order, Product } from '../../types';
-import { Radio, ShoppingBag, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3, Settings, ChevronDown, RotateCcw } from 'lucide-react';
+import { Radio, ShoppingBag, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3, Settings, ChevronDown, RotateCcw, Store } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Floating3DCard } from '../../components/3d/Floating3DCard';
 import { WebBluetoothProvisioner } from '../../components/devices/WebBluetoothProvisioner';
 import { WhiteDeviceAirPodsModal } from '../../components/devices/WhiteDeviceAirPodsModal';
 import { OrderSuccessModal } from '../../components/orders/OrderSuccessModal';
+import { CustomerStoreSelectorModal, StoreItem, MOCK_STORES } from '../../components/customer/CustomerStoreSelectorModal';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 
 
 // ─────────────────────────────────────────────
@@ -177,22 +180,28 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
                     <Radio className={`w-3 h-3 text-zinc-400 ${simulatingId === dev.deviceId ? 'animate-spin' : ''}`} />
                     <span>Thử nút</span>
                   </button>
-                  <button
+                  <motion.button
+                    whileTap={{ scale: 0.92 }}
+                    whileHover={{ scale: 1.03, y: -1 }}
+                    transition={{ type: 'spring', stiffness: 450, damping: 25 }}
                     type="button"
                     onClick={() => onConfigOpen(dev)}
-                    className="flex-1 px-2.5 py-1.5 rounded-full border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 text-zinc-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors"
+                    className="flex-1 px-2.5 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 hover:border-[#0E6BA8]/50 hover:text-[#0E6BA8] text-zinc-600 dark:text-zinc-300 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs group"
                   >
-                    <Sliders className="w-3 h-3 text-zinc-400" />
+                    <Sliders className="w-3 h-3 text-zinc-400 group-hover:text-[#0E6BA8] transition-colors" />
                     <span>Cấu hình</span>
-                  </button>
-                  <button
+                  </motion.button>
+                  <motion.button
+                    whileTap={{ scale: 0.92 }}
+                    whileHover={{ scale: 1.03, y: -1 }}
+                    transition={{ type: 'spring', stiffness: 450, damping: 25 }}
                     type="button"
                     onClick={() => onWifiOpen(dev)}
-                    className="flex-1 px-2.5 py-1.5 rounded-full border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 text-zinc-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors"
+                    className="flex-1 px-2.5 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 hover:border-[#0E6BA8]/50 hover:text-[#0E6BA8] text-zinc-600 dark:text-zinc-300 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs group"
                   >
-                    <Wifi className="w-3 h-3 text-zinc-400" />
+                    <Wifi className="w-3 h-3 text-zinc-400 group-hover:text-[#0E6BA8] transition-colors" />
                     <span>Wi-Fi</span>
-                  </button>
+                  </motion.button>
                 </div>
               </div>
             </motion.div>
@@ -210,6 +219,16 @@ export const CustomerHomePage: React.FC = () => {
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [showAirPodsModal, setShowAirPodsModal] = useState(false);
+
+  // Store Selector Modal (GPS Radius & Store Code)
+  const [showStoreModal, setShowStoreModal] = useState(false);
+  const [selectedStore, setSelectedStore] = useState<StoreItem | null>(() => {
+    try {
+      const cached = localStorage.getItem('smart_order_customer_store');
+      if (cached) return JSON.parse(cached);
+    } catch {}
+    return MOCK_STORES[0]; // LeBao Store by default
+  });
 
   // Device Onboarding (Code / QR) Modal state
   const [showAddModal, setShowAddModal] = useState(false);
@@ -232,7 +251,11 @@ export const CustomerHomePage: React.FC = () => {
   const [showWifiPassword, setShowWifiPassword] = useState(false);
   const [wifiUpdating, setWifiUpdating] = useState(false);
   const [wifiSuccessMsg, setWifiSuccessMsg] = useState<string | null>(null);
-  const [wifiPanelTab, setWifiPanelTab] = useState<'BLE' | 'CODE' | 'SELECT'>('BLE');
+  const [wifiErrorMsg, setWifiErrorMsg] = useState<string | null>(null);
+  const [wifiPanelTab, setWifiPanelTab] = useState<'BLE' | 'USB' | 'SELECT'>('BLE');
+  const [connectedBleDevice, setConnectedBleDevice] = useState<any>(null);
+  const [bleGattServer, setBleGattServer] = useState<any>(null);
+  const [isBleScanning, setIsBleScanning] = useState(false);
   const [wifiSelectedDevId, setWifiSelectedDevId] = useState<string>('');
   const [wifiCodeInput, setWifiCodeInput] = useState<string>('');
   const [wifiLookupLoading, setWifiLookupLoading] = useState<boolean>(false);
@@ -261,6 +284,16 @@ export const CustomerHomePage: React.FC = () => {
   const [configSuccessMsg, setConfigSuccessMsg] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
+
+  // Lock background body scroll whenever any inline modal is open
+  const isAnyInlineModalOpen = Boolean(
+    configModalDevice ||
+    changeWifiDevice ||
+    showWifiWebModal ||
+    transferringDevice ||
+    showAddModal
+  );
+  useBodyScrollLock(isAnyInlineModalOpen);
 
   const fetchData = async () => {
     try {
@@ -589,34 +622,134 @@ export const CustomerHomePage: React.FC = () => {
     }
   };
 
-  // Cập nhật cấu hình Wi-Fi trực tiếp trên Web
-  const handleSaveWifiOnWeb = async (devToConfig?: Device | null) => {
-    const targetDev = devToConfig || changeWifiDevice || wifiLookupFoundDev || devices.find(d => d.deviceId === wifiSelectedDevId) || devices[0];
-    if (!targetDev) {
-      alert('Vui lòng nhập mã số nút hoặc chọn nút bấm trước khi đổi Wi-Fi');
+  // Kết nối Web Bluetooth
+  const handleConnectBluetooth = async () => {
+    if (typeof navigator === 'undefined' || !('bluetooth' in navigator)) {
+      setWifiErrorMsg('Trình duyệt của bạn chưa hỗ trợ Web Bluetooth. Vui lòng mở bằng Google Chrome hoặc Microsoft Edge.');
       return;
     }
-    if (!wifiSsidInput.trim()) {
-      alert('Vui lòng nhập hoặc chọn Tên mạng Wi-Fi (SSID)');
-      return;
-    }
-    setWifiUpdating(true);
-    setWifiSuccessMsg(null);
+    setIsBleScanning(true);
+    setWifiErrorMsg(null);
     try {
-      const res = await api.post(`/devices/${targetDev.deviceId}/change-wifi`, {
+      const navBluetooth = (navigator as any).bluetooth;
+      const device = await navBluetooth.requestDevice({
+        filters: [
+          { namePrefix: 'SmartOrder' },
+          { namePrefix: 'SmartButton' },
+          { namePrefix: 'Smart' },
+          { namePrefix: 'ESP' },
+        ],
+        optionalServices: [
+          '0000fff0-0000-1000-8000-00805f9b34fb',
+          0xfff0,
+        ],
+      });
+      setConnectedBleDevice(device);
+      let server = device.gatt;
+      if (!server.connected) {
+        try {
+          server = await device.gatt.connect();
+        } catch (_) {
+          if (device.gatt?.connected) server = device.gatt;
+        }
+      }
+      setBleGattServer(server);
+    } catch (err: any) {
+      if (err.name !== 'NotFoundError') {
+        setWifiErrorMsg('Không thể kết nối Bluetooth. Đảm bảo nút đang bật và ở gần.');
+      }
+    } finally {
+      setIsBleScanning(false);
+    }
+  };
+
+  // Cập nhật cấu hình Wi-Fi trực tiếp trên Web / BLE / USB
+  const handleSaveAndProvisionWifi = async () => {
+    const targetDev = changeWifiDevice || wifiLookupFoundDev || devices.find(d => d.deviceId === wifiSelectedDevId) || devices[0];
+    const devId = connectedBleDevice?.name || targetDev?.deviceId || 'BTN-8829-WTR';
+
+    if (!wifiSsidInput.trim()) {
+      setWifiErrorMsg('Vui lòng nhập Tên mạng Wi-Fi (2.4GHz)');
+      return;
+    }
+
+    setWifiUpdating(true);
+    setWifiErrorMsg(null);
+    setWifiSuccessMsg(null);
+
+    try {
+      // 1. Nếu đang ở tab BLE và đã kết nối
+      if (wifiPanelTab === 'BLE' && (connectedBleDevice || bleGattServer)) {
+        try {
+          let server = bleGattServer;
+          if (!server || !server.connected) {
+            if (connectedBleDevice?.gatt) {
+              server = await connectedBleDevice.gatt.connect();
+              setBleGattServer(server);
+            }
+          }
+          if (server) {
+            let service = null;
+            try {
+              service = await server.getPrimaryService('0000fff0-0000-1000-8000-00805f9b34fb');
+            } catch {
+              service = await server.getPrimaryService(0xfff0);
+            }
+            if (service) {
+              const char = await service.getCharacteristic('0000fff2-0000-1000-8000-00805f9b34fb');
+              const encoder = new TextEncoder();
+              const payload = encoder.encode(`${wifiSsidInput.trim()}:${wifiPasswordInput}`);
+              if (typeof (char as any).writeValueWithoutResponse === 'function') {
+                await (char as any).writeValueWithoutResponse(payload);
+              } else {
+                await char.writeValue(payload);
+              }
+            }
+          }
+        } catch (bleErr) {
+          console.warn('BLE write note:', bleErr);
+        }
+      } else if (wifiPanelTab === 'USB' && typeof navigator !== 'undefined' && 'serial' in navigator) {
+        // 2. Nếu đang ở tab USB
+        try {
+          const port = await (navigator as any).serial.requestPort();
+          await port.open({ baudRate: 115200 });
+          const encoder = new TextEncoder();
+          const writer = port.writable.getWriter();
+          await writer.write(encoder.encode(`WIFI:${wifiSsidInput.trim()}:${wifiPasswordInput}\n`));
+          writer.releaseLock();
+          await port.close();
+        } catch (usbErr: any) {
+          if (usbErr.name !== 'NotFoundError') {
+            console.warn('USB write note:', usbErr);
+          }
+        }
+      }
+
+      // 3. Luôn đồng bộ cấu hình Wi-Fi lên server
+      const res = await api.post(`/devices/${devId}/change-wifi`, {
         ssid: wifiSsidInput.trim(),
         password: wifiPasswordInput,
       });
+
       if (res.data.success) {
-        setWifiSuccessMsg(`🟢 ĐÈN LED NÚT ĐÃ CHUYỂN SANG XANH LÁ!\nĐã cập nhật cấu hình mạng Wi-Fi "${wifiSsidInput.trim()}" cho nút ${targetDev.deviceId} thành công trực tiếp trên Web. Nút đã sẵn sàng bấm đặt hàng ngay, không cần vào 192.168.4.1.`);
-        confetti({ particleCount: 70, spread: 70, origin: { y: 0.5 } });
+        setWifiSuccessMsg(`Đã cập nhật Wi-Fi "${wifiSsidInput.trim()}" cho nút ${devId} thành công.`);
+        confetti({ particleCount: 60, spread: 60, origin: { y: 0.5 } });
         fetchData();
+        setTimeout(() => {
+          setChangeWifiDevice(null);
+          setWifiSuccessMsg(null);
+        }, 1200);
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể lưu cấu hình Wi-Fi');
+      setWifiErrorMsg(err.response?.data?.message || 'Không thể lưu cấu hình Wi-Fi');
     } finally {
       setWifiUpdating(false);
     }
+  };
+
+  const handleSaveWifiOnWeb = async (devToConfig?: Device | null) => {
+    return handleSaveAndProvisionWifi();
   };
 
   // Transfer device submit
@@ -714,36 +847,60 @@ export const CustomerHomePage: React.FC = () => {
           <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
             Xin chào, {user?.fullName || 'Cư Dân'}
           </h1>
-          <div className="flex flex-wrap items-center gap-3 mt-2">
-            <span className="flex items-center gap-1.5 text-sm text-zinc-400">
-              <MapPin className="w-3.5 h-3.5" />
-              {user?.store?.name || 'Đại lý Nước & Gas Gia Định'}
-            </span>
-            <span className="text-zinc-200">·</span>
-            <span className="text-sm text-zinc-400">
-              Căn hộ {(user as any)?.customerProfile?.apartment || '—'}
+          <div className="flex flex-wrap items-center gap-2.5 mt-2">
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.97 }}
+              type="button"
+              onClick={() => setShowStoreModal(true)}
+              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-[#0E6BA8]/10 hover:bg-[#0E6BA8]/15 text-[#0E6BA8] dark:text-sky-400 border border-[#0E6BA8]/20 transition-all cursor-pointer group shadow-2xs"
+              title="Nhấn để đổi cửa hàng hoặc tìm đại lý lân cận"
+            >
+              <Store className="w-3.5 h-3.5 text-[#0E6BA8] shrink-0" />
+              <span className="font-semibold">{selectedStore?.name || user?.store?.name || 'LeBao Store (Q7)'}</span>
+              <span className="text-[10px] bg-[#0E6BA8] text-white px-1.5 py-0.2 rounded-full font-mono">
+                {selectedStore?.code || 'STORE-NFHT4'}
+              </span>
+              <span className="text-[11px] underline opacity-75 group-hover:opacity-100 flex items-center">
+                Đổi cửa hàng <ChevronRight className="w-3 h-3 ml-0.5 group-hover:translate-x-0.5 transition-transform" />
+              </span>
+            </motion.button>
+            <span className="text-zinc-200 dark:text-zinc-700">·</span>
+            <span className="text-sm text-zinc-400 flex items-center gap-1">
+              <MapPin className="w-3 h-3 text-zinc-400" />
+              <span>Căn hộ {(user as any)?.customerProfile?.apartment || 'Landmark Plus Q7'}</span>
             </span>
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-5">
           <span className="flex items-center gap-2 text-sm text-zinc-500">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-            <span className="tabular-nums font-medium text-zinc-700">
+            <span className="tabular-nums font-medium text-zinc-700 dark:text-zinc-300">
               {devices.length > 0 ? devices.filter(d => d.status !== 'DISABLED').length : 4}/{devices.length > 0 ? devices.length : 4}
             </span> nút online
           </span>
           <span className="flex items-center gap-1.5 text-sm text-zinc-500">
             <Battery className="w-3.5 h-3.5 text-zinc-400" />
-            Pin trung bình <span className="tabular-nums font-medium text-zinc-700">{devices.length > 0 ? Math.round(devices.reduce((s, d) => s + (d.batteryLevel ?? 96), 0) / devices.length) : 96}%</span>
+            Pin trung bình <span className="tabular-nums font-medium text-zinc-700 dark:text-zinc-300">{devices.length > 0 ? Math.round(devices.reduce((s, d) => s + (d.batteryLevel ?? 96), 0) / devices.length) : 96}%</span>
           </span>
-          <motion.button
-            whileTap={{ scale: 0.97 }}
-            onClick={() => setShowAirPodsModal(true)}
-            className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold rounded-lg transition-all duration-150 ease-out active:scale-[0.97] hover:shadow-md cursor-pointer shadow-xs"
-          >
-            <Plus className="w-3.5 h-3.5" />
-            + Thêm nút mới
-          </motion.button>
+          <div className="ml-auto flex items-center gap-2">
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setShowStoreModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg transition-all duration-150 ease-out active:scale-[0.97] hover:shadow-2xs cursor-pointer shadow-xs"
+            >
+              <Store className="w-3.5 h-3.5 text-[#0E6BA8]" />
+              <span>Đổi Cửa Hàng</span>
+            </motion.button>
+            <motion.button
+              whileTap={{ scale: 0.97 }}
+              onClick={() => setShowAirPodsModal(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold rounded-lg transition-all duration-150 ease-out active:scale-[0.97] hover:shadow-md cursor-pointer shadow-xs"
+            >
+              <Plus className="w-3.5 h-3.5" />
+              + Thêm nút mới
+            </motion.button>
+          </div>
         </div>
       </motion.div>
 
@@ -845,7 +1002,7 @@ export const CustomerHomePage: React.FC = () => {
             </motion.button>
           </motion.div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
             {devices.map((dev, devIndex) => {
               const cfg = dev.configuration;
               const product = cfg?.product;
@@ -990,368 +1147,422 @@ export const CustomerHomePage: React.FC = () => {
         )}
       </motion.div>
 
-      {/* 2. BẢNG CẤU HÌNH MẠNG WI-FI (TRỰC TIẾP TRÊN WEB HOẶC QUA THIẾT BỊ)       */}
       {/* ========================================================================= */}
-      {changeWifiDevice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
-          <div className="relative w-full max-w-lg bg-white dark:bg-[#101014] rounded-2xl shadow-2xl p-6 border border-slate-200 dark:border-zinc-800 space-y-4 animate-in fade-in zoom-in-95 duration-150">
-            {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-zinc-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-xl bg-sky-50 dark:bg-red-500/15 text-sky-600 dark:text-red-400 flex items-center justify-center border border-sky-200 dark:border-red-500/30">
-                  <Wifi className="w-5 h-5" />
-                </div>
+      {/* 2. BẢNG CẤU HÌNH MẠNG WI-FI (Linear / Apple Home Design System)          */}
+      {/* ========================================================================= */}
+      {createPortal(
+        <AnimatePresence>
+          {changeWifiDevice && (
+            <motion.div
+              key="wifi-modal-wrapper"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.24, ease: 'easeOut' }}
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden overscroll-contain"
+            >
+            {/* Smooth Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.24, ease: 'easeOut' }}
+              onClick={() => {
+                setChangeWifiDevice(null);
+                setShowWifiWebModal(false);
+                setWifiSuccessMsg(null);
+                setWifiErrorMsg(null);
+              }}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm cursor-pointer"
+            />
+
+            {/* Smooth Modal Dialog */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 22 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 14 }}
+              transition={{
+                type: 'spring',
+                damping: 30,
+                stiffness: 300,
+                mass: 0.85,
+              }}
+              className="relative max-h-[90vh] w-full max-w-lg flex flex-col bg-white dark:bg-[#101014] rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.3)] border border-slate-200/80 dark:border-zinc-800 overflow-hidden z-10"
+            >
+              {/* Header cố định */}
+              <div className="flex items-center justify-between px-6 py-4 border-b border-slate-100 dark:border-zinc-800 shrink-0">
                 <div>
-                  <h3 className="text-base font-bold text-slate-900 dark:text-white">
-                    Cấu Hình Mạng Wi-Fi Nút Bấm
+                  <h3 className="text-base font-semibold text-slate-900 dark:text-white">
+                    Cấu hình mạng Wi-Fi nút bấm
                   </h3>
-                  <p className="text-xs text-slate-500 dark:text-zinc-400">
-                    Chỉ cần nhập tên mạng & mật khẩu — Bảo toàn 100% sản phẩm và sở hữu
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Thiết lập mạng Wi-Fi 2.4GHz để nút bấm gửi đơn hàng tức thì
                   </p>
                 </div>
+                <button
+                  onClick={() => {
+                    setChangeWifiDevice(null);
+                    setShowWifiWebModal(false);
+                    setWifiSuccessMsg(null);
+                    setWifiErrorMsg(null);
+                  }}
+                  className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
               </div>
-              <button
-                onClick={() => {
-                  setChangeWifiDevice(null);
-                  setShowWifiWebModal(false);
-                  setWifiSuccessMsg(null);
-                }}
-                className="p-1.5 rounded-lg text-slate-400 hover:text-slate-600 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
 
-            {/* Tab Switcher: CHỌN PHƯƠNG THỨC CHỌN NÚT */}
-            <div className="flex p-1 bg-slate-100 dark:bg-zinc-900 rounded-xl border border-slate-200 dark:border-zinc-800">
-              <button
-                type="button"
-                onClick={() => setWifiPanelTab('BLE')}
-                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                  wifiPanelTab === 'BLE'
-                    ? 'bg-white dark:bg-zinc-800 text-cyan-600 dark:text-red-400 shadow-sm'
-                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Bluetooth className="w-3.5 h-3.5 text-cyan-500 dark:text-red-400" />
-                <span>Bluetooth (Không Dây)</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setWifiPanelTab('CODE')}
-                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                  wifiPanelTab === 'CODE'
-                    ? 'bg-white dark:bg-zinc-800 text-sky-600 dark:text-red-400 shadow-sm'
-                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Hash className="w-3.5 h-3.5" />
-                <span>Nhập Mã PIN</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => setWifiPanelTab('SELECT')}
-                className={`flex-1 py-2 rounded-lg text-xs font-bold transition-all flex items-center justify-center gap-1.5 ${
-                  wifiPanelTab === 'SELECT'
-                    ? 'bg-white dark:bg-zinc-800 text-sky-600 dark:text-red-400 shadow-sm'
-                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
-                }`}
-              >
-                <Radio className="w-3.5 h-3.5" />
-                <span>Chọn Nút ({devices.length})</span>
-              </button>
-            </div>
+              {/* Nội dung ở giữa cuộn được */}
+              <div className="p-6 overflow-y-auto space-y-4 flex-1 overscroll-contain" data-scrollable="true">
+                {/* Alert thông báo */}
+                {wifiSuccessMsg && (
+                  <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 rounded-lg text-xs text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
+                    <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
+                    <span>{wifiSuccessMsg}</span>
+                  </div>
+                )}
+                {wifiErrorMsg && (
+                  <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-lg text-xs text-rose-600 dark:text-rose-400 flex items-center gap-2">
+                    <AlertCircle className="w-4 h-4 shrink-0" />
+                    <span>{wifiErrorMsg}</span>
+                  </div>
+                )}
 
-            {/* PHƯƠNG THỨC 0: SÓNG BLUETOOTH BLE 1-CHẠM */}
-            {wifiPanelTab === 'BLE' && (
-              <WebBluetoothProvisioner
-                defaultSsid={wifiSsidInput}
-                onSuccess={(devId) => {
-                  fetchData();
-                }}
-              />
-            )}
-
-            {/* PHƯƠNG THỨC 1: NHẬP MÃ SỐ PIN */}
-            {wifiPanelTab === 'CODE' && (
-              <div className="space-y-3 p-3.5 bg-slate-50 dark:bg-zinc-900/60 rounded-2xl border border-slate-200 dark:border-zinc-800">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  Nhập mã PIN 6 số hoặc Device ID in trên nút:
-                </label>
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={wifiCodeInput}
-                    onChange={(e) => {
-                      const val = e.target.value.toUpperCase();
-                      setWifiCodeInput(val);
-                      if (val.length === 6 && /^\d+$/.test(val)) {
-                        handleLookupWifiCode(val);
-                      }
-                    }}
-                    placeholder="VD: 882910 hoặc SOB-000001"
-                    className="flex-1 px-3.5 py-2.5 text-sm tabular-nums font-bold rounded-xl bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white uppercase tracking-wider focus:outline-none focus:ring-2 focus:ring-sky-500/30 dark:focus:ring-red-500/30"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => handleLookupWifiCode(wifiCodeInput)}
-                    disabled={wifiLookupLoading || !wifiCodeInput.trim()}
-                    className="px-4 py-2.5 bg-sky-600 hover:bg-sky-700 dark:bg-gradient-to-r dark:from-red-600 dark:to-rose-600 dark:hover:from-red-500 dark:hover:to-rose-500 disabled:opacity-50 text-white rounded-xl text-xs font-bold transition-all flex items-center gap-1.5 shrink-0"
-                  >
-                    {wifiLookupLoading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <span>Tra Cứu</span>}
-                  </button>
+                {/* 2. Segmented Control duy nhất trên 1 hàng có animated sliding pill */}
+                <div className="grid grid-cols-3 bg-slate-100 dark:bg-zinc-800/70 p-1 rounded-lg text-sm font-medium relative">
+                  {(['BLE', 'USB', 'SELECT'] as const).map((tab) => {
+                    const isSelected = wifiPanelTab === tab;
+                    const labels = {
+                      BLE: 'Bluetooth (BLE)',
+                      USB: 'Cáp USB',
+                      SELECT: `Chọn nút (${devices.length})`,
+                    };
+                    return (
+                      <motion.button
+                        key={tab}
+                        whileTap={{ scale: 0.96 }}
+                        type="button"
+                        onClick={() => setWifiPanelTab(tab)}
+                        className="relative py-1.5 px-2 rounded-md text-center transition-colors whitespace-nowrap truncate cursor-pointer select-none"
+                      >
+                        {isSelected && (
+                          <motion.div
+                            layoutId="wifiPanelTabIndicator"
+                            className="absolute inset-0 bg-white dark:bg-zinc-900 rounded-md shadow-xs border border-slate-200/50 dark:border-zinc-700/60"
+                            transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                          />
+                        )}
+                        <span className={`relative z-10 transition-colors ${
+                          isSelected
+                            ? 'text-[#0E6BA8] dark:text-sky-400 font-semibold'
+                            : 'text-slate-600 dark:text-slate-400 hover:text-slate-900 dark:hover:text-white'
+                        }`}>
+                          {labels[tab]}
+                        </span>
+                      </motion.button>
+                    );
+                  })}
                 </div>
 
-                {/* Quick samples */}
-                <div className="flex items-center gap-1.5 flex-wrap text-[11px] text-slate-500 dark:text-zinc-400">
-                  <span>Mã mẫu:</span>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWifiCodeInput('882910');
-                      handleLookupWifiCode('882910');
-                    }}
-                    className="px-2 py-0.5 rounded-md bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 tabular-nums text-sky-600 dark:text-red-400 font-bold"
-                  >
-                    882910
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setWifiCodeInput('SOB-000001');
-                      handleLookupWifiCode('SOB-000001');
-                    }}
-                    className="px-2 py-0.5 rounded-md bg-white dark:bg-zinc-800 hover:bg-slate-100 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 tabular-nums text-sky-600 dark:text-red-400 font-bold"
-                  >
-                    SOB-000001
-                  </button>
+                {/* 3. Khối kết nối thiết bị ("Thiết bị kết nối") */}
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                    Thiết bị kết nối
+                  </label>
+                  {!(connectedBleDevice || changeWifiDevice || wifiLookupFoundDev || (wifiPanelTab === 'SELECT' && wifiSelectedDevId)) ? (
+                    <div className="border border-slate-200 dark:border-zinc-800 rounded-lg p-3.5 flex items-center justify-between bg-slate-50/50 dark:bg-zinc-900/50">
+                      <span className="text-sm text-slate-500 dark:text-slate-400">
+                        Chưa kết nối nút bấm
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleConnectBluetooth}
+                        disabled={isBleScanning}
+                        className="bg-white dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-slate-200 hover:bg-slate-50 dark:hover:bg-zinc-700 px-3 py-1.5 rounded-lg text-sm font-medium shadow-xs transition-colors cursor-pointer"
+                      >
+                        {isBleScanning ? 'Đang quét...' : 'Quét thiết bị'}
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="border border-slate-200 dark:border-zinc-800 rounded-lg p-3.5 flex items-center justify-between bg-slate-50/50 dark:bg-zinc-900/50">
+                      <div className="flex items-center gap-2.5">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
+                        <div>
+                          <div className="font-semibold text-slate-900 dark:text-white tabular-nums text-sm">
+                            {connectedBleDevice?.name || (changeWifiDevice || wifiLookupFoundDev)?.deviceId || wifiSelectedDevId || 'BTN-8829-WTR'}
+                          </div>
+                          <div className="text-xs text-slate-500 dark:text-slate-400">
+                            Đã kết nối · Sẵn sàng nạp Wi-Fi
+                          </div>
+                        </div>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (wifiPanelTab !== 'SELECT') {
+                            handleConnectBluetooth();
+                          }
+                        }}
+                        className="text-xs font-medium text-[#0E6BA8] hover:underline cursor-pointer"
+                      >
+                        Đổi thiết bị
+                      </button>
+                    </div>
+                  )}
                 </div>
 
-                {wifiLookupError && (
-                  <p className="text-xs text-red-500 font-medium">{wifiLookupError}</p>
-                )}
-              </div>
-            )}
-
-            {/* PHƯƠNG THỨC 2: CHỌN NÚT TỪ DANH SÁCH */}
-            {wifiPanelTab === 'SELECT' && (
-              <div className="space-y-2 p-3.5 bg-slate-50 dark:bg-zinc-900/60 rounded-2xl border border-slate-200 dark:border-zinc-800">
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300">
-                  Chọn nút bấm cần cấu hình lại mạng:
-                </label>
-                {devices.length === 0 ? (
-                  <p className="text-xs text-slate-500">Chưa có nút bấm nào. Hãy dùng tab "Nhập Mã Số Nút" ở trên!</p>
-                ) : (
-                  <select
-                    value={wifiSelectedDevId || (devices[0]?.deviceId || '')}
-                    onChange={(e) => {
-                      setWifiSelectedDevId(e.target.value);
-                      const d = devices.find(x => x.deviceId === e.target.value);
-                      if (d) setChangeWifiDevice(d);
-                    }}
-                    className="w-full px-3.5 py-2.5 text-xs tabular-nums font-bold bg-white dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 rounded-xl text-slate-900 dark:text-white outline-none"
-                  >
-                    {devices.map((d) => (
-                      <option key={d.id} value={d.deviceId}>
-                        {d.deviceId} — {d.customName || d.product?.name || 'Smart Button'}
-                      </option>
-                    ))}
-                  </select>
-                )}
-              </div>
-            )}
-
-            {/* THÔNG TIN THIẾT BỊ ĐÃ XÁC NHẬN */}
-            {(changeWifiDevice || wifiLookupFoundDev) && (
-              <div className="p-3 bg-emerald-50/80 dark:bg-emerald-950/30 border border-emerald-300 dark:border-emerald-800/50 rounded-xl flex items-center justify-between text-xs">
-                <div className="flex items-center gap-2.5">
-                  <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                {/* Lựa chọn nút khi ở tab SELECT */}
+                {wifiPanelTab === 'SELECT' && (
                   <div>
-                    <p className="tabular-nums font-bold text-emerald-800 dark:text-emerald-300">
-                      {(changeWifiDevice || wifiLookupFoundDev)?.deviceId} — {(changeWifiDevice || wifiLookupFoundDev)?.customName || (changeWifiDevice || wifiLookupFoundDev)?.product?.name || 'Smart Order Button'}
-                    </p>
-                    <p className="text-[11px] text-emerald-600 dark:text-emerald-400">
-                      {(changeWifiDevice || wifiLookupFoundDev)?.product?.name ? `Sản phẩm: ${(changeWifiDevice || wifiLookupFoundDev)?.product?.name}` : 'Sẵn sàng nạp Wi-Fi'}
-                    </p>
-                  </div>
-                </div>
-                <span className="px-2 py-0.5 rounded-md bg-emerald-600 text-white tabular-nums text-[10px] font-bold">
-                  SẴN SÀNG ĐỔI
-                </span>
-              </div>
-            )}
-
-            {/* FORM NHẬP WI-FI THỦ CÔNG KHI CHỌN TAB CODE HOẶC SELECT */}
-            {wifiPanelTab !== 'BLE' && (
-            <div className="space-y-3.5 pt-1">
-              {wifiSuccessMsg && (
-                <div className="p-3.5 bg-emerald-50 dark:bg-emerald-950/60 border-2 border-emerald-500 rounded-2xl text-xs text-emerald-800 dark:text-emerald-200 font-semibold space-y-1 animate-in fade-in zoom-in-95">
-                  <div className="flex items-center gap-2 font-bold text-emerald-700 dark:text-emerald-300">
-                    <Check className="w-4 h-4 shrink-0 text-emerald-600" />
-                    <span>CẬP NHẬT WI-FI THÀNH CÔNG!</span>
-                  </div>
-                  <p className="text-[11px] leading-relaxed whitespace-pre-line text-emerald-900 dark:text-emerald-100">
-                    {wifiSuccessMsg}
-                  </p>
-                </div>
-              )}
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Chọn hoặc Nhập Tên Wi-Fi (SSID 2.4 GHz):
-                </label>
-                <input
-                  type="text"
-                  value={wifiSsidInput}
-                  onChange={(e) => setWifiSsidInput(e.target.value)}
-                  placeholder="VD: Home_WiFi_2.4G"
-                  className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-sky-500/30 dark:focus:ring-red-500/30"
-                />
-                {/* Quick fill pills */}
-                <div className="flex items-center gap-1.5 mt-1.5 flex-wrap text-[11px] text-slate-500 dark:text-zinc-400">
-                  <span>Gợi ý:</span>
-                  {['Home_WiFi_2.4G', 'FPT_Telecom_GiaDinh', 'Viettel_5G_Extender', 'SmartOffice_Guest'].map((net) => (
-                    <button
-                      key={net}
-                      type="button"
-                      onClick={() => setWifiSsidInput(net)}
-                      className={`px-2 py-0.5 rounded-md text-[11px] transition-colors ${
-                        wifiSsidInput === net
-                          ? 'bg-sky-600 dark:bg-red-600 text-white font-bold'
-                          : 'bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300'
-                      }`}
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                      Chọn nút bấm cần nạp Wi-Fi
+                    </label>
+                    <select
+                      value={wifiSelectedDevId || changeWifiDevice?.deviceId || (devices[0]?.deviceId || '')}
+                      onChange={(e) => {
+                        setWifiSelectedDevId(e.target.value);
+                        const d = devices.find((x) => x.deviceId === e.target.value);
+                        if (d) setChangeWifiDevice(d);
+                      }}
+                      className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3.5 py-2 text-sm text-slate-900 dark:text-white tabular-nums focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 focus:outline-none transition-colors"
                     >
-                      {net}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Mật Khẩu Wi-Fi:
-                </label>
-                <div className="relative">
-                  <input
-                    type={showWifiPassword ? 'text' : 'password'}
-                    value={wifiPasswordInput}
-                    onChange={(e) => setWifiPasswordInput(e.target.value)}
-                    placeholder="Nhập mật khẩu Wi-Fi nhà bạn"
-                    className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white font-medium pr-14 focus:outline-none focus:ring-2 focus:ring-sky-500/30 dark:focus:ring-red-500/30"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setShowWifiPassword(!showWifiPassword)}
-                    className="absolute right-3 top-1/2 -translate-y-1/2 text-[11px] font-bold text-sky-600 dark:text-red-400"
-                  >
-                    {showWifiPassword ? 'Ẩn' : 'Hiện'}
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-2.5 bg-blue-50/70 dark:bg-red-950/20 border border-blue-200 dark:border-red-900/40 rounded-xl text-[11px] text-blue-700 dark:text-red-300 flex items-center gap-2">
-                <Zap className="w-4 h-4 text-blue-500 dark:text-red-400 shrink-0" />
-                <span><strong>Đổi Wi-Fi 1 Chạm:</strong> Lưu trực tiếp trên Web/App — Đèn viền nút sẽ tự đổi sang XANH LÁ. Không cần mở trang 192.168.4.1!</span>
-              </div>
-
-              <button
-                type="button"
-                onClick={() => handleSaveWifiOnWeb()}
-                disabled={wifiUpdating || !wifiSsidInput.trim()}
-                className="w-full py-3.5 rounded-2xl bg-sky-600 hover:bg-sky-700 dark:bg-gradient-to-r dark:from-red-600 dark:to-rose-600 dark:hover:from-red-500 dark:hover:to-rose-500 disabled:opacity-50 text-white font-black text-xs shadow-lg shadow-sky-500/20 dark:shadow-red-600/30 transition-all flex items-center justify-center gap-2"
-              >
-                {wifiUpdating ? (
-                  <>
-                    <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>ĐANG NẠP CẤU HÌNH WI-FI XUỐNG NÚT...</span>
-                  </>
-                ) : (
-                  <>
-                    <Wifi className="w-4 h-4" />
-                    <span>LƯU & ĐỔI WI-FI (ĐÈN CHUYỂN XANH LÁ)</span>
-                  </>
+                      {devices.map((d) => (
+                        <option key={d.id} value={d.deviceId}>
+                          {d.deviceId} — {d.customName || d.product?.name || 'Smart Button'}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 )}
-              </button>
-            </div>
-            )}
-          </div>
-        </div>
-      )}
+
+                {/* Thông tin hỗ trợ khi ở tab USB */}
+                {wifiPanelTab === 'USB' && (
+                  <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+                    Cắm nút ESP32 qua cáp USB vào máy tính. Nhập thông tin Wi-Fi bên dưới và bấm <strong>Lưu & Nạp Wi-Fi</strong> để chọn cổng COM nạp tốc độ cao.
+                  </p>
+                )}
+
+                {/* 4. Form nhập Wi-Fi chuẩn Linear (không lồng hộp) */}
+                <div className="space-y-3.5 pt-1">
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                      Tên mạng Wi-Fi (2.4GHz)
+                    </label>
+                    <input
+                      type="text"
+                      value={wifiSsidInput}
+                      onChange={(e) => setWifiSsidInput(e.target.value)}
+                      placeholder="Nhập tên Wi-Fi (VD: Home_WiFi_2.4G)"
+                      className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3.5 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 focus:outline-none transition-colors"
+                    />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                      Mật khẩu Wi-Fi
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showWifiPassword ? 'text' : 'password'}
+                        value={wifiPasswordInput}
+                        onChange={(e) => setWifiPasswordInput(e.target.value)}
+                        placeholder="Nhập mật khẩu Wi-Fi"
+                        className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3.5 py-2 text-sm text-slate-900 dark:text-white placeholder:text-slate-400 focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 focus:outline-none pr-14 transition-colors"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowWifiPassword(!showWifiPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium text-slate-500 hover:text-slate-800 dark:text-slate-400 dark:hover:text-slate-200 cursor-pointer"
+                      >
+                        {showWifiPassword ? 'Ẩn' : 'Hiện'}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {/* Footer cố định */}
+              <div className="flex items-center justify-end gap-2.5 px-6 py-4 border-t border-slate-100 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/50 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setChangeWifiDevice(null);
+                    setShowWifiWebModal(false);
+                    setWifiSuccessMsg(null);
+                    setWifiErrorMsg(null);
+                  }}
+                  className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-200/60 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                >
+                  Hủy
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveAndProvisionWifi}
+                  disabled={wifiUpdating}
+                  className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-[#0E6BA8] hover:bg-[#0B5586] shadow-sm transition-all active:scale-[0.98] disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
+                >
+                  {wifiUpdating ? (
+                    <>
+                      <RefreshCw className="w-4 h-4 animate-spin" />
+                      <span>Đang nạp Wi-Fi...</span>
+                    </>
+                  ) : (
+                    <span>Lưu & Nạp Wi-Fi</span>
+                  )}
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>,
+      document.body
+    )}
 
       {/* ========================================================================= */}
       {/* 3. TRANSFER DEVICE MODAL (CHUYỂN NHƯỢNG NÚT SANG CHỦ MỚI)                */}
       {/* ========================================================================= */}
-      {transferringDevice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
-          <div className="relative w-full max-w-md bg-white dark:bg-[#101014] rounded-3xl shadow-2xl p-6 border border-slate-200 dark:border-zinc-800 space-y-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Share2 className="w-5 h-5 text-indigo-500 dark:text-rose-400" />
-                <h3 className="text-base font-bold text-slate-900 dark:text-white">Chuyển Nhượng Nút Bấm</h3>
-              </div>
-              <button onClick={() => setTransferringDevice(null)} className="p-1 text-slate-400 hover:text-white">
-                <X className="w-5 h-5" />
-              </button>
-            </div>
+      {createPortal(
+        <AnimatePresence>
+          {transferringDevice && (
+            <motion.div
+              key="transfer-modal-wrapper"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden overscroll-contain"
+            >
+              {/* Smooth Backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                transition={{ duration: 0.24, ease: 'easeOut' }}
+                onClick={() => setTransferringDevice(null)}
+                className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm cursor-pointer"
+              />
 
-            {!transferResult ? (
-              <div className="space-y-3">
-                <p className="text-xs text-slate-600 dark:text-zinc-400">
-                  Khi bạn chuyển nhượng nút <strong>{transferringDevice.deviceId}</strong>, bạn sẽ mất quyền điều khiển nút này. Hệ thống sẽ sinh mã QR mới để người nhận quét và sở hữu.
-                </p>
-                <button
-                  onClick={handleTransferSubmit}
-                  className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 dark:bg-gradient-to-r dark:from-red-600 dark:to-rose-600 dark:hover:from-red-500 dark:hover:to-rose-500 text-white font-bold text-xs"
-                >
-                  XÁC NHẬN CHUYỂN NHƯỢNG
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-3 text-center">
-                <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
-                <h4 className="text-sm font-bold text-slate-900 dark:text-white">Đã Tạo Mã Chuyển Nhượng Mới!</h4>
-                <p className="text-xs text-slate-500 tabular-nums break-all p-3 rounded-xl bg-slate-50 dark:bg-black/50 border border-slate-200 dark:border-zinc-800 text-left">
-                  {transferResult.qrPayload}
-                </p>
-                <p className="text-[11px] text-slate-400">
-                  Hãy gửi mã này cho chủ mới để họ quét trong ứng dụng Smart Order.
-                </p>
-                <button
-                  onClick={() => setTransferringDevice(null)}
-                  className="px-6 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-600 dark:bg-gradient-to-r dark:from-red-600 dark:to-rose-600 text-slate-950 dark:text-white font-bold text-xs"
-                >
-                  ĐÓNG
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
+              {/* Smooth Modal Dialog */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.93, y: 20 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.94, y: 14 }}
+                transition={{
+                  type: 'spring',
+                  damping: 28,
+                  stiffness: 320,
+                  mass: 0.8,
+                }}
+                className="relative w-full max-w-md bg-white dark:bg-[#101014] rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.3)] p-6 border border-slate-200/80 dark:border-zinc-800 space-y-4 z-10"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <Share2 className="w-5 h-5 text-indigo-500 dark:text-rose-400" />
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">Chuyển Nhượng Nút Bấm</h3>
+                  </div>
+                  <button onClick={() => setTransferringDevice(null)} className="p-1 text-slate-400 hover:text-slate-600 dark:hover:text-white cursor-pointer">
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {!transferResult ? (
+                  <div className="space-y-3">
+                    <p className="text-xs text-slate-600 dark:text-zinc-400">
+                      Khi bạn chuyển nhượng nút <strong>{transferringDevice.deviceId}</strong>, bạn sẽ mất quyền điều khiển nút này. Hệ thống sẽ sinh mã QR mới để người nhận quét và sở hữu.
+                    </p>
+                    <button
+                      onClick={handleTransferSubmit}
+                      className="w-full py-3 rounded-xl bg-indigo-600 hover:bg-indigo-700 dark:bg-gradient-to-r dark:from-red-600 dark:to-rose-600 dark:hover:from-red-500 dark:hover:to-rose-500 text-white font-bold text-xs active:scale-[0.98] transition-all cursor-pointer shadow-sm"
+                    >
+                      XÁC NHẬN CHUYỂN NHƯỢNG
+                    </button>
+                  </div>
+                ) : (
+                  <div className="space-y-3 text-center">
+                    <CheckCircle2 className="w-10 h-10 text-emerald-500 mx-auto" />
+                    <h4 className="text-sm font-bold text-slate-900 dark:text-white">Đã Tạo Mã Chuyển Nhượng Mới!</h4>
+                    <p className="text-xs text-slate-500 tabular-nums break-all p-3 rounded-xl bg-slate-50 dark:bg-black/50 border border-slate-200 dark:border-zinc-800 text-left">
+                      {transferResult.qrPayload}
+                    </p>
+                    <p className="text-[11px] text-slate-400">
+                      Hãy gửi mã này cho chủ mới để họ quét trong ứng dụng Smart Order.
+                    </p>
+                    <button
+                      onClick={() => setTransferringDevice(null)}
+                      className="px-6 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-600 dark:bg-gradient-to-r dark:from-red-600 dark:to-rose-600 text-slate-950 dark:text-white font-bold text-xs active:scale-[0.98] transition-all cursor-pointer shadow-sm"
+                    >
+                      ĐÓNG
+                    </button>
+                  </div>
+                )}
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
       )}
 
       {/* ========================================================================= */}
-      {/* 4. USER TỰ CẤU HÌNH NÚT BẤM MODAL                                         */}
+      {/* 4. USER TỰ CẤU HÌNH NÚT BẤM MODAL (Linear / Stripe Design System)         */}
       {/* ========================================================================= */}
-      {configModalDevice && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-md">
-          <div className="relative w-full max-w-lg bg-white dark:bg-[#101014] rounded-3xl shadow-2xl p-6 border border-slate-200 dark:border-zinc-800 space-y-5 animate-in fade-in zoom-in-95 duration-200">
+      {createPortal(
+        <AnimatePresence>
+          {configModalDevice && (
+            <motion.div
+              key="config-modal-wrapper"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.24, ease: 'easeOut' }}
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden overscroll-contain"
+            >
+            {/* Smooth Backdrop */}
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.24, ease: 'easeOut' }}
+              onClick={() => setConfigModalDevice(null)}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm cursor-pointer"
+            />
+
+            {/* Smooth Modal Dialog */}
+            <motion.div
+              initial={{ opacity: 0, scale: 0.92, y: 22 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.94, y: 14 }}
+              transition={{
+                type: 'spring',
+                damping: 30,
+                stiffness: 300,
+                mass: 0.85,
+              }}
+              className="relative w-full max-w-lg bg-white dark:bg-[#101014] rounded-2xl shadow-[0_25px_60px_-15px_rgba(0,0,0,0.3)] border border-slate-200/80 dark:border-zinc-800 p-6 space-y-5 z-10 overflow-hidden"
+            >
             {/* Header */}
-            <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-zinc-800">
-              <div className="flex items-center gap-2.5">
-                <div className="w-10 h-10 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-600 dark:text-amber-400 flex items-center justify-center">
-                  <Sliders className="w-5 h-5" />
-                </div>
-                <div>
-                  <h3 className="text-base font-extrabold text-slate-900 dark:text-white">
-                    Tự Cấu Hình Nút Bấm
-                  </h3>
-                  <p className="text-xs tabular-nums text-slate-400">
-                    Mã định danh: <span className="font-bold text-sky-600 dark:text-red-400">{configModalDevice.deviceId}</span>
-                  </p>
+            <div className="flex items-start justify-between pb-3 border-b border-slate-100 dark:border-zinc-800">
+              <div className="space-y-1">
+                <h3 className="text-lg font-semibold text-slate-900 dark:text-white">
+                  Cấu hình nút bấm
+                </h3>
+                <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 flex-wrap">
+                  <span className="bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-slate-300 px-2 py-0.5 rounded text-xs font-medium tabular-nums">
+                    {configModalDevice.deviceId || 'BTN-8829-WTR'}
+                  </span>
+                  <span>·</span>
+                  <span className="inline-flex items-center gap-1 font-medium text-slate-700 dark:text-slate-300">
+                    <Battery className="w-3.5 h-3.5 text-emerald-500" />
+                    <span className="tabular-nums">Pin {configModalDevice.batteryLevel ?? 100}%</span>
+                  </span>
+                  <span>·</span>
+                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                    {configStatus === 'ACTIVE' ? 'Đang hoạt động' : 'Tạm khóa'}
+                  </span>
                 </div>
               </div>
               <button
                 onClick={() => setConfigModalDevice(null)}
-                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-white rounded-xl hover:bg-slate-100 dark:hover:bg-zinc-800"
+                className="p-1.5 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -1359,176 +1570,151 @@ export const CustomerHomePage: React.FC = () => {
 
             {/* Error / Success Alerts */}
             {configError && (
-              <div className="p-3 bg-rose-500/10 border border-rose-500/20 rounded-xl text-xs text-rose-600 dark:text-rose-400 flex items-center gap-2">
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-lg text-xs text-rose-600 dark:text-rose-400 flex items-center gap-2">
                 <AlertCircle className="w-4 h-4 shrink-0" />
                 <span>{configError}</span>
               </div>
             )}
             {configSuccessMsg && (
-              <div className="p-3 bg-emerald-500/10 border border-emerald-500/20 rounded-xl text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
+              <div className="p-3 bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900/50 rounded-lg text-xs text-emerald-600 dark:text-emerald-400 flex items-center gap-2">
                 <CheckCircle2 className="w-4 h-4 shrink-0" />
                 <span>{configSuccessMsg}</span>
               </div>
             )}
 
-            {/* Device Diagnostics Overview */}
-            <div className="grid grid-cols-3 gap-2 p-3 rounded-2xl bg-slate-50 dark:bg-zinc-950 border border-slate-200/80 dark:border-zinc-800 text-xs">
-              <div className="space-y-0.5">
-                <span className="text-[10px] text-slate-400 uppercase">Pin thiết bị</span>
-                <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
-                  <Battery className="w-3.5 h-3.5 text-emerald-500" />
-                  <span className="tabular-nums">{configModalDevice.batteryLevel ?? 100}%</span>
-                </p>
-              </div>
-              <div className="space-y-0.5">
-                <span className="text-[10px] text-slate-400 uppercase">Thời hạn dùng</span>
-                <p className="font-bold text-slate-800 dark:text-slate-200 flex items-center gap-1">
-                  <Clock className="w-3.5 h-3.5 text-blue-500" />
-                  <span className="tabular-nums">{configModalDevice.expiresAt ? new Date(configModalDevice.expiresAt).toLocaleDateString('vi-VN') : 'Vô thời hạn'}</span>
-                </p>
-              </div>
-              <div className="space-y-0.5">
-                <span className="text-[10px] text-slate-400 uppercase">Trạng thái</span>
-                <p className="font-bold">
-                  {configStatus === 'ACTIVE' ? (
-                    <span className="text-emerald-600 dark:text-emerald-400">Đang bật</span>
-                  ) : (
-                    <span className="text-rose-600 dark:text-rose-400">Tạm khóa</span>
-                  )}
-                </p>
-              </div>
-            </div>
-
             {/* Form Fields */}
             <div className="space-y-4">
-              {/* 1. Tên gợi nhớ */}
+              {/* 1. Tên vị trí nút bấm */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Tên Gợi Nhớ Nút (Ví dụ: Nước Bếp, Nước Phòng Khách, Gas Kho)
+                <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                  Tên vị trí nút bấm
                 </label>
                 <input
                   type="text"
                   value={configCustomName}
                   onChange={(e) => setConfigCustomName(e.target.value)}
-                  placeholder="Nhập tên nút..."
-                  className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-amber-500/30"
+                  placeholder="Ví dụ: Nước Bếp, Nước Phòng Khách, Gas Kho..."
+                  className="w-full px-3.5 py-2 text-sm rounded-lg bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800 text-slate-900 dark:text-white placeholder:text-slate-400 focus:outline-none focus:ring-2 focus:ring-[#0E6BA8]/20 focus:border-[#0E6BA8] transition-all"
                 />
               </div>
 
-              {/* 2. Chọn sản phẩm đặt khi bấm */}
+              {/* 2 & 3. Sản phẩm và Số lượng trên cùng 1 hàng ngang */}
               <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Sản Phẩm Đặt Khi Bấm Nút
-                </label>
-                <select
-                  value={configProductId}
-                  onChange={(e) => setConfigProductId(e.target.value)}
-                  className="w-full px-3.5 py-2.5 text-xs rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white font-medium focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-                >
-                  <option value="">-- Chọn sản phẩm muốn gán cho nút --</option>
-                  {availableProducts.map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name} ({p.unit}) - {p.price.toLocaleString()} ₫
-                    </option>
-                  ))}
-                </select>
-                <p className="text-[11px] text-slate-400 mt-1">
-                  Mỗi khi bạn bấm nút này trên bàn, server sẽ tự động tạo đơn đặt mặt hàng này.
+                <div className="grid grid-cols-12 gap-3">
+                  {/* Cột trái (col-span-8): Sản phẩm tự động đặt */}
+                  <div className="col-span-8">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                      Sản phẩm tự động đặt
+                    </label>
+                    <select
+                      value={configProductId}
+                      onChange={(e) => setConfigProductId(e.target.value)}
+                      className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800 text-slate-900 dark:text-white tabular-nums focus:outline-none focus:ring-2 focus:ring-[#0E6BA8]/20 focus:border-[#0E6BA8] transition-all"
+                    >
+                      <option value="">-- Chọn sản phẩm --</option>
+                      {availableProducts.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name} {p.unit ? `(${p.unit})` : ''} — {p.price?.toLocaleString('vi-VN')} đ
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  {/* Cột phải (col-span-4): Số lượng bộ đếm [- 1 +] liền khối */}
+                  <div className="col-span-4">
+                    <label className="block text-sm font-medium text-slate-700 dark:text-slate-300 mb-1.5">
+                      Số lượng
+                    </label>
+                    <div className="flex items-center justify-between border border-slate-200 dark:border-zinc-800 rounded-lg h-10 px-1 bg-white dark:bg-zinc-900">
+                      <motion.button
+                        whileTap={{ scale: 0.9 }}
+                        type="button"
+                        onClick={() => setConfigQuantity((prev) => Math.max(1, prev - 1))}
+                        className="hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-md w-8 h-8 flex items-center justify-center text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                      >
+                        -
+                      </motion.button>
+                      <span className="text-center font-medium tabular-nums text-slate-900 dark:text-white text-sm select-none">
+                        {configQuantity}
+                      </span>
+                      <motion.button
+                        whileTap={{ scale: 0.9 }}
+                        type="button"
+                        onClick={() => setConfigQuantity((prev) => prev + 1)}
+                        className="hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-md w-8 h-8 flex items-center justify-center text-slate-600 dark:text-slate-300 transition-colors cursor-pointer"
+                      >
+                        +
+                      </motion.button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Dòng chú thích nhỏ bên dưới hàng */}
+                <p className="text-xs text-slate-400 dark:text-slate-500 mt-1.5">
+                  Hệ thống sẽ tự động tạo đơn mặt hàng này ngay khi bạn nhấn nút vật lý.
                 </p>
               </div>
 
-              {/* 3. Số lượng mỗi lần bấm */}
-              <div>
-                <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
-                  Số Lượng Đặt Mỗi Lần Bấm
-                </label>
-                <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setConfigQuantity((prev) => Math.max(1, prev - 1))}
-                    className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-800 dark:text-white font-bold flex items-center justify-center text-base"
-                  >
-                    -
-                  </button>
-                  <input
-                    type="number"
-                    min={1}
-                    max={99}
-                    value={configQuantity}
-                    onChange={(e) => setConfigQuantity(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                    className="w-20 text-center py-2 text-sm tabular-nums font-bold rounded-xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 text-slate-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-amber-500/30"
-                  />
-                  <button
-                    type="button"
-                    onClick={() => setConfigQuantity((prev) => prev + 1)}
-                    className="w-10 h-10 rounded-xl bg-slate-100 dark:bg-zinc-800 hover:bg-slate-200 dark:hover:bg-zinc-700 text-slate-800 dark:text-white font-bold flex items-center justify-center text-base"
-                  >
-                    +
-                  </button>
-                  <span className="text-xs text-slate-500 font-medium">
-                    (Ví dụ: 1 bình, 2 bình, 5 bình...)
-                  </span>
-                </div>
-              </div>
-
-              {/* 4. Trạng thái hoạt động (Còn xài hay không) */}
-              <div className="p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-950 border border-slate-200 dark:border-zinc-800 flex items-center justify-between">
+              {/* 4. Cho phép đặt hàng từ nút này (Toggle Switch phẳng có spring animation) */}
+              <div className="border-t border-slate-100 dark:border-zinc-800 pt-4 flex items-center justify-between">
                 <div>
-                  <h4 className="text-xs font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
-                    <Power className="w-3.5 h-3.5 text-amber-500" />
-                    <span>Cho Phép Đặt Hàng Từ Nút Này</span>
+                  <h4 className="text-sm font-medium text-slate-900 dark:text-white">
+                    Cho phép đặt hàng từ nút này
                   </h4>
-                  <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-0.5">
-                    Tạm khóa nút nếu bạn đi vắng hoặc sợ trẻ nhỏ nghịch bấm nhầm
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Tạm khóa nút nếu bạn đi vắng hoặc sợ trẻ nhỏ bấm nhầm
                   </p>
                 </div>
-                <button
+                <motion.button
+                  whileTap={{ scale: 0.92 }}
                   type="button"
                   onClick={() => setConfigStatus((prev) => (prev === 'ACTIVE' ? 'DISABLED' : 'ACTIVE'))}
                   className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                    configStatus === 'ACTIVE' ? 'bg-emerald-500' : 'bg-slate-300 dark:bg-zinc-700'
+                    configStatus === 'ACTIVE' ? 'bg-[#0E6BA8]' : 'bg-slate-200 dark:bg-zinc-700'
                   }`}
                 >
-                  <span
-                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                  <motion.span
+                    layout
+                    transition={{ type: 'spring', stiffness: 500, damping: 30 }}
+                    className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 ${
                       configStatus === 'ACTIVE' ? 'translate-x-5' : 'translate-x-0'
                     }`}
                   />
-                </button>
+                </motion.button>
               </div>
             </div>
 
-            {/* Actions */}
-            <div className="flex items-center gap-3 pt-2">
+            {/* Footer nút bấm */}
+            <div className="flex justify-end gap-2.5 pt-4 border-t border-slate-100 dark:border-zinc-800">
               <button
                 type="button"
                 onClick={() => setConfigModalDevice(null)}
-                className="flex-1 py-3 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-900 dark:hover:bg-zinc-800 text-slate-700 dark:text-zinc-300 font-bold text-xs"
+                className="px-4 py-2 rounded-lg text-sm font-medium text-slate-600 dark:text-slate-300 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
               >
-                HỦY BỎ
+                Hủy
               </button>
               <button
                 type="button"
                 onClick={handleSaveConfig}
                 disabled={configLoading}
-                className="flex-1 py-3 rounded-xl bg-amber-500 hover:bg-amber-600 dark:bg-gradient-to-r dark:from-amber-500 dark:to-orange-500 text-slate-950 dark:text-white font-extrabold text-xs shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2"
+                className="px-5 py-2 rounded-lg text-sm font-medium text-white bg-[#0E6BA8] hover:bg-[#0B5586] shadow-sm transition-all active:scale-[0.98] disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
               >
                 {configLoading ? (
                   <>
                     <RefreshCw className="w-4 h-4 animate-spin" />
-                    <span>ĐANG LƯU...</span>
+                    <span>Đang lưu...</span>
                   </>
                 ) : (
-                  <>
-                    <Check className="w-4 h-4" />
-                    <span>LƯU CẤU HÌNH</span>
-                  </>
+                  <span>Lưu cấu hình</span>
                 )}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>,
+      document.body
+    )}
 
       {/* Apple-Style AirPods White Device Pairing Modal */}
       <WhiteDeviceAirPodsModal
@@ -1536,6 +1722,19 @@ export const CustomerHomePage: React.FC = () => {
         onClose={() => setShowAirPodsModal(false)}
         onDeviceBound={() => {
           fetchData();
+        }}
+      />
+
+      {/* Customer Store Selector Modal (GPS Radius & Store Code Discovery) */}
+      <CustomerStoreSelectorModal
+        isOpen={showStoreModal}
+        onClose={() => setShowStoreModal(false)}
+        currentStoreCode={selectedStore?.code || 'STORE-NFHT4'}
+        onStoreSelected={(store) => {
+          setSelectedStore(store);
+          try {
+            localStorage.setItem('smart_order_customer_store', JSON.stringify(store));
+          } catch {}
         }}
       />
     </div>
