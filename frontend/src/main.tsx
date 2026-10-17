@@ -5,8 +5,13 @@ import { AuthProvider } from './context/AuthContext';
 import { SoundProvider } from './context/OrderSoundContext';
 import { ThemeProvider } from './context/ThemeContext';
 import { SidebarProvider } from './context/SidebarContext';
+import { ToastProvider } from './context/ToastContext';
 import { App } from './App';
+import { initGlobalModalScrollLock } from './hooks/useBodyScrollLock';
 import './index.css';
+
+// Automatically lock background scrolling whenever any modal/popup is open
+initGlobalModalScrollLock();
 
 ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
   <React.StrictMode>
@@ -15,7 +20,9 @@ ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
         <AuthProvider>
           <SoundProvider>
             <SidebarProvider>
-              <App />
+              <ToastProvider>
+                <App />
+              </ToastProvider>
             </SidebarProvider>
           </SoundProvider>
         </AuthProvider>
