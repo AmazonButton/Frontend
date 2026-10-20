@@ -46,6 +46,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       localStorage.removeItem('smart_order_token');
       localStorage.removeItem('smart_order_refresh_token');
       localStorage.removeItem('smart_order_user');
+      delete api.defaults.headers.common['Authorization'];
       setToken(null);
       setRefreshToken(null);
       setUser(null);
@@ -54,7 +55,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshUser = useCallback(async () => {
     const activeToken = localStorage.getItem('smart_order_token');
-    if (!activeToken) {
+    const activeRefreshToken = localStorage.getItem('smart_order_refresh_token');
+    if (!activeToken && !activeRefreshToken) {
+      setUser(null);
+      setToken(null);
       setIsLoading(false);
       return;
     }
@@ -69,6 +73,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         };
         setUser(normalizedUser);
         localStorage.setItem('smart_order_user', JSON.stringify(normalizedUser));
+
+        const latestToken = localStorage.getItem('smart_order_token');
+        if (latestToken) {
+          setToken(latestToken);
+          api.defaults.headers.common['Authorization'] = `Bearer ${latestToken}`;
+        }
       }
     } catch (e: any) {
       if (e.response?.status === 401) {
@@ -86,6 +96,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = (newToken: string, userData: User, newRefreshToken?: string) => {
     localStorage.setItem('smart_order_token', newToken);
     setToken(newToken);
+    api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
 
     if (newRefreshToken) {
       localStorage.setItem('smart_order_refresh_token', newRefreshToken);
