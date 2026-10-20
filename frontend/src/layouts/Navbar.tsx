@@ -294,7 +294,7 @@ export const Navbar: React.FC = () => {
         {/* ================================================================= */}
         {!user && (
           <div className="hidden md:flex items-center justify-center">
-            <Link to="/shop" className="mr-5 text-sm font-semibold text-slate-600 transition hover:text-teal-700 dark:text-zinc-300 dark:hover:text-teal-400">Mua sắm</Link>
+            
             <HeaderNavigation />
           </div>
         )}
@@ -494,7 +494,7 @@ export const Navbar: React.FC = () => {
             className="md:hidden border-t border-slate-200/80 dark:border-zinc-800 bg-white/95 dark:bg-[#09090B]/95 backdrop-blur-md px-4 py-4 overflow-hidden"
           >
             <div className="flex flex-col space-y-1">
-              <Link to="/shop" onClick={() => setMobileMenuOpen(false)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-teal-700 hover:bg-teal-50 dark:text-teal-400 dark:hover:bg-zinc-800">Mua sắm sản phẩm</Link>
+              
               <HeaderNavigation isMobile={true} onMobileSelect={() => setMobileMenuOpen(false)} />
               <div className="pt-3 mt-2 border-t border-slate-100 dark:border-zinc-800 flex flex-col gap-2">
                 <Link

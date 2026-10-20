@@ -15,7 +15,12 @@ export const ShopPage: React.FC = () => {
   const location = useLocation();
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartLine[]>(() => { try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); } catch { return []; } });
-  const [search, setSearch] = useState('');
+  const [search, setSearch] = useState(() => {
+    if (typeof window !== 'undefined') {
+      return new URLSearchParams(window.location.search).get('search') || '';
+    }
+    return '';
+  });
   const [category, setCategory] = useState('Tất cả');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -42,11 +47,19 @@ export const ShopPage: React.FC = () => {
     });
   };
   useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
-  useEffect(() => {
-    const status = new URLSearchParams(location.search).get('payos_status');
-    if (new URLSearchParams(location.search).get('cart') === 'open') setCartOpen(true);
+    const params = new URLSearchParams(location.search);
+    const searchParam = params.get('search');
+    if (searchParam !== null) {
+      setSearch(searchParam);
+      const timer = setTimeout(() => {
+        scrollToCatalog();
+      }, 150);
+      return () => clearTimeout(timer);
+    } else {
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+    }
+    const status = params.get('payos_status');
+    if (params.get('cart') === 'open') setCartOpen(true);
     if (status === 'success') setNotice('PayOS đã chuyển bạn trở lại. Trạng thái thanh toán đang được xác nhận từ PayOS.');
     if (status === 'cancelled') setNotice('Bạn đã hủy thanh toán PayOS. Bạn có thể thử lại hoặc chọn thanh toán khi nhận hàng.');
   }, [location.search]);
@@ -105,7 +118,13 @@ export const ShopPage: React.FC = () => {
     } finally { setBusy(false); }
   };
 
-  return <main className="min-h-screen bg-[#f7f8fa] text-slate-900">
+  return (
+    <motion.main
+      initial={{ opacity: 0, y: 10 }}
+      animate={{ opacity: 1, y: 0 }}
+      transition={{ duration: 0.35, ease: 'easeOut' }}
+      className="min-h-screen bg-[#f7f8fa] text-slate-900"
+    >
     {flyingProduct && <motion.div
       key={`${flyingProduct.product.id}-${flyingProduct.x}-${flyingProduct.y}`}
       initial={{ left: flyingProduct.x - 24, top: flyingProduct.y - 24, opacity: 1, scale: 1 }}
@@ -211,7 +230,23 @@ export const ShopPage: React.FC = () => {
         <div className="flex gap-2">
           <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition focus-within:border-[#287DA8] focus-within:ring-2 focus-within:ring-[#287DA8]/10 sm:w-72">
             <Search size={18} className="shrink-0 text-slate-400"/>
-            <input aria-label="Tìm sản phẩm" className="w-full bg-transparent text-sm outline-none" placeholder="Tìm sản phẩm..." value={search} onChange={(e) => setSearch(e.target.value)}/>
+            <input
+              aria-label="Tìm sản phẩm"
+              className="w-full bg-transparent text-sm outline-none"
+              placeholder="Tìm sản phẩm..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+            {search && (
+              <button
+                type="button"
+                onClick={() => setSearch('')}
+                className="text-slate-400 hover:text-slate-600 transition-colors"
+                title="Xóa bộ lọc tìm kiếm"
+              >
+                <X size={16} />
+              </button>
+            )}
           </label>
           <motion.button
             animate={cartBump ? { scale: [1, 1.15, 0.95, 1.05, 1] } : {}}
@@ -563,5 +598,6 @@ export const ShopPage: React.FC = () => {
         </div>
       )}
     </AnimatePresence>
-  </main>;
+  </motion.main>
+  );
 };

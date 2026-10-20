@@ -487,6 +487,7 @@ export const LandingPage: React.FC = () => {
             >
               <Link
                 to="/shop"
+                onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
                 className="group inline-flex items-center gap-1.5 text-sm font-semibold text-[#1976D2] hover:text-blue-700 dark:text-sky-400 dark:hover:text-sky-300 transition-colors"
               >
                 <span>Xem tất cả sản phẩm</span>
@@ -515,7 +516,11 @@ export const LandingPage: React.FC = () => {
                   whileHover={{ y: -8 }}
                   className="group rounded-2xl bg-white dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800/90 p-4 sm:p-4.5 flex flex-col justify-between shadow-xs hover:shadow-xl hover:shadow-slate-200/70 dark:hover:shadow-black/50 hover:border-slate-300 dark:hover:border-zinc-700 transition-all duration-300 relative"
                 >
-                  <div>
+                  <Link
+                    to={`/shop?search=${encodeURIComponent(product.name)}`}
+                    onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+                    className="block group/link cursor-pointer focus:outline-none"
+                  >
                     {/* Image Area with 4:3 Aspect Ratio, Floating Badge, and Zoom on Hover */}
                     <div className="relative w-full aspect-[4/3] rounded-xl overflow-hidden mb-3.5 bg-slate-100 dark:bg-zinc-800">
                       {product.imageUrl ? <img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover transition-all duration-500 ease-out group-hover:scale-105" loading="lazy" /> : <div className="grid h-full place-items-center text-5xl">🛍️</div>}
@@ -547,7 +552,7 @@ export const LandingPage: React.FC = () => {
                       {product.brand || product.unit || product.category}
                       <span className="mt-1 block text-[11px] text-slate-400">Còn {stock}</span>
                     </p>
-                  </div>
+                  </Link>
 
                   {/* Card Button */}
                   <div className="pt-4 mt-2">
@@ -576,6 +581,10 @@ export const LandingPage: React.FC = () => {
                     </motion.button>
                     <Link
                       to="/shop?cart=open"
+                      onClick={() => {
+                        addProductToCart(product);
+                        window.scrollTo({ top: 0, behavior: 'smooth' });
+                      }}
                       className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#287DA8] py-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#206588]"
                     >
                       <ArrowRight className="h-3.5 w-3.5" />
