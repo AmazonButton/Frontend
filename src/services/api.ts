@@ -55,7 +55,8 @@ api.interceptors.response.use(
         localStorage.removeItem('smart_order_token');
         localStorage.removeItem('smart_order_refresh_token');
         localStorage.removeItem('smart_order_user');
-        if (!window.location.pathname.includes('/login')) {
+        const isPublicPath = ['/', '/shop', '/quick-setup'].includes(window.location.pathname);
+        if (!isPublicPath && !window.location.pathname.includes('/login')) {
           window.location.href = '/login';
         }
         return Promise.reject(error);

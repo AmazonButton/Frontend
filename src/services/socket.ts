@@ -11,8 +11,9 @@ export function getSocket(): Socket {
       autoConnect: true,
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: Infinity,
-      reconnectionDelay: 1000,
+      reconnectionAttempts: 5,
+      reconnectionDelay: 2000,
+      timeout: 5000,
     });
 
     socket.on('connect', () => {
@@ -28,8 +29,29 @@ export function getSocket(): Socket {
     });
 
     socket.on('disconnect', (reason) => {
-      console.log('❌ [Socket.io Client] Disconnected from server:', reason);
+      if (reason !== 'io client disconnect') {
+        console.log('❌ [Socket.io Client] Disconnected from server:', reason);
+      }
     });
+
+    socket.on('connect_error', () => {
+      // Quietly handle transient connection errors without noisy unhandled exceptions
+    });
+
+    // Cleanly disconnect when page enters Back-Forward Cache (bfcache)
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', () => {
+        if (socket?.connected) {
+          socket.disconnect();
+        }
+      });
+
+      window.addEventListener('pageshow', (event) => {
+        if (event.persisted && socket && !socket.connected) {
+          socket.connect();
+        }
+      });
+    }
   }
   return socket;
 }
@@ -49,4 +71,3 @@ export function subscribeToCustomer(customerId: string) {
     s.emit('subscribe:customer', customerId);
   }
 }
-

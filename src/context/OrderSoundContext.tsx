@@ -287,6 +287,7 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
   // WebSocket Live Real-time Listener
   useEffect(() => {
+    if (!user) return;
     const socket = getSocket();
 
     const handleOrderCreated = (payload: any) => {
