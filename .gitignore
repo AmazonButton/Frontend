@@ -9,3 +9,4 @@ dist-ssr/
 repomix-output.xml
 repomix*.xml
 
+.vercel
