@@ -53,7 +53,7 @@ function formatRelativeTime(isoString: string): string {
 }
 
 export const NotificationBellPopover: React.FC = () => {
-  const { user } = useAuth();
+  const { user, token, isLoading } = useAuth();
   const { playOrderChime, playCancelChime } = useSound();
   const navigate = useNavigate();
 
@@ -97,7 +97,7 @@ export const NotificationBellPopover: React.FC = () => {
 
   // Load real historical orders on initial mount
   useEffect(() => {
-    if (!user) return;
+    if (!user || !token || isLoading) return;
     let isMounted = true;
     const fetchRecentOrders = async () => {
       try {
@@ -157,8 +157,10 @@ export const NotificationBellPopover: React.FC = () => {
             );
           });
         }
-      } catch (err) {
-        console.warn('Could not pre-fetch orders for notification bell:', err);
+      } catch (err: any) {
+        if (err?.response?.status !== 401) {
+          console.warn('Could not pre-fetch orders for notification bell:', err);
+        }
       }
     };
 
@@ -166,7 +168,7 @@ export const NotificationBellPopover: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, []);
+  }, [user, token, isLoading]);
 
   // Realtime Socket Listener: New Orders & Cancellations
   useEffect(() => {
@@ -196,11 +198,6 @@ export const NotificationBellPopover: React.FC = () => {
       };
 
       setNotifications((prev) => [newNotif, ...prev]);
-      try {
-        playOrderChime();
-      } catch {
-        // ignore
-      }
     };
 
     const handleOrderCancelled = (payload: any) => {
@@ -222,11 +219,6 @@ export const NotificationBellPopover: React.FC = () => {
       };
 
       setNotifications((prev) => [cancelNotif, ...prev]);
-      try {
-        playCancelChime();
-      } catch {
-        // ignore
-      }
     };
 
     socket.on('ORDER_CREATED', handleOrderCreated);
