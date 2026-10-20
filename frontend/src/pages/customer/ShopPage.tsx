@@ -1,8 +1,10 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, CheckCircle2, Minus, Plus, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
 import { api } from '../../services/api';
+
+const deliveryHeroBackground = '/assets/products/delivery-hero-pastel.png';
 
 type Product = { id: string; storeId: string; name: string; brand: string; category: string; unit: string; price: number; stock: number; reservedStock: number; imageUrl?: string; store: { id: string; name: string } };
 type CartLine = { product: Product; quantity: number };
@@ -23,8 +25,22 @@ export const ShopPage: React.FC = () => {
   const [notice, setNotice] = useState('');
   const [flyingProduct, setFlyingProduct] = useState<{ product: Product; x: number; y: number } | null>(null);
   const [form, setForm] = useState({ customerName: '', customerPhone: '', deliveryAddress: '', paymentMethod: 'PAYOS' });
+  const [cartBump, setCartBump] = useState(false);
 
   useEffect(() => { localStorage.setItem(CART_KEY, JSON.stringify(cart)); }, [cart]);
+
+  const scrollToCatalog = () => {
+    const catalogElement = document.getElementById('storefront-catalog');
+    if (!catalogElement) return;
+    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const headerOffset = 76;
+    const elementPosition = catalogElement.getBoundingClientRect().top;
+    const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
+    window.scrollTo({
+      top: offsetPosition,
+      behavior: prefersReducedMotion ? 'auto' : 'smooth',
+    });
+  };
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
@@ -62,6 +78,8 @@ export const ShopPage: React.FC = () => {
   const addWithAnimation = (product: Product, event: React.MouseEvent<HTMLButtonElement>) => {
     changeQuantity(product, 1);
     setFlyingProduct({ product, x: event.clientX, y: event.clientY });
+    setCartBump(true);
+    setTimeout(() => setCartBump(false), 400);
   };
 
   const checkout = async (event: React.FormEvent) => {
@@ -98,18 +116,180 @@ export const ShopPage: React.FC = () => {
     >
       {flyingProduct.product.imageUrl ? <img src={flyingProduct.product.imageUrl} alt="" className="h-full w-full object-cover" /> : <span className="grid h-full place-items-center text-xl">🛍️</span>}
     </motion.div>}
-    <section className="mx-auto max-w-7xl px-4 pb-12 pt-24 sm:px-6 lg:px-8">
-      <div className="mb-7 overflow-hidden rounded-3xl bg-gradient-to-r from-[#0f766e] via-[#0e7490] to-[#2563eb] px-6 py-8 text-white shadow-lg sm:px-10 sm:py-10">
-        <div className="max-w-2xl"><p className="mb-3 flex items-center gap-2 text-sm font-semibold text-teal-100"><ShoppingBag size={17}/> CỬA HÀNG TRỰC TUYẾN</p><h1 className="text-3xl font-bold tracking-tight sm:text-4xl">Mua sắm tiện lợi, giao đến tận nhà</h1><p className="mt-3 max-w-xl text-sm leading-6 text-white/80">Chọn sản phẩm từ các cửa hàng đang hoạt động, thêm vào giỏ và đặt hàng chỉ trong vài bước.</p><div className="mt-6 flex flex-wrap gap-3 text-xs font-medium"><span className="rounded-full bg-white/15 px-3 py-2"><Truck className="mr-1.5 inline" size={15}/>Giao hàng tận nơi</span><span className="rounded-full bg-white/15 px-3 py-2">PayOS hoặc tiền mặt khi nhận hàng</span></div></div>
+    {/* Full-Bleed / Edge-to-Edge Hero Banner */}
+    <section
+      className="relative w-full overflow-hidden border-b border-sky-100/70 bg-[#eaf7f8] bg-cover bg-[center_right] sm:bg-center bg-no-repeat"
+      style={{ backgroundImage: `url("${deliveryHeroBackground}")` }}
+    >
+      {/* Subtle Gradient Overlay: Soft pastel-tinted on left, smoothly transparent on right to reveal illustration */}
+      <div
+        className="pointer-events-none absolute inset-0 bg-gradient-to-r from-[#eaf7f8]/98 via-[#eaf7f8]/85 to-transparent sm:from-[#eaf7f8]/95 sm:via-[#eaf7f8]/75 sm:to-transparent lg:w-[68%]"
+        aria-hidden="true"
+      />
+
+      <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        <div className="relative z-10 flex min-h-[340px] items-center py-10 sm:min-h-[380px] sm:py-14 lg:min-h-[420px] lg:py-16">
+          <motion.div
+            initial="hidden"
+            animate="visible"
+            variants={{
+              hidden: { opacity: 0 },
+              visible: {
+                opacity: 1,
+                transition: { staggerChildren: 0.1, delayChildren: 0.05 },
+              },
+            }}
+            className="max-w-[580px]"
+          >
+            {/* Label */}
+            <motion.p
+              variants={{ hidden: { opacity: 0, y: 15 }, visible: { opacity: 1, y: 0, transition: { duration: 0.45, ease: [0.22, 1, 0.36, 1] } } }}
+              className="mb-3 flex items-center gap-2 text-xs font-bold tracking-[0.15em] text-[#0E6BA8] uppercase"
+            >
+              <ShoppingBag size={15} className="shrink-0" />
+              <span>CỬA HÀNG TRỰC TUYẾN</span>
+            </motion.p>
+
+            {/* Headline */}
+            <motion.h1
+              variants={{ hidden: { opacity: 0, y: 20 }, visible: { opacity: 1, y: 0, transition: { duration: 0.55, ease: [0.22, 1, 0.36, 1] } } }}
+              className="text-3xl font-bold tracking-tight text-[#0c2340] sm:text-4xl lg:text-[44px] leading-[1.15] sm:leading-[1.18]"
+            >
+              Mua sắm dễ dàng, giao tận nhà
+            </motion.h1>
+
+            {/* Description */}
+            <motion.p
+              variants={{ hidden: { opacity: 0, y: 15 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } } }}
+              className="mt-3 text-base leading-relaxed text-slate-600 sm:mt-4 sm:text-lg sm:leading-relaxed"
+            >
+              Hàng thiết yếu từ các cửa hàng đối tác, đặt mua nhanh chóng chỉ trong vài bước.
+            </motion.p>
+
+            {/* Actions: Primary CTA + Secondary Benefit */}
+            <motion.div
+              variants={{ hidden: { opacity: 0, y: 15 }, visible: { opacity: 1, y: 0, transition: { duration: 0.5, ease: [0.22, 1, 0.36, 1] } } }}
+              className="mt-6 flex flex-wrap items-center gap-4 sm:mt-8 sm:gap-6"
+            >
+              <motion.button
+                whileHover={{ scale: 1.03 }}
+                whileTap={{ scale: 0.97 }}
+                type="button"
+                onClick={scrollToCatalog}
+                className="group inline-flex items-center gap-2 rounded-xl bg-[#287DA8] px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors duration-200 hover:bg-[#1e688e] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#287DA8]/50 focus:ring-offset-2 sm:px-6 sm:py-3.5 sm:text-base"
+              >
+                <span>Khám phá sản phẩm</span>
+                <ArrowRight
+                  size={18}
+                  className="transition-transform duration-200 group-hover:translate-x-1"
+                  aria-hidden="true"
+                />
+              </motion.button>
+
+              <motion.div
+                whileHover={{ scale: 1.02 }}
+                className="flex items-center gap-2 text-xs font-medium text-slate-600 sm:text-sm"
+              >
+                <span className="grid h-8 w-8 place-items-center rounded-full bg-sky-100/90 text-[#287DA8]">
+                  <Truck size={16} />
+                </span>
+                <span>Giao hàng tận nơi</span>
+              </motion.div>
+            </motion.div>
+          </motion.div>
+        </div>
+      </div>
+    </section>
+
+    <section id="storefront-catalog" className="mx-auto max-w-7xl px-4 pb-12 pt-8 sm:px-6 lg:px-8">
+
+      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">Sản phẩm dành cho bạn</h2>
+          <p className="mt-1 text-sm text-slate-500">Giá và tình trạng hàng được cập nhật từ cửa hàng.</p>
+        </div>
+        <div className="flex gap-2">
+          <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition focus-within:border-[#287DA8] focus-within:ring-2 focus-within:ring-[#287DA8]/10 sm:w-72">
+            <Search size={18} className="shrink-0 text-slate-400"/>
+            <input aria-label="Tìm sản phẩm" className="w-full bg-transparent text-sm outline-none" placeholder="Tìm sản phẩm..." value={search} onChange={(e) => setSearch(e.target.value)}/>
+          </label>
+          <motion.button
+            animate={cartBump ? { scale: [1, 1.15, 0.95, 1.05, 1] } : {}}
+            transition={{ duration: 0.35 }}
+            whileHover={{ scale: 1.02 }}
+            whileTap={{ scale: 0.95 }}
+            onClick={() => setCartOpen(true)}
+            className="relative flex shrink-0 items-center gap-2 rounded-xl bg-[#287DA8] px-4 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-[#206588]"
+          >
+            <ShoppingCart size={18}/>
+            <span>Giỏ hàng</span>
+            {cartCount > 0 && (
+              <motion.span
+                key={cartCount}
+                initial={{ scale: 0 }}
+                animate={{ scale: 1 }}
+                className="absolute -right-2 -top-2 grid h-5 min-w-5 place-items-center rounded-full bg-[#E53E3E] px-1 text-[11px] font-bold text-white shadow-xs"
+              >
+                {cartCount}
+              </motion.span>
+            )}
+          </motion.button>
+        </div>
       </div>
 
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"><div><h2 className="text-xl font-bold">Sản phẩm dành cho bạn</h2><p className="mt-1 text-sm text-slate-500">Giá và tình trạng hàng được cập nhật từ cửa hàng.</p></div><div className="flex gap-2"><label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 sm:w-72"><Search size={18} className="shrink-0 text-slate-400"/><input aria-label="Tìm sản phẩm" className="w-full bg-transparent text-sm outline-none" placeholder="Tìm sản phẩm..." value={search} onChange={(e) => setSearch(e.target.value)}/></label><button onClick={() => setCartOpen(true)} className="relative flex shrink-0 items-center gap-2 rounded-xl bg-[#287DA8] px-4 text-sm font-semibold text-white hover:bg-[#206588]"><ShoppingCart size={18}/>Giỏ hàng{cartCount > 0 && <span className="absolute -right-2 -top-2 grid h-5 min-w-5 place-items-center rounded-full bg-[#287DA8] px-1 text-[11px]">{cartCount}</span>}</button></div></div>
-
-      <div className="mb-5 flex gap-2 overflow-auto pb-1">{categories.map((item) => <button key={item} onClick={() => setCategory(item)} className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium ${category === item ? 'bg-[#287DA8] text-white' : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:ring-teal-300'}`}>{item}</button>)}</div>
-      {notice && <div className="mb-5 flex items-start justify-between gap-3 rounded-xl border border-teal-200 bg-[#EAF4F9] p-4 text-sm text-teal-900"><span>{notice}</span><button onClick={() => setNotice('')} aria-label="Đóng thông báo"><X size={17}/></button></div>}
+      <div className="mb-5 flex gap-2 overflow-auto pb-1">
+        {categories.map((item) => (
+          <motion.button
+            key={item}
+            layout
+            whileHover={{ y: -2 }}
+            whileTap={{ scale: 0.95 }}
+            transition={{ duration: 0.15 }}
+            onClick={() => setCategory(item)}
+            className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
+              category === item
+                ? 'bg-[#287DA8] text-white shadow-xs'
+                : 'bg-white text-slate-600 ring-1 ring-slate-200 hover:text-[#287DA8] hover:ring-sky-300'
+            }`}
+          >
+            {item}
+          </motion.button>
+        ))}
+      </div>
+      <AnimatePresence>
+        {notice && (
+          <motion.div
+            initial={{ opacity: 0, y: -10, height: 0 }}
+            animate={{ opacity: 1, y: 0, height: 'auto' }}
+            exit={{ opacity: 0, y: -10, height: 0 }}
+            transition={{ duration: 0.25 }}
+            className="mb-5 flex items-start justify-between gap-3 overflow-hidden rounded-xl border border-teal-200 bg-[#EAF4F9] p-4 text-sm text-teal-900"
+          >
+            <span>{notice}</span>
+            <button onClick={() => setNotice('')} aria-label="Đóng thông báo" className="text-teal-700 hover:text-teal-900">
+              <X size={17}/>
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       {error && <div className="rounded-2xl bg-white p-10 text-center text-sm text-rose-600">{error}</div>}
-      {loading && <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">{Array.from({length:8},(_,i)=><div key={i} className="h-72 animate-pulse rounded-2xl bg-white"/>)}</div>}
-      {!loading && !error && shownProducts.length === 0 && <div className="rounded-2xl bg-white p-12 text-center text-slate-500">Chưa có sản phẩm phù hợp.</div>}
+      {loading && (
+        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+          {Array.from({ length: 8 }, (_, i) => (
+            <div key={i} className="h-72 animate-pulse rounded-2xl bg-white/80 border border-slate-100 shadow-xs" />
+          ))}
+        </div>
+      )}
+      {!loading && !error && shownProducts.length === 0 && (
+        <motion.div
+          initial={{ opacity: 0, scale: 0.95 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="rounded-2xl bg-white p-12 text-center text-slate-500 shadow-xs border border-slate-100"
+        >
+          <span className="text-4xl block mb-2">🔍</span>
+          Chưa có sản phẩm phù hợp.
+        </motion.div>
+      )}
       {!loading && shownProducts.length > 0 && <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">{shownProducts.map((product) => {
         const line = cart.find((item) => item.product.id === product.id);
         const stock = Math.max(0, product.stock - product.reservedStock);
@@ -121,8 +301,267 @@ export const ShopPage: React.FC = () => {
       <p className="mt-8 text-center text-xs text-slate-400">Bạn có thể xem sản phẩm mà không cần tài khoản. Đơn hàng trực tuyến sẽ được gửi trực tiếp đến cửa hàng bán sản phẩm.</p>
     </section>
 
-    {cartOpen && <div className="fixed inset-0 z-50 bg-slate-900/40" onClick={() => setCartOpen(false)}><aside onClick={(e) => e.stopPropagation()} className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-white shadow-2xl"><div className="flex items-center justify-between border-b p-5"><div><h2 className="text-lg font-bold">Giỏ hàng</h2><p className="text-xs text-slate-500">{cartCount} sản phẩm</p></div><button onClick={() => setCartOpen(false)} aria-label="Đóng giỏ hàng"><X/></button></div><div className="flex-1 overflow-auto p-5">{cart.length === 0 ? <p className="py-16 text-center text-sm text-slate-500">Giỏ hàng của bạn đang trống.</p> : cart.map(({product,quantity})=><div key={product.id} className="flex gap-3 border-b py-4"><div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-slate-50">{product.imageUrl ? <img src={product.imageUrl} alt="" className="h-full w-full object-cover"/> : '🛍️'}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{product.name}</p><p className="text-xs text-slate-500">{product.store.name}</p><div className="mt-2 flex items-center justify-between"><b className="text-sm text-[#287DA8]">{money(product.price * quantity)}</b><div className="flex items-center gap-2"><button onClick={()=>changeQuantity(product,-1)}><Minus size={15}/></button><span className="text-sm">{quantity}</span><button onClick={()=>changeQuantity(product,1)}><Plus size={15}/></button><button onClick={()=>removeCartItem(product.id)} aria-label={`Xóa ${product.name}`} title="Xóa sản phẩm" className="ml-1 grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600"><Trash2 size={15}/></button></div></div></div></div>)}</div><div className="border-t p-5"><div className="mb-4 flex justify-between text-sm"><span>Tổng cộng</span><b className="text-lg text-[#287DA8]">{money(total)}</b></div><button disabled={!cart.length} onClick={()=>setCheckoutOpen(true)} className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#287DA8] py-3 font-semibold text-white disabled:bg-slate-300">Tiến hành đặt hàng <ArrowRight size={17}/></button>{cart.length>0 && <button onClick={()=>setCart([])} className="mt-3 w-full text-xs text-slate-400 hover:text-rose-600">Xóa toàn bộ giỏ</button>}</div></aside></div>}
+    {/* Cart Drawer */}
+    <AnimatePresence>
+      {cartOpen && (
+        <div className="fixed inset-0 z-50 overflow-hidden">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.25 }}
+            className="fixed inset-0 bg-slate-900/40 backdrop-blur-xs"
+            onClick={() => setCartOpen(false)}
+          />
 
-    {checkoutOpen && <div className="fixed inset-0 z-[60] grid place-items-center overflow-auto bg-slate-900/50 p-4" onClick={()=>!busy && setCheckoutOpen(false)}><form onSubmit={checkout} onClick={(e)=>e.stopPropagation()} className="my-auto w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl sm:p-7"><div className="mb-5 flex items-start justify-between"><div><h2 className="text-xl font-bold">Thông tin giao hàng</h2><p className="mt-1 text-sm text-slate-500">Đơn hàng từ {cart[0]?.product.store.name}</p></div><button type="button" onClick={()=>setCheckoutOpen(false)} aria-label="Đóng"><X/></button></div><div className="space-y-3"><input required maxLength={100} value={form.customerName} onChange={(e)=>setForm({...form,customerName:e.target.value})} placeholder="Họ và tên người nhận" className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-teal-600"/><input required type="tel" maxLength={20} value={form.customerPhone} onChange={(e)=>setForm({...form,customerPhone:e.target.value})} placeholder="Số điện thoại" className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-teal-600"/><textarea required maxLength={500} value={form.deliveryAddress} onChange={(e)=>setForm({...form,deliveryAddress:e.target.value})} placeholder="Địa chỉ nhận hàng" rows={3} className="w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none focus:border-teal-600"/></div><div className="mt-5"><p className="mb-2 text-sm font-semibold">Phương thức thanh toán</p><label className={`mb-2 flex cursor-pointer items-center gap-3 rounded-xl border p-3 ${form.paymentMethod==='PAYOS'?'border-teal-600 bg-[#EAF4F9]':'border-slate-200'}`}><input type="radio" name="payment" checked={form.paymentMethod==='PAYOS'} onChange={()=>setForm({...form,paymentMethod:'PAYOS'})}/><span><b className="block text-sm">Thanh toán trực tuyến PayOS</b><small className="text-slate-500">Chuyển đến cổng thanh toán bảo mật</small></span></label><label className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 ${form.paymentMethod==='CASH_ON_DELIVERY'?'border-teal-600 bg-[#EAF4F9]':'border-slate-200'}`}><input type="radio" name="payment" checked={form.paymentMethod==='CASH_ON_DELIVERY'} onChange={()=>setForm({...form,paymentMethod:'CASH_ON_DELIVERY'})}/><span><b className="block text-sm">Tiền mặt khi nhận hàng</b><small className="text-slate-500">Thanh toán cho shipper khi giao hàng</small></span></label></div><div className="mt-5 flex justify-between border-t pt-4 text-sm"><span>Tổng thanh toán</span><b className="text-lg text-[#287DA8]">{money(total)}</b></div><button disabled={busy} className="mt-4 w-full rounded-xl bg-[#287DA8] py-3 font-bold text-white hover:bg-[#206588] disabled:opacity-60">{busy?'Đang xử lý...':'Xác nhận đặt hàng'}</button><p className="mt-3 flex items-center justify-center gap-1 text-center text-[11px] text-slate-400"><CheckCircle2 size={13}/>Thông tin đơn hàng được gửi an toàn đến cửa hàng</p></form></div>}
+          <motion.aside
+            initial={{ x: '100%' }}
+            animate={{ x: 0 }}
+            exit={{ x: '100%' }}
+            transition={{ type: 'spring', damping: 28, stiffness: 280 }}
+            onClick={(e) => e.stopPropagation()}
+            className="absolute right-0 top-0 flex h-full w-full max-w-md flex-col bg-white shadow-2xl"
+          >
+            <div className="flex items-center justify-between border-b p-5">
+              <div>
+                <h2 className="text-lg font-bold">Giỏ hàng</h2>
+                <p className="text-xs text-slate-500">{cartCount} sản phẩm</p>
+              </div>
+              <motion.button
+                whileHover={{ scale: 1.1, rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
+                transition={{ duration: 0.2 }}
+                onClick={() => setCartOpen(false)}
+                aria-label="Đóng giỏ hàng"
+                className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X size={18} />
+              </motion.button>
+            </div>
+
+            <div className="flex-1 overflow-auto p-5">
+              {cart.length === 0 ? (
+                <div className="py-16 text-center">
+                  <span className="text-5xl">🛍️</span>
+                  <p className="mt-3 text-sm text-slate-500">Giỏ hàng của bạn đang trống.</p>
+                </div>
+              ) : (
+                <AnimatePresence initial={false}>
+                  {cart.map(({ product, quantity }) => (
+                    <motion.div
+                      layout
+                      key={product.id}
+                      initial={{ opacity: 0, height: 0, y: 15 }}
+                      animate={{ opacity: 1, height: 'auto', y: 0 }}
+                      exit={{ opacity: 0, height: 0, x: -30 }}
+                      transition={{ duration: 0.25 }}
+                      className="flex gap-3 border-b py-4"
+                    >
+                      <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-slate-50 border border-slate-100">
+                        {product.imageUrl ? (
+                          <img src={product.imageUrl} alt="" className="h-full w-full object-cover" />
+                        ) : (
+                          '🛍️'
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate text-sm font-semibold">{product.name}</p>
+                        <p className="text-xs text-slate-500">{product.store.name}</p>
+                        <div className="mt-2 flex items-center justify-between">
+                          <b className="text-sm text-[#287DA8]">{money(product.price * quantity)}</b>
+                          <div className="flex items-center gap-2">
+                            <motion.button
+                              whileTap={{ scale: 0.8 }}
+                              onClick={() => changeQuantity(product, -1)}
+                              className="grid h-6 w-6 place-items-center rounded-md text-slate-600 hover:bg-slate-100"
+                            >
+                              <Minus size={14} />
+                            </motion.button>
+                            <span className="text-sm font-medium min-w-4 text-center">{quantity}</span>
+                            <motion.button
+                              whileTap={{ scale: 0.8 }}
+                              onClick={() => changeQuantity(product, 1)}
+                              className="grid h-6 w-6 place-items-center rounded-md text-slate-600 hover:bg-slate-100"
+                            >
+                              <Plus size={14} />
+                            </motion.button>
+                            <motion.button
+                              whileTap={{ scale: 0.8 }}
+                              onClick={() => removeCartItem(product.id)}
+                              aria-label={`Xóa ${product.name}`}
+                              title="Xóa sản phẩm"
+                              className="ml-1 grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                            >
+                              <Trash2 size={15} />
+                            </motion.button>
+                          </div>
+                        </div>
+                      </div>
+                    </motion.div>
+                  ))}
+                </AnimatePresence>
+              )}
+            </div>
+
+            <div className="border-t p-5 bg-slate-50/50">
+              <div className="mb-4 flex justify-between text-sm">
+                <span className="text-slate-600">Tổng cộng</span>
+                <b className="text-lg text-[#287DA8]">{money(total)}</b>
+              </div>
+              <motion.button
+                whileHover={{ scale: 1.02 }}
+                whileTap={{ scale: 0.98 }}
+                disabled={!cart.length}
+                onClick={() => setCheckoutOpen(true)}
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#287DA8] py-3 font-semibold text-white shadow-sm transition hover:bg-[#206588] disabled:bg-slate-300 disabled:cursor-not-allowed"
+              >
+                Tiến hành đặt hàng <ArrowRight size={17} />
+              </motion.button>
+              {cart.length > 0 && (
+                <button
+                  onClick={() => setCart([])}
+                  className="mt-3 w-full text-center text-xs text-slate-400 hover:text-rose-600 transition-colors"
+                >
+                  Xóa toàn bộ giỏ
+                </button>
+              )}
+            </div>
+          </motion.aside>
+        </div>
+      )}
+    </AnimatePresence>
+
+    {/* Checkout Modal */}
+    <AnimatePresence>
+      {checkoutOpen && (
+        <div className="fixed inset-0 z-[60] grid place-items-center overflow-auto p-4">
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+            className="fixed inset-0 bg-slate-900/50 backdrop-blur-xs"
+            onClick={() => !busy && setCheckoutOpen(false)}
+          />
+
+          <motion.form
+            initial={{ opacity: 0, scale: 0.92, y: 16 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            exit={{ opacity: 0, scale: 0.92, y: 16 }}
+            transition={{ type: 'spring', damping: 26, stiffness: 300 }}
+            onSubmit={checkout}
+            onClick={(e) => e.stopPropagation()}
+            className="relative z-10 my-auto w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl sm:p-7 border border-slate-100"
+          >
+            <div className="mb-5 flex items-start justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-slate-900">Thông tin giao hàng</h2>
+                <p className="mt-1 text-sm text-slate-500">Đơn hàng từ {cart[0]?.product.store.name}</p>
+              </div>
+              <motion.button
+                whileHover={{ scale: 1.1, rotate: 90 }}
+                whileTap={{ scale: 0.9 }}
+                transition={{ duration: 0.2 }}
+                type="button"
+                onClick={() => setCheckoutOpen(false)}
+                aria-label="Đóng"
+                className="grid h-8 w-8 place-items-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-600"
+              >
+                <X size={18} />
+              </motion.button>
+            </div>
+
+            <div className="space-y-3">
+              <input
+                required
+                maxLength={100}
+                value={form.customerName}
+                onChange={(e) => setForm({ ...form, customerName: e.target.value })}
+                placeholder="Họ và tên người nhận"
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-600/10"
+              />
+              <input
+                required
+                type="tel"
+                maxLength={20}
+                value={form.customerPhone}
+                onChange={(e) => setForm({ ...form, customerPhone: e.target.value })}
+                placeholder="Số điện thoại"
+                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-600/10"
+              />
+              <textarea
+                required
+                maxLength={500}
+                value={form.deliveryAddress}
+                onChange={(e) => setForm({ ...form, deliveryAddress: e.target.value })}
+                placeholder="Địa chỉ nhận hàng"
+                rows={3}
+                className="w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-600/10"
+              />
+            </div>
+
+            <div className="mt-5">
+              <p className="mb-2 text-sm font-semibold text-slate-800">Phương thức thanh toán</p>
+              <motion.label
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.99 }}
+                className={`mb-2 flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors ${
+                  form.paymentMethod === 'PAYOS' ? 'border-teal-600 bg-[#EAF4F9]' : 'border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="payment"
+                  checked={form.paymentMethod === 'PAYOS'}
+                  onChange={() => setForm({ ...form, paymentMethod: 'PAYOS' })}
+                  className="accent-[#287DA8]"
+                />
+                <span>
+                  <b className="block text-sm text-slate-900">Thanh toán trực tuyến PayOS</b>
+                  <small className="text-slate-500">Chuyển đến cổng thanh toán bảo mật</small>
+                </span>
+              </motion.label>
+              <motion.label
+                whileHover={{ scale: 1.01 }}
+                whileTap={{ scale: 0.99 }}
+                className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors ${
+                  form.paymentMethod === 'CASH_ON_DELIVERY' ? 'border-teal-600 bg-[#EAF4F9]' : 'border-slate-200 hover:bg-slate-50'
+                }`}
+              >
+                <input
+                  type="radio"
+                  name="payment"
+                  checked={form.paymentMethod === 'CASH_ON_DELIVERY'}
+                  onChange={() => setForm({ ...form, paymentMethod: 'CASH_ON_DELIVERY' })}
+                  className="accent-[#287DA8]"
+                />
+                <span>
+                  <b className="block text-sm text-slate-900">Tiền mặt khi nhận hàng</b>
+                  <small className="text-slate-500">Thanh toán cho shipper khi giao hàng</small>
+                </span>
+              </motion.label>
+            </div>
+
+            <div className="mt-5 flex justify-between border-t pt-4 text-sm">
+              <span className="text-slate-600">Tổng thanh toán</span>
+              <b className="text-lg text-[#287DA8]">{money(total)}</b>
+            </div>
+
+            <motion.button
+              whileHover={{ scale: 1.02 }}
+              whileTap={{ scale: 0.98 }}
+              disabled={busy}
+              className="mt-4 w-full rounded-xl bg-[#287DA8] py-3 font-bold text-white shadow-sm transition hover:bg-[#206588] disabled:opacity-60"
+            >
+              {busy ? 'Đang xử lý...' : 'Xác nhận đặt hàng'}
+            </motion.button>
+            <p className="mt-3 flex items-center justify-center gap-1 text-center text-[11px] text-slate-400">
+              <CheckCircle2 size={13} className="text-teal-600" />
+              Thông tin đơn hàng được gửi an toàn đến cửa hàng
+            </p>
+          </motion.form>
+        </div>
+      )}
+    </AnimatePresence>
   </main>;
 };

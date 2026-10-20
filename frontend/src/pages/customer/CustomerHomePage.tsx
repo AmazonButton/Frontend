@@ -7,7 +7,7 @@ import { toast } from '../../context/ToastContext';
 import { useSound } from '../../context/OrderSoundContext';
 import { subscribeToCustomer, getSocket } from '../../services/socket';
 import { Device, Order, Product } from '../../types';
-import { Radio, ShoppingBag, ShoppingCart, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3, Settings, ChevronDown, RotateCcw, Store, Unlink2, Trash2 } from 'lucide-react';
+import { Radio, ShoppingBag, ShoppingCart, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3, Settings, ChevronDown, RotateCcw, Store, Unlink2, Trash2, Volume2, VolumeX } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Floating3DCard } from '../../components/3d/Floating3DCard';
 import { WebBluetoothProvisioner } from '../../components/devices/WebBluetoothProvisioner';
@@ -213,7 +213,7 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
 
 export const CustomerHomePage: React.FC = () => {
   const { user } = useAuth();
-  const { playOrderChime, playCancelChime } = useSound();
+  const { playOrderChime, playCancelChime, isSoundEnabled, toggleSound } = useSound();
   const [devices, setDevices] = useState<Device[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -964,6 +964,15 @@ export const CustomerHomePage: React.FC = () => {
 
           {/* Header Action Buttons */}
           <div className="flex items-center gap-2.5 self-start sm:self-center flex-wrap">
+            <button
+              type="button"
+              onClick={toggleSound}
+              className={`inline-flex items-center gap-2 px-3 py-2 border text-xs font-semibold rounded-lg transition-colors ${isSoundEnabled ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:bg-emerald-100' : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'}`}
+              title={isSoundEnabled ? 'Tắt âm thanh thông báo đơn hàng' : 'Bật âm thanh thông báo đơn hàng'}
+            >
+              {isSoundEnabled ? <Volume2 className="w-3.5 h-3.5" /> : <VolumeX className="w-3.5 h-3.5" />}
+              <span className="hidden sm:inline">Âm thanh {isSoundEnabled ? 'đang bật' : 'đang tắt'}</span>
+            </button>
             <motion.button
               whileTap={{ scale: 0.98 }}
               onClick={() => setShowAirPodsModal(true)}

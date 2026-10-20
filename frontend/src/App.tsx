@@ -17,6 +17,7 @@ import { StoreProductsPage } from './pages/store/StoreProductsPage';
 import { StoreWalletPage } from './pages/store/StoreWalletPage';
 import { StoreAnalyticsPage } from './pages/store/StoreAnalyticsPage';
 import { CustomerHomePage } from './pages/customer/CustomerHomePage';
+import { CustomerOrdersPage } from './pages/customer/CustomerOrdersPage';
 import { ShopPage } from './pages/customer/ShopPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminSecurityHubPage } from './pages/admin/AdminSecurityHubPage';
@@ -69,6 +70,7 @@ const StoreLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => 
 
 export const App: React.FC = () => {
   const location = useLocation();
+  const { user } = useAuth();
 
   // Route-aware 3D atmosphere variant (Specifications 36.1, 36.9, 36.10, 36.11)
   const getAtmosphereVariant = (): AtmosphereVariant => {
@@ -93,7 +95,7 @@ export const App: React.FC = () => {
       {/* 36. Animated Background — Premium 3D Atmosphere */}
       <Atmosphere3DBackground variant={getAtmosphereVariant()} />
       <Navbar />
-      <div className={`flex-1 relative ${location.pathname === '/' ? '' : 'pt-16'}`}>
+      <div className={`flex-1 relative ${location.pathname === '/' ? '' : 'pt-16'} ${user?.role === 'CUSTOMER' ? 'pb-16 md:pb-0' : ''}`}>
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/shop" element={<ShopPage />} />
@@ -138,6 +140,14 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute allowedRoles={['CUSTOMER']}>
                 <CustomerHomePage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/customer/orders"
+            element={
+              <ProtectedRoute allowedRoles={['CUSTOMER']}>
+                <CustomerOrdersPage />
               </ProtectedRoute>
             }
           />

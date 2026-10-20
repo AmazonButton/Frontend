@@ -1,10 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useSound } from '../context/OrderSoundContext';
-import { LogOut, Shield, ShieldAlert, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X, ShoppingCart } from 'lucide-react';
+import { LogOut, Shield, ShieldAlert, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X, ShoppingCart, ReceiptText, ChevronDown } from 'lucide-react';
 import { WhiteDeviceAirPodsModal } from '../components/devices/WhiteDeviceAirPodsModal';
 import { HeaderNavigation } from '../components/common/HeaderNavigation';
 import { LogoutConfirmModal } from '../components/common/LogoutConfirmModal';
@@ -23,6 +23,9 @@ export const Navbar: React.FC = () => {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
+  const [customerMenuOpen, setCustomerMenuOpen] = useState(false);
+  const customerMenuRef = useRef<HTMLDivElement>(null);
+  const isCustomer = user?.role === 'CUSTOMER';
 
   // Auto-dismiss logout modal if route goes to login or user is logged out
   useEffect(() => {
@@ -42,6 +45,21 @@ export const Navbar: React.FC = () => {
 
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
+  }, []);
+
+  useEffect(() => {
+    const closeCustomerMenu = (event: MouseEvent) => {
+      if (customerMenuRef.current && !customerMenuRef.current.contains(event.target as Node)) setCustomerMenuOpen(false);
+    };
+    const closeWithEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setCustomerMenuOpen(false);
+    };
+    document.addEventListener('mousedown', closeCustomerMenu);
+    document.addEventListener('keydown', closeWithEscape);
+    return () => {
+      document.removeEventListener('mousedown', closeCustomerMenu);
+      document.removeEventListener('keydown', closeWithEscape);
+    };
   }, []);
 
   // Sync user avatar with ProfilePage storage and realtime event
@@ -118,7 +136,7 @@ export const Navbar: React.FC = () => {
     <header
       data-navbar="true"
       className={`fixed top-0 left-0 w-full z-30 transition-[background-color,border-color,box-shadow] duration-200 ease-in-out ${
-        isScrolled
+        isCustomer || isScrolled
           ? 'bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shadow-md border-b border-slate-200/80 dark:border-zinc-800'
           : 'bg-transparent border-b border-transparent backdrop-blur-sm'
       }`}
@@ -138,13 +156,13 @@ export const Navbar: React.FC = () => {
                 className="w-full h-full object-contain"
               />
             </div>
-            <span className="text-base font-bold tracking-tight text-slate-900 dark:text-white">
+            <span className="hidden sm:block text-base font-bold tracking-tight text-slate-900 dark:text-white">
               Smart Order Button
             </span>
           </Link>
 
           {/* Primary Nav Links based on login role */}
-          {user && (
+          {user && !isCustomer && (
             <nav className="hidden md:flex items-center gap-1 pl-3 border-l border-slate-200 dark:border-zinc-800">
               {user.role === 'CUSTOMER' && (
                 <>
@@ -157,16 +175,6 @@ export const Navbar: React.FC = () => {
                   >
                     <Smartphone className="w-3.5 h-3.5" />
                     <span>Nút Của Tôi</span>
-                  </Link>
-                  <Link
-                    to="/customer/profile"
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/customer/profile')
-                      ? 'bg-[#287DA8]/10 text-[#287DA8] border border-[#287DA8]/30 shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
-                      }`}
-                  >
-                    <UserIcon className="w-3.5 h-3.5" />
-                    <span>Hồ Sơ Của Tôi</span>
                   </Link>
                   <MotionLink
                     to="/shop"
@@ -181,6 +189,26 @@ export const Navbar: React.FC = () => {
                     <ShoppingCart className="w-3.5 h-3.5" />
                     <span>Mua Sắm</span>
                   </MotionLink>
+                  <Link
+                    to="/customer/orders"
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/customer/orders')
+                      ? 'bg-[#287DA8]/10 text-[#287DA8] border border-[#287DA8]/30 shadow-xs'
+                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
+                      }`}
+                  >
+                    <ReceiptText className="w-3.5 h-3.5" />
+                    <span>Đơn Hàng Của Tôi</span>
+                  </Link>
+                  <Link
+                    to="/customer/profile"
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/customer/profile')
+                      ? 'bg-[#287DA8]/10 text-[#287DA8] border border-[#287DA8]/30 shadow-xs'
+                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
+                      }`}
+                  >
+                    <UserIcon className="w-3.5 h-3.5" />
+                    <span>Hồ Sơ Của Tôi</span>
+                  </Link>
                 </>
               )}
 
@@ -246,6 +274,21 @@ export const Navbar: React.FC = () => {
           )}
         </div>
 
+        {isCustomer && (
+          <nav aria-label="Điều hướng khách hàng" className="hidden md:flex items-center gap-1 rounded-xl border border-slate-200/80 bg-slate-50/70 p-1 dark:border-zinc-800 dark:bg-zinc-900/70">
+            {[
+              { to: '/shop', label: 'Mua sắm', icon: ShoppingCart },
+              { to: '/customer/home', label: 'Nút của tôi', icon: Smartphone },
+              { to: '/customer/orders', label: 'Đơn hàng', icon: ReceiptText },
+            ].map(({ to, label, icon: Icon }) => (
+              <Link key={to} to={to} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${isActive(to) ? 'bg-white text-[#0E6BA8] shadow-xs dark:bg-zinc-800 dark:text-sky-400' : 'text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white'}`}>
+                <Icon className="w-3.5 h-3.5" />
+                {label}
+              </Link>
+            ))}
+          </nav>
+        )}
+
         {/* ================================================================= */}
         {/* CENTER: Minimalist Navigation with Smooth Shared Layout Pill      */}
         {/* ================================================================= */}
@@ -261,8 +304,34 @@ export const Navbar: React.FC = () => {
         {/* ================================================================= */}
         <div className="flex items-center gap-2 sm:gap-3">
 
+          {isCustomer && user && (
+            <div ref={customerMenuRef} className="flex items-center gap-1.5 sm:gap-2">
+              <NotificationBellPopover />
+              <div className="relative">
+                <button type="button" onClick={() => setCustomerMenuOpen((open) => !open)} aria-expanded={customerMenuOpen} aria-haspopup="menu" aria-label="Mở menu tài khoản" className="flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-1.5 sm:px-2.5 text-left transition hover:border-slate-300 hover:bg-slate-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800">
+                  <span className="w-7 h-7 rounded-lg bg-[#0E6BA8] text-white flex items-center justify-center overflow-hidden text-[11px] font-bold">
+                    {userAvatar ? <img src={userAvatar} alt="" className="w-full h-full object-cover" onError={() => setUserAvatar(null)} /> : getInitials(user.fullName)}
+                  </span>
+                  <span className="hidden lg:block max-w-28 truncate text-xs font-semibold text-slate-700 dark:text-zinc-200">{getDisplayName(user.fullName)}</span>
+                  <ChevronDown className={`hidden sm:block w-3.5 h-3.5 text-slate-400 transition-transform ${customerMenuOpen ? 'rotate-180' : ''}`} />
+                </button>
+                <AnimatePresence>
+                  {customerMenuOpen && (
+                    <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }} role="menu" className="absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
+                      <div className="px-3 py-2.5 border-b border-slate-100 dark:border-zinc-800"><p className="truncate text-xs font-bold text-slate-900 dark:text-white">{getDisplayName(user.fullName)}</p><p className="mt-0.5 truncate text-[11px] text-slate-400">{user.email}</p></div>
+                      <Link role="menuitem" to="/customer/profile" onClick={() => setCustomerMenuOpen(false)} className="mt-1 flex min-h-10 items-center gap-2 rounded-lg px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"><UserIcon className="w-3.5 h-3.5" />Hồ sơ của tôi</Link>
+                      <button role="menuitem" type="button" onClick={toggleTheme} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white">{theme === 'dark' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}{theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}</button>
+                      <div className="my-1 border-t border-slate-100 dark:border-zinc-800" />
+                      <button role="menuitem" type="button" onClick={() => { setCustomerMenuOpen(false); setShowLogoutModal(true); }} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30"><LogOut className="w-3.5 h-3.5" />Đăng xuất</button>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
+            </div>
+          )}
+
           {/* Internal Utilities (Only for logged in users) */}
-          {user && (
+          {user && !isCustomer && (
             <>
               {/* Bluetooth Nút Trắng (AirPods-style sleek pill) */}
               <button
@@ -312,10 +381,10 @@ export const Navbar: React.FC = () => {
           )}
 
           {/* Realtime Order & Cancellation Notification Bell */}
-          <NotificationBellPopover />
+          {!isCustomer && <NotificationBellPopover />}
 
           {/* Dark/Light Mode Toggle */}
-          <button
+          {!isCustomer && <button
             onClick={toggleTheme}
             className="p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
             title={theme === 'dark' ? 'Chuyển sang Giao diện Sáng' : 'Chuyển sang Giao diện Tối'}
@@ -326,11 +395,11 @@ export const Navbar: React.FC = () => {
             ) : (
               <Moon className="w-4 h-4 text-slate-700" />
             )}
-          </button>
+          </button>}
 
           {/* User Account / Auth Section */}
           {user ? (
-            <div className="flex items-center gap-2.5 pl-2 sm:pl-3 border-l border-slate-200 dark:border-zinc-800">
+            <div className={`${isCustomer ? 'hidden' : 'flex'} items-center gap-2.5 pl-2 sm:pl-3 border-l border-slate-200 dark:border-zinc-800`}>
               {/* Clickable Profile Link (Avatar + Name) */}
               <Link
                 to={getProfileRoute(user.role)}
@@ -440,6 +509,24 @@ export const Navbar: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {isCustomer && (
+        <nav aria-label="Điều hướng nhanh" className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 md:hidden">
+          <div className="grid grid-cols-4 max-w-lg mx-auto">
+            {[
+              { to: '/shop', label: 'Mua sắm', icon: ShoppingCart },
+              { to: '/customer/home', label: 'Nút của tôi', icon: Smartphone },
+              { to: '/customer/orders', label: 'Đơn hàng', icon: ReceiptText },
+              { to: '/customer/profile', label: 'Tài khoản', icon: UserIcon },
+            ].map(({ to, label, icon: Icon }) => (
+              <Link key={to} to={to} aria-current={isActive(to) ? 'page' : undefined} className={`flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-semibold transition ${isActive(to) ? 'text-[#0E6BA8]' : 'text-slate-400 dark:text-zinc-500'}`}>
+                <Icon className="w-[18px] h-[18px]" />
+                {label}
+              </Link>
+            ))}
+          </div>
+        </nav>
+      )}
 
       {/* Apple AirPods-Style Bluetooth Modal */}
       <WhiteDeviceAirPodsModal
