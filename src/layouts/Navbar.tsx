@@ -4,10 +4,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useSound } from '../context/OrderSoundContext';
-import { LogOut, Shield, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X } from 'lucide-react';
+import { LogOut, Shield, ShieldAlert, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X, ShoppingCart } from 'lucide-react';
 import { WhiteDeviceAirPodsModal } from '../components/devices/WhiteDeviceAirPodsModal';
 import { HeaderNavigation } from '../components/common/HeaderNavigation';
 import { LogoutConfirmModal } from '../components/common/LogoutConfirmModal';
+import { NotificationBellPopover } from '../components/common/NotificationBellPopover';
+
+const MotionLink = motion(Link);
 
 export const Navbar: React.FC = () => {
   const { user, logout } = useAuth();
@@ -165,6 +168,19 @@ export const Navbar: React.FC = () => {
                     <UserIcon className="w-3.5 h-3.5" />
                     <span>Hồ Sơ Của Tôi</span>
                   </Link>
+                  <MotionLink
+                    to="/shop"
+                    whileHover={{ y: -1, scale: 1.02 }}
+                    whileTap={{ scale: 0.97 }}
+                    transition={{ type: 'spring', stiffness: 420, damping: 22 }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/shop')
+                      ? 'bg-[#287DA8]/10 text-[#287DA8] border border-[#287DA8]/30 shadow-xs'
+                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
+                      }`}
+                  >
+                    <ShoppingCart className="w-3.5 h-3.5" />
+                    <span>Mua Sắm</span>
+                  </MotionLink>
                 </>
               )}
 
@@ -203,16 +219,28 @@ export const Navbar: React.FC = () => {
               )}
 
               {user.role === 'SUPER_ADMIN' && (
-                <Link
-                  to="/admin/dashboard"
-                  className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/admin/dashboard')
-                    ? 'bg-blue-50 dark:bg-red-500/15 text-blue-600 dark:text-red-400 border border-blue-200/80 dark:border-red-500/30'
-                    : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800/60'
-                    }`}
-                >
-                  <Shield className="w-3.5 h-3.5" />
-                  <span>Admin Hub</span>
-                </Link>
+                <>
+                  <Link
+                    to="/admin/dashboard"
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/admin/dashboard')
+                      ? 'bg-blue-50 dark:bg-sky-500/15 text-[#0E6BA8] dark:text-[#38a5da] border border-[#0E6BA8]/30 shadow-xs'
+                      : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800/60'
+                      }`}
+                  >
+                    <Shield className="w-3.5 h-3.5" />
+                    <span>Admin Hub</span>
+                  </Link>
+                  <Link
+                    to="/admin/security/devices"
+                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/admin/security/devices')
+                      ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-200/80 dark:border-rose-500/30 shadow-xs'
+                      : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800/60'
+                      }`}
+                  >
+                    <ShieldAlert className="w-3.5 h-3.5" />
+                    <span>Security Hub</span>
+                  </Link>
+                </>
               )}
             </nav>
           )}
@@ -223,6 +251,7 @@ export const Navbar: React.FC = () => {
         {/* ================================================================= */}
         {!user && (
           <div className="hidden md:flex items-center justify-center">
+            <Link to="/shop" className="mr-5 text-sm font-semibold text-slate-600 transition hover:text-teal-700 dark:text-zinc-300 dark:hover:text-teal-400">Mua sắm</Link>
             <HeaderNavigation />
           </div>
         )}
@@ -239,11 +268,11 @@ export const Navbar: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setShowAirPodsModal(true)}
-                className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-zinc-200 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800/80 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-lg transition-all group cursor-pointer"
+                className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-zinc-200 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800/80 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-lg transition-all group cursor-pointer whitespace-nowrap shrink-0"
                 title="Ghép nối Nút Bấm Trắng qua Bluetooth (AirPods Mode)"
               >
-                <Bluetooth className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400 group-hover:scale-110 transition-transform" />
-                <span>Nút Trắng Bluetooth</span>
+                <Bluetooth className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400 group-hover:scale-110 transition-transform shrink-0" />
+                <span className="whitespace-nowrap">Nút Trắng Bluetooth</span>
               </button>
 
               {/* Sound Notification Toggle & Test */}
@@ -281,6 +310,9 @@ export const Navbar: React.FC = () => {
               </button>
             </>
           )}
+
+          {/* Realtime Order & Cancellation Notification Bell */}
+          <NotificationBellPopover />
 
           {/* Dark/Light Mode Toggle */}
           <button
@@ -324,7 +356,7 @@ export const Navbar: React.FC = () => {
                 </motion.div>
 
                 {/* User Name & Role Info */}
-                <div className="text-left hidden sm:block">
+                <div className="text-left hidden sm:block shrink-0">
                   <div className="leading-tight">
                     <span
                       className="text-xs font-semibold text-slate-900 dark:text-white truncate max-w-[160px] block group-hover:text-[#0E6BA8] dark:group-hover:text-[#38a5da] transition-colors"
@@ -334,7 +366,7 @@ export const Navbar: React.FC = () => {
                     </span>
                   </div>
                   <div className="mt-0.5">
-                    <span className={`text-[9.5px] font-medium px-1.5 py-0.5 rounded-[4px] border ${getRoleBadge(user.role).color}`}>
+                    <span className={`text-[9.5px] font-medium px-1.5 py-0.5 rounded-[4px] border whitespace-nowrap shrink-0 inline-block ${getRoleBadge(user.role).color}`}>
                       {getRoleBadge(user.role).label}
                     </span>
                   </div>
@@ -393,6 +425,7 @@ export const Navbar: React.FC = () => {
             className="md:hidden border-t border-slate-200/80 dark:border-zinc-800 bg-white/95 dark:bg-[#09090B]/95 backdrop-blur-md px-4 py-4 overflow-hidden"
           >
             <div className="flex flex-col space-y-1">
+              <Link to="/shop" onClick={() => setMobileMenuOpen(false)} className="rounded-xl px-4 py-2.5 text-sm font-semibold text-teal-700 hover:bg-teal-50 dark:text-teal-400 dark:hover:bg-zinc-800">Mua sắm sản phẩm</Link>
               <HeaderNavigation isMobile={true} onMobileSelect={() => setMobileMenuOpen(false)} />
               <div className="pt-3 mt-2 border-t border-slate-100 dark:border-zinc-800 flex flex-col gap-2">
                 <Link

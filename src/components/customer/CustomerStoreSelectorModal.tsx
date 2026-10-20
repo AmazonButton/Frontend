@@ -687,7 +687,7 @@ export const CustomerStoreSelectorModal: React.FC<CustomerStoreSelectorModalProp
                           <span className="text-xs font-semibold text-emerald-600 dark:text-emerald-400">
                             ✓ Đã tìm thấy đại lý chính hãng
                           </span>
-                          <span className="text-xs font-mono font-medium px-2 py-0.5 rounded bg-slate-200/70 dark:bg-zinc-800 text-slate-700 dark:text-slate-300">
+                          <span className="text-xs font-semibold tabular-nums px-2 py-0.5 rounded-md bg-slate-200/70 dark:bg-zinc-800 text-slate-700 dark:text-slate-300">
                             {searchedStore.code}
                           </span>
                         </div>

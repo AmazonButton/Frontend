@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import ReactDOM from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, LayoutGroup, AnimatePresence } from 'framer-motion';
-import { ShoppingBag, Cpu, Package, BarChart3, ShieldCheck, Layers, Store, Menu, User as UserIcon } from 'lucide-react';
+import { ShoppingBag, Cpu, Package, BarChart3, ShieldCheck, Layers, Store, Menu, Wallet, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSidebar } from '../context/SidebarContext';
 
@@ -38,6 +38,11 @@ export const Sidebar: React.FC = () => {
       to: '/store/analytics',
       label: 'Báo Cáo Doanh Thu',
       icon: BarChart3,
+    },
+    {
+      to: '/store/wallet',
+      label: 'Ví Cửa Hàng',
+      icon: Wallet,
     },
   ];
 

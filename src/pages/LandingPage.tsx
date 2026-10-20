@@ -1,8 +1,9 @@
-import React, { useState, useRef } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, Volume2, VolumeX, ArrowRight, ShieldCheck, Zap, Battery, CheckCircle2, ShoppingCart, Droplets, Star, Shield, Check, Sparkles, MousePointerClick, SearchX, Cog, Truck, ChevronLeft, ChevronRight } from 'lucide-react';
 import { InteractiveHeroBackground } from '../components/InteractiveHeroBackground';
+import { api } from '../services/api';
 
 const PARTNER_BRANDS = [
   {
@@ -91,7 +92,48 @@ export const LandingPage: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(true);
   const [orderedProduct, setOrderedProduct] = useState<string | null>(null);
+  const [storefrontProducts, setStorefrontProducts] = useState<any[]>([]);
+  const [productsLoading, setProductsLoading] = useState(true);
+  const [cartCount, setCartCount] = useState(0);
+  const [cartPulse, setCartPulse] = useState(false);
   const brandScrollRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    let active = true;
+    api.get('/products/storefront/catalog')
+      .then(({ data }) => { if (active) setStorefrontProducts(data.data || []); })
+      .catch(() => { if (active) setStorefrontProducts([]); })
+      .finally(() => { if (active) setProductsLoading(false); });
+
+    try {
+      const saved = JSON.parse(localStorage.getItem('sob_storefront_cart_v1') || '[]');
+      setCartCount(saved.reduce((sum: number, line: any) => sum + Number(line.quantity || 0), 0));
+    } catch { setCartCount(0); }
+    return () => { active = false; };
+  }, []);
+
+  const addProductToCart = (product: any) => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('sob_storefront_cart_v1') || '[]');
+      if (saved[0]?.product?.storeId && saved[0].product.storeId !== product.storeId) {
+        setOrderedProduct('Giỏ hàng chỉ nhận sản phẩm của một cửa hàng');
+        window.setTimeout(() => setOrderedProduct(null), 2200);
+        return;
+      }
+      const existing = saved.find((line: any) => line.product?.id === product.id);
+      const next = existing
+        ? saved.map((line: any) => line.product?.id === product.id ? { ...line, quantity: line.quantity + 1 } : line)
+        : [...saved, { product, quantity: 1 }];
+      localStorage.setItem('sob_storefront_cart_v1', JSON.stringify(next));
+      setCartCount(next.reduce((sum: number, line: any) => sum + Number(line.quantity || 0), 0));
+      setCartPulse(true);
+      window.setTimeout(() => setCartPulse(false), 650);
+      setOrderedProduct(product.name);
+      window.setTimeout(() => setOrderedProduct(null), 2200);
+    } catch {
+      setOrderedProduct('Không thể thêm sản phẩm vào giỏ hàng');
+    }
+  };
 
   const scrollBrandsLeft = () => {
     if (brandScrollRef.current) {
@@ -444,7 +486,7 @@ export const LandingPage: React.FC = () => {
               className="shrink-0"
             >
               <Link
-                to="/store/products"
+                to="/shop"
                 className="group inline-flex items-center gap-1.5 text-sm font-semibold text-[#1976D2] hover:text-blue-700 dark:text-sky-400 dark:hover:text-sky-300 transition-colors"
               >
                 <span>Xem tất cả sản phẩm</span>
@@ -453,11 +495,15 @@ export const LandingPage: React.FC = () => {
             </motion.div>
           </div>
 
-          {/* 4-Column Grid with Staggered Entrance & Interactive Hover Animations */}
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-7">
-            {FEATURED_PRODUCTS.map((product, index) => {
-              const Icon = product.BadgeIcon;
-              const isSelected = orderedProduct === product.title;
+          {/* Sản phẩm thật từ cửa hàng */}
+          {productsLoading && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-7">
+            {Array.from({ length: 4 }).map((_, index) => <div key={index} className="h-96 animate-pulse rounded-2xl bg-slate-100 dark:bg-zinc-900" />)}
+          </div>}
+          {!productsLoading && storefrontProducts.length === 0 && <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500 dark:border-zinc-700 dark:bg-zinc-900">Hiện chưa có sản phẩm đang bán. Vui lòng thêm sản phẩm trong trang quản lý cửa hàng.</div>}
+          {!productsLoading && storefrontProducts.length > 0 && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-7">
+            {storefrontProducts.slice(0, 8).map((product, index) => {
+              const isSelected = orderedProduct === product.name;
+              const stock = Math.max(0, Number(product.stock || 0) - Number(product.reservedStock || 0));
 
               return (
                 <motion.div
@@ -472,28 +518,13 @@ export const LandingPage: React.FC = () => {
                   <div>
                     {/* Image Area with 4:3 Aspect Ratio, Floating Badge, and Zoom on Hover */}
                     <div className="relative w-full aspect-[4/3] rounded-xl overflow-hidden mb-3.5 bg-slate-100 dark:bg-zinc-800">
-                      <img
-                        src={product.image}
-                        alt={product.title}
-                        className={`w-full h-full object-cover transition-all duration-500 ease-out group-hover:scale-105 ${
-                          product.hoverImage ? 'group-hover:opacity-0' : ''
-                        }`}
-                        loading="lazy"
-                      />
-                      {product.hoverImage && (
-                        <img
-                          src={product.hoverImage}
-                          alt={`${product.title} sản phẩm`}
-                          className="absolute inset-0 w-full h-full object-cover transition-all duration-500 ease-out opacity-0 group-hover:opacity-100 group-hover:scale-105"
-                          loading="lazy"
-                        />
-                      )}
+                      {product.imageUrl ? <img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover transition-all duration-500 ease-out group-hover:scale-105" loading="lazy" /> : <div className="grid h-full place-items-center text-5xl">🛍️</div>}
 
                       {/* Top-Left Floating Badge */}
                       <div className="absolute top-3 left-3 z-10">
                         <span className={`inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold backdrop-blur-md border shadow-2xs ${product.badgeStyle}`}>
-                          <Icon className={`w-3.5 h-3.5 ${product.badgeIconColor}`} />
-                          <span>{product.badge}</span>
+                          <ShoppingCart className="w-3.5 h-3.5 text-emerald-600" />
+                          <span>{product.store?.name || 'Đang bán'}</span>
                         </span>
                       </div>
 
@@ -504,16 +535,17 @@ export const LandingPage: React.FC = () => {
                     {/* Title & Price on the Same Row */}
                     <div className="flex items-baseline justify-between gap-2 mb-1">
                       <h3 className="text-base font-bold text-[#0F172A] dark:text-white tracking-tight group-hover:text-[#1976D2] dark:group-hover:text-sky-400 transition-colors">
-                        {product.title}
+                        {product.name}
                       </h3>
                       <span className="text-sm sm:text-base font-bold font-mono text-[#1976D2] dark:text-sky-400 shrink-0">
-                        {product.price}
+                        {Number(product.price).toLocaleString('vi-VN')} ₫
                       </span>
                     </div>
 
                     {/* Product Description */}
                     <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed min-h-[36px] line-clamp-2">
-                      {product.description}
+                      {product.brand || product.unit || product.category}
+                      <span className="mt-1 block text-[11px] text-slate-400">Còn {stock}</span>
                     </p>
                   </div>
 
@@ -522,30 +554,38 @@ export const LandingPage: React.FC = () => {
                     <motion.button
                       type="button"
                       whileTap={{ scale: 0.97 }}
-                      onClick={() => handleQuickOrder(product.title)}
-                      className={`w-full py-2.5 px-4 rounded-xl text-white text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 shadow-xs hover:shadow-md ${
+                      onClick={() => addProductToCart(product)}
+                      disabled={stock <= 0}
+                      className={`w-full py-2.5 px-4 rounded-xl text-xs sm:text-sm font-semibold flex items-center justify-center gap-2 transition-all duration-200 shadow-xs hover:shadow-md ${
                         isSelected
-                          ? 'bg-emerald-600 hover:bg-emerald-700'
-                          : 'bg-[#287DA8] hover:bg-[#206588] active:bg-[#1b5573]'
+                          ? 'bg-[#EAF4F9] text-[#287DA8] border border-[#287DA8]/30'
+                          : 'bg-[#EAF4F9] text-[#287DA8] border border-[#287DA8]/30 hover:bg-[#D8EDF6]'
                       }`}
                     >
                       {isSelected ? (
                         <>
                           <Check className="w-4 h-4 animate-scale-in" />
-                          <span>Đã chọn thiết lập</span>
+                          <span>Đã thêm vào giỏ</span>
                         </>
                       ) : (
                         <>
                           <ShoppingCart className="w-4 h-4 transition-transform duration-200 group-hover:scale-110" />
-                          <span>Đặt ngay</span>
+                          <span>{stock > 0 ? 'Thêm vào giỏ' : 'Hết hàng'}</span>
                         </>
                       )}
                     </motion.button>
+                    <Link
+                      to="/shop?cart=open"
+                      className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-xl bg-[#287DA8] py-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#206588]"
+                    >
+                      <ArrowRight className="h-3.5 w-3.5" />
+                      Mua ngay
+                    </Link>
                   </div>
                 </motion.div>
               );
             })}
-          </div>
+          </div>}
 
         </div>
       </section>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { api } from '../../services/api';
+import { api, productsService } from '../../services';
 import { Product } from '../../types';
 import {
   Package,
@@ -15,6 +15,8 @@ import {
   Radio,
   Check,
   ChevronDown,
+  Pencil,
+  Save,
 } from 'lucide-react';
 
 const tableContainerVariants: Variants = {
@@ -53,6 +55,9 @@ export const StoreProductsPage: React.FC = () => {
   const [stock, setStock] = useState('100');
   const [imageUrl, setImageUrl] = useState('');
   const [submitLoading, setSubmitLoading] = useState(false);
+  const [editingPriceProductId, setEditingPriceProductId] = useState<string | null>(null);
+  const [editingPrice, setEditingPrice] = useState('');
+  const [savingPrice, setSavingPrice] = useState(false);
 
   // Universal body scroll lock & header submerge
   useBodyScrollLock(showAddModal);
@@ -107,14 +112,42 @@ export const StoreProductsPage: React.FC = () => {
   const handleStockUpdate = async (productId: string, currentStock: number, delta: number) => {
     const nextStock = Math.max(0, currentStock + delta);
     try {
-      const res = await api.put(`/products/${productId}`, { stock: nextStock });
-      if (res.data.success) {
+      const res = await productsService.updateStock(productId, { availableStock: nextStock });
+      if (res.success) {
         setProducts((prev) =>
           prev.map((p) => (p.id === productId ? { ...p, stock: nextStock } : p))
         );
       }
     } catch (e: any) {
       alert(e.response?.data?.message || 'Lỗi cập nhật tồn kho');
+    }
+  };
+
+  const startEditingPrice = (product: Product) => {
+    setEditingPriceProductId(product.id);
+    setEditingPrice(String(product.price));
+  };
+
+  const handlePriceUpdate = async (productId: string) => {
+    const nextPrice = Number(editingPrice);
+    if (!Number.isFinite(nextPrice) || nextPrice <= 0) {
+      alert('Vui lòng nhập giá lớn hơn 0');
+      return;
+    }
+
+    setSavingPrice(true);
+    try {
+      const res = await productsService.update(productId, { price: nextPrice });
+      if (res.success) {
+        setProducts((prev) => prev.map((product) =>
+          product.id === productId ? { ...product, price: nextPrice } : product
+        ));
+        setEditingPriceProductId(null);
+      }
+    } catch (err: any) {
+      alert(err.response?.data?.message || 'Không thể cập nhật giá sản phẩm');
+    } finally {
+      setSavingPrice(false);
     }
   };
 
@@ -358,7 +391,58 @@ export const StoreProductsPage: React.FC = () => {
 
                       {/* Đơn Giá (Monospace) */}
                       <td className="py-3 px-4 whitespace-nowrap font-mono font-bold text-zinc-900 dark:text-zinc-100">
-                        {prod.price.toLocaleString()} ₫
+                        {editingPriceProductId === prod.id ? (
+                          <div className="inline-flex items-center gap-1.5">
+                            <input
+                              type="number"
+                              min="1"
+                              step="1000"
+                              value={editingPrice}
+                              onChange={(event) => setEditingPrice(event.target.value)}
+                              onKeyDown={(event) => {
+                                if (event.key === 'Enter') handlePriceUpdate(prod.id);
+                                if (event.key === 'Escape') setEditingPriceProductId(null);
+                              }}
+                              autoFocus
+                              aria-label={`Giá mới cho ${prod.name}`}
+                              className="w-32 rounded-md border border-zinc-300 bg-white px-2 py-1 text-right text-xs dark:border-zinc-700 dark:bg-zinc-900"
+                            />
+                            <span className="text-xs">₫</span>
+                            <button
+                              type="button"
+                              disabled={savingPrice}
+                              onClick={() => handlePriceUpdate(prod.id)}
+                              title="Lưu giá"
+                              aria-label="Lưu giá"
+                              className="rounded p-1 text-emerald-600 hover:bg-emerald-50 disabled:opacity-50 dark:hover:bg-emerald-950"
+                            >
+                              <Save className="h-4 w-4" />
+                            </button>
+                            <button
+                              type="button"
+                              disabled={savingPrice}
+                              onClick={() => setEditingPriceProductId(null)}
+                              title="Hủy sửa giá"
+                              aria-label="Hủy sửa giá"
+                              className="rounded p-1 text-zinc-500 hover:bg-zinc-100 disabled:opacity-50 dark:hover:bg-zinc-800"
+                            >
+                              <X className="h-4 w-4" />
+                            </button>
+                          </div>
+                        ) : (
+                          <div className="inline-flex items-center gap-1.5">
+                            <span>{prod.price.toLocaleString()} ₫</span>
+                            <button
+                              type="button"
+                              onClick={() => startEditingPrice(prod)}
+                              title="Chỉnh sửa giá"
+                              aria-label={`Chỉnh sửa giá ${prod.name}`}
+                              className="rounded p-1 text-zinc-400 opacity-0 transition-opacity hover:bg-zinc-100 hover:text-zinc-800 group-hover:opacity-100 dark:hover:bg-zinc-800 dark:hover:text-white"
+                            >
+                              <Pencil className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        )}
                       </td>
 
                       {/* Tồn Kho Khả Dụng (LED Status Indicator) */}

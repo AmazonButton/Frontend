@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { api } from '../../services/api';
+import { toast } from '../../context/ToastContext';
 import {
   ShieldAlert,
   ShieldCheck,
@@ -10,11 +11,29 @@ import {
   Activity,
   Lock,
   RefreshCw,
+  RotateCcw,
 } from 'lucide-react';
 
 export const AdminSecurityHubPage: React.FC = () => {
   const [incidents, setIncidents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [isResetting, setIsResetting] = useState(false);
+
+  const handleFactoryReset = async (deviceId: string) => {
+    if (!window.confirm(`Xác nhận Factory Reset và thu hồi thiết bị [${deviceId}] về trạng thái xuất xưởng? Toàn bộ liên kết cấu hình sẽ bị xóa sạch.`)) return;
+    setIsResetting(true);
+    try {
+      const res = await api.post(`/devices/${encodeURIComponent(deviceId)}/factory-reset`);
+      if (res.data?.success) {
+        toast.success(res.data.message || `Đã Factory Reset nút [${deviceId}] thành công!`);
+        fetchIncidents();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không thể khôi phục cài đặt gốc');
+    } finally {
+      setIsResetting(false);
+    }
+  };
 
   const fetchIncidents = async () => {
     try {
@@ -140,6 +159,7 @@ export const AdminSecurityHubPage: React.FC = () => {
                   <th className="py-2.5 px-3">Loại Sự Kiện</th>
                   <th className="py-2.5 px-3">Device ID</th>
                   <th className="py-2.5 px-3">Chi Tiết Cảnh Báo</th>
+                  <th className="py-2.5 px-3 text-right">Xử Lý Khẩn Cấp</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-white/5">
@@ -155,6 +175,17 @@ export const AdminSecurityHubPage: React.FC = () => {
                     </td>
                     <td className="py-2.5 px-3 font-bold text-cyan-500">{inc.deviceId}</td>
                     <td className="py-2.5 px-3 text-slate-700 dark:text-slate-300">{inc.reason}</td>
+                    <td className="py-2.5 px-3 text-right">
+                      <button
+                        type="button"
+                        disabled={isResetting}
+                        onClick={() => handleFactoryReset(inc.deviceId)}
+                        className="px-2.5 py-1 rounded-md text-[11px] font-semibold text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition-colors cursor-pointer inline-flex items-center gap-1"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Factory Reset</span>
+                      </button>
+                    </td>
                   </tr>
                 ))}
               </tbody>
