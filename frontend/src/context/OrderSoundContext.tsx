@@ -29,7 +29,9 @@ const SoundContext = createContext<SoundContextType | undefined>(undefined);
 // Shared singleton AudioContext with user-gesture auto-resume
 let sharedAudioCtx: AudioContext | null = null;
 let currentPlayingAudio: HTMLAudioElement | null = null;
+let currentPlayPromise: Promise<void> | null = null;
 let lastAnnounceTimestamp = 0;
+const recentProcessedOrders = new Map<string, number>();
 
 const getAudioContext = (): AudioContext | null => {
   try {
@@ -142,18 +144,59 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     }
   };
 
+  // Helper phát giọng đọc tự nhiên qua Web SpeechSynthesis
+  const speakViaSynthesis = (textToSpeak: string) => {
+    if ('speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(textToSpeak);
+        utterance.lang = 'vi-VN';
+        utterance.rate = 1.0;
+        const voices = window.speechSynthesis.getVoices();
+        const viVoice = voices.find((v) => v.lang === 'vi-VN' || v.lang.includes('vi'));
+        if (viVoice) utterance.voice = viVoice;
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {
+        console.warn('SpeechSynthesis error:', e);
+      }
+    }
+  };
+
   // 🎙️ Phát giọng đọc tiếng Việt gốc (Chuẩn Google tự nhiên, trong trẻo, không bị méo/vang)
   const playVietnameseVoiceAudio = (text: string) => {
     if (!isVoiceEnabledRef.current) return;
 
-    // Dừng ngay lập tức bất kỳ âm thanh nào đang phát trước đó
-    if (currentPlayingAudio) {
-      try {
-        currentPlayingAudio.pause();
-        currentPlayingAudio.currentTime = 0;
-      } catch (e) {}
-      currentPlayingAudio = null;
+    // Check if running on HTTPS while API_URL is HTTP (Mixed Content prevention)
+    const isHttpsFrontend = typeof window !== 'undefined' && window.location.protocol === 'https:';
+    const isInsecureApi = API_URL.startsWith('http://');
+
+    if (isHttpsFrontend && isInsecureApi) {
+      // In production HTTPS without a secure TTS backend URL, safely use native SpeechSynthesis
+      speakViaSynthesis(text);
+      return;
     }
+
+    // Safely stop previous audio only if its play promise is settled
+    if (currentPlayingAudio) {
+      const prevAudio = currentPlayingAudio;
+      currentPlayingAudio = null;
+      if (currentPlayPromise) {
+        currentPlayPromise
+          .then(() => {
+            try {
+              prevAudio.pause();
+              prevAudio.currentTime = 0;
+            } catch (_) {}
+          })
+          .catch(() => {});
+      } else {
+        try {
+          prevAudio.pause();
+          prevAudio.currentTime = 0;
+        } catch (_) {}
+      }
+    }
+
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
     }
@@ -166,27 +209,26 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       audio.onended = () => {
         if (currentPlayingAudio === audio) {
           currentPlayingAudio = null;
+          currentPlayPromise = null;
         }
       };
 
       const playPromise = audio.play();
+      currentPlayPromise = playPromise;
+
       if (playPromise !== undefined) {
         playPromise.catch((err) => {
-          console.warn('Audio stream failed, fallback to SpeechSynthesis:', err);
-          if ('speechSynthesis' in window) {
-            window.speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'vi-VN';
-            utterance.rate = 1.0;
-            const voices = window.speechSynthesis.getVoices();
-            const viVoice = voices.find((v) => v.lang === 'vi-VN' || v.lang.includes('vi'));
-            if (viVoice) utterance.voice = viVoice;
-            window.speechSynthesis.speak(utterance);
+          // AbortError is intentional (e.g. paused for a newer audio or user action) - ignore it safely
+          if (err && err.name === 'AbortError') {
+            return;
           }
+          console.warn('Audio stream failed, fallback to SpeechSynthesis:', err);
+          speakViaSynthesis(text);
         });
       }
     } catch (e) {
       console.warn('TTS playback error:', e);
+      speakViaSynthesis(text);
     }
   };
 
@@ -291,6 +333,22 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     const socket = getSocket();
 
     const handleOrderCreated = (payload: any) => {
+      // Deduplicate event by order ID or order number within 3 seconds
+      const orderId = payload?.order?.id || payload?.orderNumber || payload?.order?.orderNumber || payload?.id;
+      if (orderId) {
+        const lastTime = recentProcessedOrders.get(orderId);
+        const now = Date.now();
+        if (lastTime && now - lastTime < 3000) {
+          return;
+        }
+        recentProcessedOrders.set(orderId, now);
+        if (recentProcessedOrders.size > 80) {
+          for (const [key, t] of recentProcessedOrders.entries()) {
+            if (now - t > 10000) recentProcessedOrders.delete(key);
+          }
+        }
+      }
+
       console.log('🔔 [LIVE AUDIO] New order triggered! Payload:', payload);
       const isStore = user && ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN'].includes(user.role);
 
@@ -307,7 +365,17 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
       }
     };
 
-    const handleOrderCancelled = () => {
+    const handleOrderCancelled = (payload?: any) => {
+      const cancelId = payload?.orderId || payload?.order?.id || payload?.id;
+      if (cancelId) {
+        const key = `cancel_${cancelId}`;
+        const lastTime = recentProcessedOrders.get(key);
+        const now = Date.now();
+        if (lastTime && now - lastTime < 3000) {
+          return;
+        }
+        recentProcessedOrders.set(key, now);
+      }
       playCancelChime();
     };
 

@@ -368,7 +368,6 @@ export const CustomerHomePage: React.FC = () => {
         setPressingDeviceId(null);
       }, 2500);
 
-      playOrderChime();
       fetchData();
 
       if (data.order) {
