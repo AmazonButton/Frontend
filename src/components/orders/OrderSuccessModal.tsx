@@ -110,6 +110,21 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
     };
   }, [isOpen, order?.id, order?.orderNumber]);
 
+  useEffect(() => {
+    if (!order || !isOpen || isPaid || !paymentData?.orderCode || selectedPaymentMethod !== 'PAYOS') return;
+
+    const timer = setInterval(async () => {
+      try {
+        const res = await paymentsService.getPaymentLinkInfo(paymentData.orderCode);
+        if (res.data?.status === 'PAID') setIsPaid(true);
+      } catch {
+        // A transient status lookup error should not change the order's payment state.
+      }
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, [order?.id, isOpen, isPaid, paymentData?.orderCode, selectedPaymentMethod]);
+
   if (!order) return null;
 
   const totalCancelWindow = (order as any).cancelWindowSeconds || 60;
@@ -212,19 +227,6 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
       setIsPaying(false);
     }
   };
-
-  useEffect(() => {
-    if (!isOpen || isPaid || !paymentData?.orderCode || selectedPaymentMethod !== 'PAYOS') return;
-    const timer = setInterval(async () => {
-      try {
-        const res = await paymentsService.getPaymentLinkInfo(paymentData.orderCode);
-        if (res.data?.status === 'PAID') setIsPaid(true);
-      } catch {
-        // A transient status lookup error should not change the order's payment state.
-      }
-    }, 5000);
-    return () => clearInterval(timer);
-  }, [isOpen, isPaid, paymentData?.orderCode, selectedPaymentMethod]);
 
   return createPortal(
     <AnimatePresence>
