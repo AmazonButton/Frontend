@@ -3,10 +3,11 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
+import { toast } from '../../context/ToastContext';
 import { useSound } from '../../context/OrderSoundContext';
 import { subscribeToCustomer, getSocket } from '../../services/socket';
 import { Device, Order, Product } from '../../types';
-import { Radio, ShoppingBag, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3, Settings, ChevronDown, RotateCcw, Store } from 'lucide-react';
+import { Radio, ShoppingBag, ShoppingCart, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3, Settings, ChevronDown, RotateCcw, Store, Unlink2, Trash2 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Floating3DCard } from '../../components/3d/Floating3DCard';
 import { WebBluetoothProvisioner } from '../../components/devices/WebBluetoothProvisioner';
@@ -38,7 +39,8 @@ interface DeviceCardUIProps {
 
 const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
   dev, productImg, name, productDesc, priceStr, isOnline, battery, rssi,
-  isPressing, simulatingId, onOrder, onSimulate, onConfigOpen, onWifiOpen,
+  isPressing, simulatingId,
+  onOrder, onSimulate, onConfigOpen, onWifiOpen,
 }) => {
   const [expanded, setExpanded] = React.useState(false);
   const cfg = dev.configuration;
@@ -46,18 +48,19 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
   return (
     <motion.div
       layout
-      whileHover={{ scale: 1.012, y: -3 }}
-      whileTap={{ scale: 0.988 }}
+      whileHover={{ scale: 1.012, y: -2 }}
+      whileTap={{ scale: 0.99 }}
       transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-      className={`relative bg-white rounded-3xl overflow-hidden shadow-xs border transition-all ${
+      className={`relative bg-white rounded-xl overflow-hidden shadow-xs border transition-all ${
         isPressing
           ? 'border-amber-300 shadow-amber-100 shadow-lg ring-2 ring-amber-200'
-          : 'border-zinc-200/80 hover:shadow-md hover:border-zinc-300'
+          : 'border-slate-200/80 hover:shadow-md hover:border-slate-300'
       }`}
       style={{ willChange: 'transform' }}
     >
-      {/* Product Image on soft bg-zinc-50 */}
-      <div className="relative h-36 bg-zinc-50 flex items-center justify-center overflow-hidden">
+      {/* Product Image on soft bg-slate-50 */}
+      <div className="relative h-36 bg-slate-50/70 border-b border-slate-100 flex items-center justify-center overflow-hidden">
+
         <img
           src={productImg}
           alt={name}
@@ -79,15 +82,15 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
 
         {/* Subtle Gear/Settings Icon in Top Right Corner */}
         <motion.button
-          whileTap={{ scale: 0.9 }}
+          whileTap={{ scale: 0.92 }}
           onClick={(e) => {
             e.stopPropagation();
             setExpanded((v) => !v);
           }}
-          className={`absolute top-3 right-3 w-7 h-7 rounded-full flex items-center justify-center shadow-xs border transition-all z-10 ${
+          className={`absolute top-3 right-3 w-7 h-7 rounded-lg flex items-center justify-center shadow-xs border transition-all z-10 ${
             expanded
-              ? 'bg-zinc-900 border-zinc-900 text-white'
-              : 'bg-white/90 backdrop-blur-sm border-zinc-200/80 text-zinc-400 hover:text-zinc-700 hover:border-zinc-300'
+              ? 'bg-slate-900 border-slate-900 text-white'
+              : 'bg-white/90 backdrop-blur-sm border-slate-200/80 text-slate-400 hover:text-slate-700 hover:border-slate-300'
           }`}
           title={expanded ? 'Đóng cài đặt' : 'Cài đặt thiết bị'}
         >
@@ -99,8 +102,8 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
       <div className="p-4 space-y-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-zinc-900 truncate">{name}</h3>
-            <p className="text-xs text-zinc-400 mt-0.5 truncate">
+            <h3 className="text-sm font-semibold text-slate-900 truncate tracking-tight">{name}</h3>
+            <p className="text-xs text-slate-500 mt-0.5 truncate">
               {productDesc || cfg?.product?.name || 'Nút bấm thông minh 1 chạm'}
             </p>
           </div>
@@ -111,19 +114,19 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
                   ? 'bg-rose-400'
                   : isOnline
                   ? 'bg-emerald-500'
-                  : 'bg-zinc-300'
+                  : 'bg-slate-300'
               }`}
               title={dev.status === 'DISABLED' ? 'Đã tắt' : isOnline ? 'Online' : 'Offline'}
             />
-            <span className="text-xs font-medium text-zinc-500 tabular-nums">{battery}%</span>
+            <span className="text-xs font-medium text-slate-500 tabular-nums">{battery}%</span>
           </div>
         </div>
 
         {/* Single Primary Action Button: "Đặt ngay — [Price]" */}
         <motion.button
-          whileTap={{ scale: 0.97 }}
+          whileTap={{ scale: 0.98 }}
           onClick={() => onOrder(dev.deviceId)}
-          className="w-full py-2.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all duration-150 ease-out active:scale-[0.97] hover:shadow-md cursor-pointer shadow-xs"
+          className="w-full py-2.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all duration-150 ease-out active:scale-[0.98] cursor-pointer shadow-xs"
         >
           <ShoppingBag className="w-3.5 h-3.5" />
           <span className="tabular-nums">{priceStr ? `Đặt ngay — ${priceStr}` : 'Đặt ngay'}</span>
@@ -140,31 +143,31 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
               transition={{ type: "spring", bounce: 0, duration: 0.3 }}
               className="overflow-hidden"
             >
-              <div className="pt-3 border-t border-zinc-100 space-y-2.5">
+              <div className="pt-3 border-t border-slate-100 space-y-2.5">
                 {/* Telemetry row */}
-                <div className="flex items-center justify-between text-[11px] text-zinc-400 tabular-nums px-0.5">
+                <div className="flex items-center justify-between text-[11px] text-slate-400 tabular-nums px-0.5">
                   <span className="flex items-center gap-1">
-                    <Wifi className="w-3 h-3 text-zinc-400" />
+                    <Wifi className="w-3 h-3 text-slate-400" />
                     {rssi} dBm
                   </span>
-                  <span className="truncate max-w-[85px] text-zinc-400" title={dev.deviceId}>
+                  <span className="truncate max-w-[85px] text-slate-400 tabular-nums" title={dev.deviceId}>
                     {dev.deviceId}
                   </span>
-                  <span className="flex items-center gap-1 text-zinc-400">
-                    <Clock className="w-3 h-3 text-zinc-400" />
+                  <span className="flex items-center gap-1 text-slate-400 tabular-nums">
+                    <Clock className="w-3 h-3 text-slate-400" />
                     {cfg?.cancelWindowSeconds ?? 60}s
                   </span>
                 </div>
 
                 {/* Gesture guide as minimalist outline tags */}
                 <div className="flex items-center gap-1.5 flex-wrap">
-                  <span className="px-2 py-0.5 rounded-full border border-zinc-200/90 bg-zinc-50/70 text-[10px] text-zinc-500 font-medium">
+                  <span className="px-2 py-0.5 rounded-lg border border-slate-200/90 bg-slate-50/70 text-[10px] text-slate-600 font-medium">
                     1 chạm: Bật
                   </span>
-                  <span className="px-2 py-0.5 rounded-full border border-zinc-200/90 bg-zinc-50/70 text-[10px] text-zinc-500 font-medium">
+                  <span className="px-2 py-0.5 rounded-lg border border-slate-200/90 bg-slate-50/70 text-[10px] text-slate-600 font-medium">
                     2 chạm: Đặt
                   </span>
-                  <span className="px-2 py-0.5 rounded-full border border-zinc-200/90 bg-zinc-50/70 text-[10px] text-zinc-500 font-medium">
+                  <span className="px-2 py-0.5 rounded-lg border border-slate-200/90 bg-slate-50/70 text-[10px] text-slate-600 font-medium">
                     Giữ 5s: Wi-Fi
                   </span>
                 </div>
@@ -175,31 +178,27 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
                     type="button"
                     onClick={() => onSimulate(dev.deviceId)}
                     disabled={simulatingId === dev.deviceId}
-                    className="flex-1 px-2.5 py-1.5 rounded-full border border-zinc-200 bg-white hover:bg-zinc-50 hover:border-zinc-300 text-zinc-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors"
+                    className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors"
                   >
-                    <Radio className={`w-3 h-3 text-zinc-400 ${simulatingId === dev.deviceId ? 'animate-spin' : ''}`} />
+                    <Radio className={`w-3 h-3 text-slate-400 ${simulatingId === dev.deviceId ? 'animate-spin' : ''}`} />
                     <span>Thử nút</span>
                   </button>
                   <motion.button
-                    whileTap={{ scale: 0.92 }}
-                    whileHover={{ scale: 1.03, y: -1 }}
-                    transition={{ type: 'spring', stiffness: 450, damping: 25 }}
+                    whileTap={{ scale: 0.94 }}
                     type="button"
                     onClick={() => onConfigOpen(dev)}
-                    className="flex-1 px-2.5 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 hover:border-[#0E6BA8]/50 hover:text-[#0E6BA8] text-zinc-600 dark:text-zinc-300 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs group"
+                    className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-[#0E6BA8]/50 hover:text-[#0E6BA8] text-slate-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs group"
                   >
-                    <Sliders className="w-3 h-3 text-zinc-400 group-hover:text-[#0E6BA8] transition-colors" />
+                    <Sliders className="w-3 h-3 text-slate-400 group-hover:text-[#0E6BA8] transition-colors" />
                     <span>Cấu hình</span>
                   </motion.button>
                   <motion.button
-                    whileTap={{ scale: 0.92 }}
-                    whileHover={{ scale: 1.03, y: -1 }}
-                    transition={{ type: 'spring', stiffness: 450, damping: 25 }}
+                    whileTap={{ scale: 0.94 }}
                     type="button"
                     onClick={() => onWifiOpen(dev)}
-                    className="flex-1 px-2.5 py-1.5 rounded-full border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 hover:border-[#0E6BA8]/50 hover:text-[#0E6BA8] text-zinc-600 dark:text-zinc-300 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs group"
+                    className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-[#0E6BA8]/50 hover:text-[#0E6BA8] text-slate-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs group"
                   >
-                    <Wifi className="w-3 h-3 text-zinc-400 group-hover:text-[#0E6BA8] transition-colors" />
+                    <Wifi className="w-3 h-3 text-slate-400 group-hover:text-[#0E6BA8] transition-colors" />
                     <span>Wi-Fi</span>
                   </motion.button>
                 </div>
@@ -284,6 +283,8 @@ export const CustomerHomePage: React.FC = () => {
   const [configSuccessMsg, setConfigSuccessMsg] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
+  const [unclaimingDevice, setUnclaimingDevice] = useState<Device | null>(null);
+  const [unclaimLoading, setUnclaimLoading] = useState(false);
 
   // Lock background body scroll whenever any inline modal is open
   const isAnyInlineModalOpen = Boolean(
@@ -291,6 +292,7 @@ export const CustomerHomePage: React.FC = () => {
     changeWifiDevice ||
     showWifiWebModal ||
     transferringDevice ||
+    unclaimingDevice ||
     showAddModal
   );
   useBodyScrollLock(isAnyInlineModalOpen);
@@ -303,7 +305,35 @@ export const CustomerHomePage: React.FC = () => {
         api.get('/products').catch(() => ({ data: { success: false, data: [] } })),
       ]);
       if (devRes.data.success) setDevices(devRes.data.data);
-      if (ordRes.data.success) setOrders(ordRes.data.data);
+      if (ordRes.data.success) {
+        const fetchedOrders: Order[] = ordRes.data.data;
+        setOrders(fetchedOrders);
+
+        // Check activeCancelOrder: if status is no longer PENDING (e.g. accepted by store/shipper), clear immediately!
+        setActiveCancelOrder((current) => {
+          if (!current) return null;
+          const fresh = fetchedOrders.find(
+            (o) => o.id === current.id || o.orderNumber === current.orderNumber
+          );
+          if (!fresh || fresh.status !== 'PENDING') {
+            setSecondsRemaining(0);
+            return null;
+          }
+          return fresh;
+        });
+
+        // Also update activeSuccessOrder status if modal is open
+        setActiveSuccessOrder((current) => {
+          if (!current) return null;
+          const fresh = fetchedOrders.find(
+            (o) => o.id === current.id || o.orderNumber === current.orderNumber
+          );
+          if (fresh) {
+            return { ...current, status: fresh.status };
+          }
+          return current;
+        });
+      }
       if (prodRes.data?.success) setAvailableProducts(prodRes.data.data);
     } catch (e) {
       console.error('Failed to load customer data:', e);
@@ -349,8 +379,27 @@ export const CustomerHomePage: React.FC = () => {
       }
     };
 
-    const handleOrderUpdated = () => {
+    const handleOrderUpdated = (data?: any) => {
       fetchData();
+
+      const updatedOrder = data?.order || data;
+      if (updatedOrder && updatedOrder.status && updatedOrder.status !== 'PENDING') {
+        setActiveCancelOrder((current) => {
+          if (!current) return null;
+          if (current.id === updatedOrder.id || current.orderNumber === updatedOrder.orderNumber) {
+            setSecondsRemaining(0);
+            return null; // DISMISS IMMEDIATELY WHEN STORE ACCEPTS!
+          }
+          return current;
+        });
+
+        setActiveSuccessOrder((current) => {
+          if (current && (current.id === updatedOrder.id || current.orderNumber === updatedOrder.orderNumber)) {
+            return { ...current, status: updatedOrder.status };
+          }
+          return current;
+        });
+      }
     };
 
     const handleDeviceHeartbeat = (data: any) => {
@@ -407,6 +456,8 @@ export const CustomerHomePage: React.FC = () => {
 
     socket.on('ORDER_CREATED', handleOrderCreated);
     socket.on('ORDER_STATUS_CHANGED', handleOrderUpdated);
+    socket.on('order:status_changed', handleOrderUpdated);
+    socket.on('order:updated', handleOrderUpdated);
     socket.on('ORDER_CANCELLED', handleOrderCancelled);
     socket.on('DEVICE_HEARTBEAT', handleDeviceHeartbeat);
     socket.on('BUTTON_PRESSING', handleButtonPressing);
@@ -419,6 +470,8 @@ export const CustomerHomePage: React.FC = () => {
       window.removeEventListener('sob_device_claimed_success', handleDeviceClaimed);
       socket.off('ORDER_CREATED', handleOrderCreated);
       socket.off('ORDER_STATUS_CHANGED', handleOrderUpdated);
+      socket.off('order:status_changed', handleOrderUpdated);
+      socket.off('order:updated', handleOrderUpdated);
       socket.off('ORDER_CANCELLED', handleOrderCancelled);
       socket.off('DEVICE_HEARTBEAT', handleDeviceHeartbeat);
       socket.off('BUTTON_PRESSING', handleButtonPressing);
@@ -433,6 +486,16 @@ export const CustomerHomePage: React.FC = () => {
   useEffect(() => {
     if (!activeCancelOrder || secondsRemaining <= 0) return;
 
+    // Check if activeCancelOrder is still PENDING
+    const matched = orders.find(
+      (o) => o.id === activeCancelOrder.id || o.orderNumber === activeCancelOrder.orderNumber
+    );
+    if (matched && matched.status !== 'PENDING') {
+      setActiveCancelOrder(null);
+      setSecondsRemaining(0);
+      return;
+    }
+
     const interval = setInterval(() => {
       setSecondsRemaining((prev) => {
         if (prev <= 1) {
@@ -445,7 +508,7 @@ export const CustomerHomePage: React.FC = () => {
     }, 1000);
 
     return () => clearInterval(interval);
-  }, [activeCancelOrder, secondsRemaining]);
+  }, [activeCancelOrder, secondsRemaining, orders]);
 
   // App-triggered Quick Reorder
   const handleQuickReorder = async (deviceId: string) => {
@@ -475,13 +538,15 @@ export const CustomerHomePage: React.FC = () => {
 
     try {
       const res = await api.post(`/orders/${orderId}/cancel`, {
-        reason: 'Khách hàng hủy đơn trong thời gian 60 giây cho phép',
+        reason: 'Khách hàng hủy đơn',
       });
       if (res.data.success) {
+        toast.success(`Đã hủy đơn hàng #${orderNumber || orderId.slice(0, 8)} thành công!`);
         fetchData();
       }
     } catch (err: any) {
       console.error('Cancel order error:', err);
+      toast.error(err.response?.data?.message || 'Không thể hủy đơn hàng');
       fetchData();
     }
   };
@@ -762,7 +827,26 @@ export const CustomerHomePage: React.FC = () => {
         fetchData();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể chuyển nhượng');
+      toast.error(err.response?.data?.message || 'Không thể chuyển nhượng');
+    }
+  };
+
+  // Unclaim device (Gỡ / Hủy liên kết nút bấm khỏi tài khoản cá nhân)
+  const handleUnclaimSubmit = async () => {
+    if (!unclaimingDevice) return;
+    setUnclaimLoading(true);
+    try {
+      const res = await api.post(`/devices/${unclaimingDevice.deviceId}/unclaim`);
+      if (res.data?.success) {
+        toast.success(`Đã hủy liên kết nút ${unclaimingDevice.customName || unclaimingDevice.deviceId} thành công!`);
+        setUnclaimingDevice(null);
+        setConfigModalDevice(null);
+        await fetchData();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không thể hủy liên kết thiết bị');
+    } finally {
+      setUnclaimLoading(false);
     }
   };
 
@@ -770,7 +854,7 @@ export const CustomerHomePage: React.FC = () => {
   const openConfigModal = (dev: Device) => {
     setConfigModalDevice(dev);
     setConfigCustomName(dev.customName || dev.configuration?.customName || '');
-    setConfigProductId(dev.productId || dev.configuration?.productId || '');
+    setConfigProductId(dev.configuration?.productId || dev.productId || '');
     setConfigQuantity(dev.configuration?.defaultQuantity || 1);
     setConfigStatus(dev.status === 'DISABLED' ? 'DISABLED' : 'ACTIVE');
     setConfigSuccessMsg(null);
@@ -794,11 +878,17 @@ export const CustomerHomePage: React.FC = () => {
       });
       if (res.data.success) {
         setConfigSuccessMsg('Đã lưu cấu hình nút thành công!');
-        fetchData();
+        const updatedDev = res.data.data;
+        if (updatedDev) {
+          setDevices((prev) =>
+            prev.map((d) => (d.id === updatedDev.id || d.deviceId === updatedDev.deviceId ? updatedDev : d))
+          );
+        }
+        await fetchData();
         setTimeout(() => {
           setConfigModalDevice(null);
           setConfigSuccessMsg(null);
-        }, 1000);
+        }, 800);
       }
     } catch (err: any) {
       setConfigError(err.response?.data?.message || 'Không thể lưu cấu hình nút');
@@ -836,71 +926,76 @@ export const CustomerHomePage: React.FC = () => {
 
 
 
-      {/* ── PART 1: Greeting Header ── */}
+      {/* ── PART 1: Greeting & Minimalist Linear Status Bar ── */}
       <motion.div
-        initial={{ opacity: 0, y: 15 }}
+        initial={{ opacity: 0, y: 12 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, ease: [0.25, 0.46, 0.45, 0.94] }}
-        className="space-y-3"
+        transition={{ duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] }}
+        className="space-y-4"
       >
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight text-zinc-900">
-            Xin chào, {user?.fullName || 'Cư Dân'}
-          </h1>
-          <div className="flex flex-wrap items-center gap-2.5 mt-2">
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+          <div>
+            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-900">
+              Xin chào, {user?.fullName || 'Cư Dân'}
+            </h1>
+            <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-slate-500">
+              <button
+                type="button"
+                onClick={() => setShowStoreModal(true)}
+                className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-slate-100 hover:bg-slate-200/80 text-slate-700 border border-slate-200/80 transition-colors cursor-pointer group"
+                title="Nhấn để đổi cửa hàng hoặc tìm đại lý lân cận"
+              >
+                <Store className="w-3.5 h-3.5 text-[#0E6BA8] shrink-0" />
+                <span className="font-semibold text-slate-800">{selectedStore?.name || user?.store?.name || 'LeBao Store (Q7)'}</span>
+                <span className="text-[10px] bg-[#0E6BA8] text-white px-1.5 py-0.2 rounded-full font-medium tabular-nums">
+                  {selectedStore?.code || 'STORE-NFHT4'}
+                </span>
+                <span className="text-[11px] text-[#0E6BA8] group-hover:underline flex items-center ml-0.5">
+                  Đổi <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
+                </span>
+              </button>
+              <span className="text-slate-300">·</span>
+              <span className="text-slate-500 flex items-center gap-1">
+                <MapPin className="w-3 h-3 text-slate-400" />
+                <span>Căn hộ {(user as any)?.customerProfile?.apartment || 'Landmark Plus Q7'}</span>
+              </span>
+            </div>
+          </div>
+
+          {/* Header Action Buttons */}
+          <div className="flex items-center gap-2.5 self-start sm:self-center flex-wrap">
             <motion.button
-              whileHover={{ scale: 1.02 }}
-              whileTap={{ scale: 0.97 }}
-              type="button"
-              onClick={() => setShowStoreModal(true)}
-              className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-[#0E6BA8]/10 hover:bg-[#0E6BA8]/15 text-[#0E6BA8] dark:text-sky-400 border border-[#0E6BA8]/20 transition-all cursor-pointer group shadow-2xs"
-              title="Nhấn để đổi cửa hàng hoặc tìm đại lý lân cận"
+              whileTap={{ scale: 0.98 }}
+              onClick={() => setShowAirPodsModal(true)}
+              className="inline-flex items-center gap-2 px-3.5 py-2 bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold rounded-lg transition-all duration-150 active:scale-[0.98] shadow-xs cursor-pointer whitespace-nowrap"
             >
-              <Store className="w-3.5 h-3.5 text-[#0E6BA8] shrink-0" />
-              <span className="font-semibold">{selectedStore?.name || user?.store?.name || 'LeBao Store (Q7)'}</span>
-              <span className="text-[10px] bg-[#0E6BA8] text-white px-1.5 py-0.2 rounded-full font-mono">
-                {selectedStore?.code || 'STORE-NFHT4'}
-              </span>
-              <span className="text-[11px] underline opacity-75 group-hover:opacity-100 flex items-center">
-                Đổi cửa hàng <ChevronRight className="w-3 h-3 ml-0.5 group-hover:translate-x-0.5 transition-transform" />
-              </span>
+              <Plus className="w-4 h-4" />
+              <span>Thêm nút mới</span>
             </motion.button>
-            <span className="text-zinc-200 dark:text-zinc-700">·</span>
-            <span className="text-sm text-zinc-400 flex items-center gap-1">
-              <MapPin className="w-3 h-3 text-zinc-400" />
-              <span>Căn hộ {(user as any)?.customerProfile?.apartment || 'Landmark Plus Q7'}</span>
-            </span>
           </div>
         </div>
-        <div className="flex flex-wrap items-center gap-5">
-          <span className="flex items-center gap-2 text-sm text-zinc-500">
-            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 inline-block" />
-            <span className="tabular-nums font-medium text-zinc-700 dark:text-zinc-300">
+
+        {/* Minimalist Linear/Stripe Status Bar */}
+        <div className="flex flex-wrap items-center gap-4 py-2.5 px-4 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600">
+          <span className="inline-flex items-center gap-2 font-medium">
+            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse shrink-0" />
+            <span className="tabular-nums font-semibold text-slate-800">
               {devices.length > 0 ? devices.filter(d => d.status !== 'DISABLED').length : 4}/{devices.length > 0 ? devices.length : 4}
-            </span> nút online
+            </span>{' '}
+            thiết bị đang hoạt động
           </span>
-          <span className="flex items-center gap-1.5 text-sm text-zinc-500">
-            <Battery className="w-3.5 h-3.5 text-zinc-400" />
-            Pin trung bình <span className="tabular-nums font-medium text-zinc-700 dark:text-zinc-300">{devices.length > 0 ? Math.round(devices.reduce((s, d) => s + (d.batteryLevel ?? 96), 0) / devices.length) : 96}%</span>
+          <span className="text-slate-300">·</span>
+          <span className="inline-flex items-center gap-1.5 font-medium">
+            <Battery className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+            <span>Pin trung bình</span>
+            <span className="tabular-nums font-semibold text-slate-800">
+              {devices.length > 0 ? Math.round(devices.reduce((s, d) => s + (d.batteryLevel ?? 93), 0) / devices.length) : 93}%
+            </span>
           </span>
-          <div className="ml-auto flex items-center gap-2">
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={() => setShowStoreModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-white dark:bg-zinc-800 hover:bg-slate-50 dark:hover:bg-zinc-700 border border-slate-200 dark:border-zinc-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg transition-all duration-150 ease-out active:scale-[0.97] hover:shadow-2xs cursor-pointer shadow-xs"
-            >
-              <Store className="w-3.5 h-3.5 text-[#0E6BA8]" />
-              <span>Đổi Cửa Hàng</span>
-            </motion.button>
-            <motion.button
-              whileTap={{ scale: 0.97 }}
-              onClick={() => setShowAirPodsModal(true)}
-              className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold rounded-lg transition-all duration-150 ease-out active:scale-[0.97] hover:shadow-md cursor-pointer shadow-xs"
-            >
-              <Plus className="w-3.5 h-3.5" />
-              + Thêm nút mới
-            </motion.button>
-          </div>
+          <span className="text-slate-300 hidden sm:inline">·</span>
+          <span className="text-slate-400 hidden sm:inline">
+            Tự động đồng bộ qua Wi-Fi 2.4GHz & Bluetooth
+          </span>
         </div>
       </motion.div>
 
@@ -938,18 +1033,21 @@ export const CustomerHomePage: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Cancel grace banner */}
+      {/* Cancel grace banner - Only visible while order is strictly PENDING (chưa tiếp nhận) */}
       <AnimatePresence>
-        {!showSuccessModal && activeCancelOrder && secondsRemaining > 0 && (
+        {!showSuccessModal &&
+          activeCancelOrder &&
+          secondsRemaining > 0 &&
+          (orders.find((o) => o.id === activeCancelOrder.id || o.orderNumber === activeCancelOrder.orderNumber)?.status || activeCancelOrder.status) === 'PENDING' && (
           <motion.div
             initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }}
-            className="flex items-center justify-between px-4 py-2.5 bg-white border border-zinc-200/90 rounded-2xl shadow-xs text-xs"
+            className="flex items-center justify-between px-4 py-2.5 bg-white border border-slate-200/90 rounded-xl shadow-xs text-xs"
           >
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shrink-0" />
-              <span className="text-zinc-600 font-medium">
+              <span className="text-slate-600 font-medium">
                 Đơn #{activeCancelOrder.orderNumber} — Hủy miễn phí trong{' '}
-                <span className="font-bold text-zinc-900 tabular-nums">
+                <span className="font-bold text-slate-900 tabular-nums">
                   {secondsRemaining}s
                 </span>
               </span>
@@ -969,33 +1067,41 @@ export const CustomerHomePage: React.FC = () => {
         initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ duration: 0.45, delay: 0.1, ease: [0.25, 0.46, 0.45, 0.94] }}
+        className="pt-2"
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-zinc-900">
-            Nút Đặt Hàng
-            {devices.length > 0 && <span className="ml-2 text-zinc-400 font-normal text-sm">({devices.length})</span>}
-          </h2>
+          <div className="flex items-baseline gap-2">
+            <h2 className="text-base font-semibold text-slate-900 tracking-tight">
+              Nút Đặt Hàng
+            </h2>
+            {devices.length > 0 && (
+              <span className="text-slate-400 font-normal text-xs tabular-nums">
+                ({devices.length} thiết bị)
+              </span>
+            )}
+          </div>
         </div>
 
         {loading ? (
-          <div className="py-16 text-center text-zinc-400 text-sm">
-            <div className="w-5 h-5 border-2 border-zinc-300 border-t-zinc-600 rounded-full animate-spin mx-auto mb-3" />
-            Đang tải...
+          <div className="py-16 text-center text-slate-400 text-sm">
+            <div className="w-5 h-5 border-2 border-slate-300 border-t-[#0E6BA8] rounded-full animate-spin mx-auto mb-3" />
+            Đang tải dữ liệu thiết bị...
           </div>
         ) : devices.length === 0 ? (
           <motion.div
-            initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }}
-            className="py-16 text-center bg-white border border-zinc-200 rounded-3xl"
+            initial={{ opacity: 0, y: 10 }}
+            animate={{ opacity: 1, y: 0 }}
+            className="py-16 text-center bg-white border border-slate-200/80 rounded-xl"
           >
-            <div className="w-12 h-12 mx-auto rounded-2xl bg-zinc-100 flex items-center justify-center text-zinc-400 mb-4">
+            <div className="w-12 h-12 mx-auto rounded-xl bg-slate-100 flex items-center justify-center text-slate-400 mb-4">
               <Radio className="w-5 h-5" />
             </div>
-            <p className="text-sm font-medium text-zinc-700 mb-1">Chưa có nút bấm nào</p>
-            <p className="text-xs text-zinc-400 mb-4 max-w-xs mx-auto">Kết nối nút đặt hàng thông minh của bạn để bắt đầu.</p>
+            <p className="text-sm font-medium text-slate-700 mb-1">Chưa có nút bấm nào</p>
+            <p className="text-xs text-slate-400 mb-4 max-w-xs mx-auto">Kết nối nút đặt hàng thông minh của bạn để bắt đầu.</p>
             <motion.button
-              whileTap={{ scale: 0.97 }}
+              whileTap={{ scale: 0.98 }}
               onClick={() => setShowAirPodsModal(true)}
-              className="px-5 py-2.5 bg-[#0E6BA8] hover:bg-[#0B5586] text-white rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-all duration-150 ease-out active:scale-[0.97] hover:shadow-md cursor-pointer shadow-xs"
+              className="px-4 py-2 bg-[#0E6BA8] hover:bg-[#0B5586] text-white rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-all duration-150 active:scale-[0.98] shadow-xs cursor-pointer"
             >
               <Bluetooth className="w-3.5 h-3.5" />
               Ghép nối nút bấm
@@ -1003,41 +1109,45 @@ export const CustomerHomePage: React.FC = () => {
           </motion.div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
-            {devices.map((dev, devIndex) => {
+            {devices.map((dev) => {
               const cfg = dev.configuration;
-              const product = cfg?.product;
-              const isFirstDev = devIndex === 0;
+              const product = cfg?.product || dev.product;
               const isOnline = dev.status !== 'DISABLED';
-              const battery = dev.batteryLevel ?? 96;
+              const battery = dev.batteryLevel ?? 100;
               const rssi = dev.wifiRSSI ?? -55;
               const isPressing = pressingDeviceId === dev.deviceId;
               const getCleanProductCutout = (p?: Product | null): string => {
+                if (p?.imageUrl && !p.imageUrl.includes('photo-1548839140-29a749e1bc4e') && !p.imageUrl.includes('photo-1586201375761-83865001e31c')) {
+                  return p.imageUrl;
+                }
                 const n = (p?.name || '').toLowerCase();
+                const c = (p?.category || '').toLowerCase();
                 if (n.includes('gas') || n.includes('petrolimex') || n.includes('saigon') || n.includes('total')) {
                   return '/assets/products/Petrolimex.png';
                 }
                 if (n.includes('gạo') || n.includes('rice') || n.includes('st25')) {
                   return '/assets/products/rice-st25.png';
                 }
-                if (n.includes('nước') || n.includes('lavie') || n.includes('vĩnh') || n.includes('ion') || n.includes('satori') || n.includes('water')) {
-                  return '/assets/products/vinhhao.png';
+                if (n.includes('giấy') || n.includes('toilet') || n.includes('tissue')) {
+                  return '/assets/products/toilet-paper.jpg';
                 }
-                if (p?.imageUrl && !p.imageUrl.includes('photo-1548839140-29a749e1bc4e') && !p.imageUrl.includes('photo-1586201375761-83865001e31c')) {
-                  return p.imageUrl;
+                if (n.includes('nước') || n.includes('lavie') || n.includes('vĩnh') || n.includes('ion') || n.includes('satori') || n.includes('water') || c.includes('nước')) {
+                  return '/assets/products/vinhhao.png';
                 }
                 return '/assets/products/vinhhao.png';
               };
-              const rawName = cfg?.customName || dev.customName || 'Nút Đặt Hàng';
-              const name = isFirstDev ? 'Nút Nước Khoáng Phòng Khách' : rawName;
-              const productDesc = isFirstDev
-                ? 'Nước khoáng thiên nhiên La Vie 20L'
-                : (cfg?.product?.name || 'Nút bấm thông minh 1 chạm');
-              const productImg = isFirstDev
-                ? '/assets/products/vinhhao.png'
-                : getCleanProductCutout(product);
-              const priceStr = isFirstDev
-                ? '68.000 ₫'
-                : (product ? `${((product.price || 0) * (cfg?.defaultQuantity || 1)).toLocaleString('vi-VN')} ₫` : null);
+
+              const name = dev.customName || cfg?.customName || 'Nút Đặt Hàng';
+              const quantity = cfg?.defaultQuantity || 1;
+              const unitPrice = product?.price ?? 0;
+              const totalPrice = unitPrice * quantity;
+              const priceStr = product ? `${totalPrice.toLocaleString('vi-VN')} ₫` : null;
+
+              const productDesc = product
+                ? `${product.name}${product.unit ? ` (${product.unit})` : ''}${quantity > 1 ? ` × ${quantity}` : ''}`
+                : (cfg?.customName || dev.customName || 'Nút bấm thông minh 1 chạm');
+
+              const productImg = getCleanProductCutout(product);
 
               return (
                 <DeviceCardUI
@@ -1063,23 +1173,27 @@ export const CustomerHomePage: React.FC = () => {
         )}
       </motion.div>
 
-      {/* ── PART 3: Order History ── */}
+      {/* ── PART 3: Order History (Clean Flat List, Linear/Stripe Style) ── */}
       <motion.div
         initial={{ opacity: 0, y: 15 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, delay: 0.2, ease: [0.25, 0.46, 0.45, 0.94] }}
+        transition={{ duration: 0.45, delay: 0.15, ease: [0.25, 0.46, 0.45, 0.94] }}
+        className="pt-4"
       >
         <div className="flex items-center justify-between mb-4">
-          <h2 className="text-base font-semibold text-zinc-900">Lịch sử đặt hàng</h2>
-          <span className="text-xs text-zinc-400">5 đơn gần nhất</span>
+          <div className="flex items-baseline gap-2.5">
+            <h2 className="text-base font-semibold text-slate-900 tracking-tight">Lịch sử đặt hàng</h2>
+            <span className="text-xs text-slate-400 tabular-nums">5 đơn gần nhất</span>
+          </div>
         </div>
         {orders.length === 0 ? (
-          <div className="py-12 text-center bg-white border border-zinc-200 rounded-3xl">
-            <ShoppingBag className="w-8 h-8 text-zinc-300 mx-auto mb-3" />
-            <p className="text-sm text-zinc-400">Chưa có đơn hàng nào</p>
+          <div className="py-12 text-center bg-white border border-slate-200/80 rounded-xl">
+            <ShoppingBag className="w-8 h-8 text-slate-300 mx-auto mb-2.5" />
+            <p className="text-sm font-medium text-slate-600">Chưa có đơn hàng nào</p>
+            <p className="text-xs text-slate-400 mt-0.5">Bấm nút đặt hàng thông minh để tạo đơn đầu tiên của bạn.</p>
           </div>
         ) : (
-          <div className="bg-white border border-zinc-200 rounded-3xl divide-y divide-zinc-100 overflow-hidden shadow-xs">
+          <div className="bg-white border border-slate-200/80 rounded-xl divide-y divide-slate-100 overflow-hidden shadow-2xs">
             {orders.slice(0, 5).map((order, idx) => {
               const isPending = order.status === 'PENDING';
               const statusConfig: Record<string, { label: string; dot: string; ring: string; text: string }> = {
@@ -1090,35 +1204,35 @@ export const CustomerHomePage: React.FC = () => {
                 COMPLETED: { label: 'Đã giao',      dot: 'bg-emerald-500', ring: 'bg-emerald-50 border-emerald-200', text: 'text-emerald-700'},
                 CANCELLED: { label: 'Đã hủy',       dot: 'bg-rose-500',    ring: 'bg-rose-50 border-rose-200',       text: 'text-rose-700'   },
               };
-              const s = statusConfig[order.status] || { label: order.status, dot: 'bg-zinc-300', ring: 'bg-zinc-50 border-zinc-200', text: 'text-zinc-500' };
+              const s = statusConfig[order.status] || { label: order.status, dot: 'bg-slate-300', ring: 'bg-slate-50 border-slate-200', text: 'text-slate-500' };
               const formattedDate = new Date(order.createdAt).toLocaleDateString('vi-VN');
               const formattedTime = new Date(order.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit' });
 
               return (
                 <motion.div
                   key={order.id}
-                  initial={{ opacity: 0, y: 8 }}
+                  initial={{ opacity: 0, y: 6 }}
                   animate={{ opacity: 1, y: 0 }}
-                  transition={{ delay: idx * 0.06 }}
-                  className={`px-5 py-4 ${isPending ? 'bg-amber-50/50' : ''}`}
+                  transition={{ delay: idx * 0.04 }}
+                  className={`px-5 py-4 transition-colors hover:bg-slate-50/60 ${isPending ? 'bg-amber-50/30' : ''}`}
                 >
                   <div className="flex items-center justify-between gap-4">
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs font-semibold text-slate-700 tabular-nums">#{order.orderNumber}</span>
-                        <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium border ${s.ring} ${s.text}`}>
+                      <div className="flex items-center gap-2.5 flex-wrap">
+                        <span className="text-xs font-semibold text-slate-800 tabular-nums">#{order.orderNumber}</span>
+                        <span className={`inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-medium border ${s.ring} ${s.text}`}>
                           <span className={`w-1.5 h-1.5 rounded-full ${s.dot} ${order.status === 'PENDING' ? 'animate-pulse' : ''}`} />
                           {s.label}
                         </span>
                       </div>
-                      <div className="mt-1.5 space-y-0.5">
+                      <div className="mt-1 space-y-0.5">
                         {order.items.map((it) => (
-                          <div key={it.id} className="text-xs text-zinc-600">
+                          <div key={it.id} className="text-xs text-slate-600">
                             <span>{it.quantity}× {it.productName}</span>
                           </div>
                         ))}
                       </div>
-                      <div className="flex items-center gap-2 mt-2">
+                      <div className="flex items-center gap-2 mt-1.5">
                         <span className="text-[11px] text-slate-400 tabular-nums">
                           {formattedDate} · {formattedTime}
                         </span>
@@ -1128,14 +1242,40 @@ export const CustomerHomePage: React.FC = () => {
                       <span className="text-sm font-semibold text-slate-900 tabular-nums">
                         {order.totalAmount.toLocaleString('vi-VN')} ₫
                       </span>
-                      {isPending && (
+                      {isPending ? (
+                        <div className="flex items-center gap-1.5 mt-2">
+                          <motion.button
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => {
+                              setActiveSuccessOrder(order);
+                              setShowSuccessModal(true);
+                              setSecondsRemaining(0);
+                            }}
+                            className="bg-[#0E6BA8] hover:bg-[#0B5586] text-white px-2.5 py-1 rounded-lg text-xs font-semibold flex items-center gap-1 transition-all shadow-2xs cursor-pointer"
+                          >
+                            <QrCode className="w-3 h-3" />
+                            <span>Thanh toán</span>
+                          </motion.button>
+                          <motion.button
+                            whileTap={{ scale: 0.95 }}
+                            onClick={() => handleCancelOrder(order.id)}
+                            className="text-rose-500 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-2 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-all active:scale-[0.97] cursor-pointer"
+                          >
+                            <X className="w-3 h-3" />
+                            Hủy
+                          </motion.button>
+                        </div>
+                      ) : (
                         <motion.button
                           whileTap={{ scale: 0.95 }}
-                          onClick={() => handleCancelOrder(order.id)}
-                          className="mt-2 text-rose-500 bg-rose-50 hover:bg-rose-100 border border-rose-200 px-3 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-all duration-150 ease-out active:scale-[0.97] cursor-pointer"
+                          onClick={() => {
+                            setActiveSuccessOrder(order);
+                            setShowSuccessModal(true);
+                            setSecondsRemaining(0);
+                          }}
+                          className="mt-2 text-slate-500 hover:text-slate-800 bg-slate-50 hover:bg-slate-100 border border-slate-200/80 px-2.5 py-1 rounded-lg text-xs font-medium flex items-center gap-1 transition-all cursor-pointer"
                         >
-                          <X className="w-3 h-3" />
-                          Hủy đơn
+                          <span>Xem hóa đơn</span>
                         </motion.button>
                       )}
                     </div>
@@ -1682,6 +1822,42 @@ export const CustomerHomePage: React.FC = () => {
                   />
                 </motion.button>
               </div>
+
+              {/* 5. Vùng quản lý quyền sở hữu: Chuyển nhượng hoặc Hủy liên kết nút */}
+              <div className="border-t border-slate-100 dark:border-zinc-800 pt-4 flex items-center justify-between">
+                <div>
+                  <h4 className="text-sm font-medium text-slate-900 dark:text-white">
+                    Quyền sở hữu thiết bị
+                  </h4>
+                  <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+                    Chuyển giao cho người khác hoặc hủy liên kết khỏi nhà
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const dev = configModalDevice;
+                      setConfigModalDevice(null);
+                      setTransferringDevice(dev);
+                    }}
+                    className="px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-slate-300 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg border border-slate-200 dark:border-zinc-700 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Share2 className="w-3.5 h-3.5" />
+                    <span>Chuyển nhượng</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setUnclaimingDevice(configModalDevice);
+                    }}
+                    className="px-3 py-1.5 text-xs font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/40 rounded-lg border border-rose-200/80 dark:border-rose-900/50 transition-colors flex items-center gap-1.5 cursor-pointer"
+                  >
+                    <Unlink2 className="w-3.5 h-3.5" />
+                    <span>Hủy liên kết</span>
+                  </button>
+                </div>
+              </div>
             </div>
 
             {/* Footer nút bấm */}
@@ -1715,6 +1891,90 @@ export const CustomerHomePage: React.FC = () => {
       </AnimatePresence>,
       document.body
     )}
+
+      {/* ========================================================================= */}
+      {/* 5. UNCLAIM DEVICE CONFIRMATION MODAL                                     */}
+      {/* ========================================================================= */}
+      {createPortal(
+        <AnimatePresence>
+          {unclaimingDevice && (
+            <motion.div
+              key="unclaim-modal-wrapper"
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+              className="fixed inset-0 z-[110] flex items-center justify-center p-4 overflow-hidden overscroll-contain"
+            >
+              {/* Backdrop */}
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => !unclaimLoading && setUnclaimingDevice(null)}
+                className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm cursor-pointer"
+              />
+
+              {/* Dialog */}
+              <motion.div
+                initial={{ opacity: 0, scale: 0.93, y: 16 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 12 }}
+                transition={{ type: 'spring', damping: 28, stiffness: 350, mass: 0.8 }}
+                className="relative w-full max-w-md bg-white dark:bg-[#101014] rounded-2xl shadow-2xl p-6 border border-slate-200/90 dark:border-zinc-800 space-y-4 z-10"
+              >
+                <div className="flex items-center gap-3">
+                  <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/50 border border-rose-200/60 dark:border-rose-900/50 text-rose-600 dark:text-rose-400 flex items-center justify-center shrink-0">
+                    <Unlink2 className="w-5 h-5 stroke-[2]" />
+                  </div>
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                      Hủy liên kết nút bấm?
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-zinc-400">
+                      Thiết bị: <span className="font-semibold text-slate-800 dark:text-zinc-200 tabular-nums">{unclaimingDevice.deviceId}</span>
+                    </p>
+                  </div>
+                </div>
+
+                <div className="text-xs text-slate-600 dark:text-zinc-300 leading-relaxed bg-slate-50 dark:bg-zinc-900/60 rounded-xl p-3 border border-slate-100 dark:border-zinc-800">
+                  Nút <strong>"{unclaimingDevice.customName || unclaimingDevice.product?.name || 'Nút bấm'}"</strong> sẽ được gỡ khỏi danh sách thiết bị của gia đình bạn ngay lập tức. Sau khi gỡ, bạn hoặc người khác có thể quét mã QR trên nút để nhận lại quyền sở hữu bất cứ lúc nào.
+                </div>
+
+                <div className="flex items-center justify-end gap-2.5 pt-2">
+                  <button
+                    type="button"
+                    disabled={unclaimLoading}
+                    onClick={() => setUnclaimingDevice(null)}
+                    className="px-4 py-2 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                  >
+                    Giữ lại nút
+                  </button>
+                  <button
+                    type="button"
+                    disabled={unclaimLoading}
+                    onClick={handleUnclaimSubmit}
+                    className="px-4 py-2 rounded-lg text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 shadow-xs transition-all active:scale-[0.98] disabled:opacity-60 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {unclaimLoading ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Đang xử lý...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>Xác nhận hủy liên kết</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </motion.div>
+            </motion.div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
 
       {/* Apple-Style AirPods White Device Pairing Modal */}
       <WhiteDeviceAirPodsModal

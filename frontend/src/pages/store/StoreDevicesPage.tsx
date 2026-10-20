@@ -51,6 +51,15 @@ import {
   Bluetooth,
   MoreHorizontal,
   ChevronDown,
+  ShoppingCart,
+  RotateCcw,
+  Wrench,
+  PhoneCall,
+  Siren,
+  Ban,
+  MousePointerClick,
+  Timer,
+  ShieldAlert,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import { QrCameraScanner } from '../../components/common/QrCameraScanner';
@@ -101,6 +110,120 @@ const modalDialogVariants: Variants = {
     transition: { duration: 0.18, ease: 'easeIn' },
   },
 };
+
+interface ActionDefinition {
+  value: string;
+  label: string;
+  desc: string;
+  icon: React.ComponentType<{ className?: string }>;
+  iconClass: string;
+}
+
+const ACTION_DEFINITIONS: Record<string, ActionDefinition> = {
+  ORDER_PRODUCT: {
+    value: 'ORDER_PRODUCT',
+    label: 'Đặt hàng tự động ngay lập tức',
+    desc: 'Tự động tạo đơn hàng ngay khi người dùng nhấn nút',
+    icon: Zap,
+    iconClass: 'text-amber-500 bg-amber-500/10 border-amber-500/20',
+  },
+  ADD_TO_SHOPPING_LIST: {
+    value: 'ADD_TO_SHOPPING_LIST',
+    label: 'Thêm vào danh sách đi chợ / Giỏ hàng',
+    desc: 'Đưa sản phẩm vào danh sách chờ xác nhận',
+    icon: ShoppingCart,
+    iconClass: 'text-sky-500 bg-sky-500/10 border-sky-500/20',
+  },
+  CANCEL_LAST_ORDER: {
+    value: 'CANCEL_LAST_ORDER',
+    label: 'Hủy đơn hàng vừa bấm (trong 60s)',
+    desc: 'Cho phép khách tự hủy đơn hàng vừa ấn nhầm',
+    icon: RotateCcw,
+    iconClass: 'text-orange-500 bg-orange-500/10 border-orange-500/20',
+  },
+  REQUEST_SERVICE: {
+    value: 'REQUEST_SERVICE',
+    label: 'Yêu cầu kỹ thuật viên / Thay bình / Bảo dưỡng',
+    desc: 'Tạo phiếu yêu cầu bảo trì gửi tới cửa hàng',
+    icon: Wrench,
+    iconClass: 'text-indigo-500 bg-indigo-500/10 border-indigo-500/20',
+  },
+  CALL_STORE: {
+    value: 'CALL_STORE',
+    label: 'Báo cửa hàng gọi điện liên hệ tư vấn',
+    desc: 'Thông báo nhân viên CSKH chủ động liên hệ với khách',
+    icon: PhoneCall,
+    iconClass: 'text-blue-500 bg-blue-500/10 border-blue-500/20',
+  },
+  TRIGGER_EMERGENCY: {
+    value: 'TRIGGER_EMERGENCY',
+    label: 'Báo động khẩn cấp SOS tới người thân & Cửa hàng',
+    desc: 'Kích hoạt còi chuông và gửi cảnh báo khẩn cấp',
+    icon: Siren,
+    iconClass: 'text-rose-500 bg-rose-500/10 border-rose-500/20',
+  },
+  WIFI_CONFIG: {
+    value: 'WIFI_CONFIG',
+    label: 'Kích hoạt chế độ cài Wi-Fi (SoftAP / BLE)',
+    desc: 'Phát sóng AP/BLE để kết nối với mạng Wi-Fi mới',
+    icon: Wifi,
+    iconClass: 'text-teal-500 bg-teal-500/10 border-teal-500/20',
+  },
+  NONE: {
+    value: 'NONE',
+    label: 'Vô hiệu hóa cử chỉ',
+    desc: 'Không thực hiện hành động nào (Chỉ bật đèn LED / Đánh thức)',
+    icon: Ban,
+    iconClass: 'text-slate-400 bg-slate-500/10 border-slate-500/20',
+  },
+};
+
+const GESTURE_ITEMS = [
+  {
+    key: 'singlePressAction' as const,
+    menuKey: 'single' as const,
+    title: 'Nhấn Đơn (Single Click)',
+    subtitle: 'Thực hiện khi người dùng bấm nhanh 1 lần',
+    badgeLabel: '1×',
+    BadgeIcon: MousePointerClick,
+    badgeClass: 'bg-emerald-50 dark:bg-emerald-950/60 text-emerald-700 dark:text-emerald-400 border border-emerald-200/60 dark:border-emerald-800/50',
+    options: ['ORDER_PRODUCT', 'ADD_TO_SHOPPING_LIST', 'NONE'],
+    defaultOption: 'ORDER_PRODUCT',
+  },
+  {
+    key: 'doublePressAction' as const,
+    menuKey: 'double' as const,
+    title: 'Nhấn Đúp (Double Click)',
+    subtitle: 'Thực hiện khi bấm 2 lần liên tiếp trong 1.5s',
+    badgeLabel: '2×',
+    BadgeIcon: Layers,
+    badgeClass: 'bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-400 border border-blue-200/60 dark:border-blue-800/50',
+    options: ['ADD_TO_SHOPPING_LIST', 'ORDER_PRODUCT', 'CANCEL_LAST_ORDER', 'NONE'],
+    defaultOption: 'ADD_TO_SHOPPING_LIST',
+  },
+  {
+    key: 'hold3sAction' as const,
+    menuKey: 'hold3s' as const,
+    title: 'Nhấn Giữ 3 Giây (Hold 3s)',
+    subtitle: 'Thực hiện khi ấn đè nút trong 3 giây',
+    badgeLabel: '3s',
+    BadgeIcon: Timer,
+    badgeClass: 'bg-amber-50 dark:bg-amber-950/60 text-amber-700 dark:text-amber-400 border border-amber-200/60 dark:border-amber-800/50',
+    options: ['REQUEST_SERVICE', 'CALL_STORE', 'NONE'],
+    defaultOption: 'REQUEST_SERVICE',
+  },
+  {
+    key: 'hold5sAction' as const,
+    menuKey: 'hold5s' as const,
+    title: 'Nhấn Giữ 5 Giây (Hold 5s)',
+    subtitle: 'Cử chỉ khẩn cấp hoặc cấu hình phần cứng',
+    badgeLabel: '5s',
+    BadgeIcon: ShieldAlert,
+    badgeClass: 'bg-rose-50 dark:bg-rose-950/60 text-rose-700 dark:text-rose-400 border border-rose-200/60 dark:border-rose-800/50',
+    options: ['TRIGGER_EMERGENCY', 'WIFI_CONFIG', 'NONE'],
+    defaultOption: 'TRIGGER_EMERGENCY',
+  },
+];
 
 export const StoreDevicesPage: React.FC = () => {
   const { user } = useAuth();
@@ -233,6 +356,17 @@ export const StoreDevicesPage: React.FC = () => {
   const [deletingDevice, setDeletingDevice] = useState<Device | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // SmartSupply Behavior Designer Modal State
+  const [behaviorDevice, setBehaviorDevice] = useState<Device | null>(null);
+  const [behaviorSaving, setBehaviorSaving] = useState(false);
+  const [openGestureMenu, setOpenGestureMenu] = useState<'single' | 'double' | 'hold3s' | 'hold5s' | null>(null);
+  const [behaviorForm, setBehaviorForm] = useState({
+    singlePressAction: 'ORDER_PRODUCT',
+    doublePressAction: 'ADD_TO_SHOPPING_LIST',
+    hold3sAction: 'REQUEST_SERVICE',
+    hold5sAction: 'TRIGGER_EMERGENCY',
+  });
+
   // Universal body scroll lock & header submerge whenever any modal is open on this page
   const isAnyModalOpen = Boolean(
     showWizard ||
@@ -243,7 +377,8 @@ export const StoreDevicesPage: React.FC = () => {
     showCreateModal ||
     editingDevice ||
     deletingDevice ||
-    simulationResult
+    simulationResult ||
+    behaviorDevice
   );
   useBodyScrollLock(isAnyModalOpen);
 
@@ -538,6 +673,36 @@ export const StoreDevicesPage: React.FC = () => {
       toast.error(err.response?.data?.message || 'Không thể gán sản phẩm');
     } finally {
       setAssignLoading(false);
+    }
+  };
+
+  // SmartSupply Behavior Designer Handlers
+  const handleOpenBehaviorModal = (device: Device) => {
+    setBehaviorDevice(device);
+    setOpenGestureMenu(null);
+    const cfg = device.configuration;
+    setBehaviorForm({
+      singlePressAction: cfg?.singlePressAction || 'ORDER_PRODUCT',
+      doublePressAction: cfg?.doublePressAction || 'ADD_TO_SHOPPING_LIST',
+      hold3sAction: cfg?.hold3sAction || 'REQUEST_SERVICE',
+      hold5sAction: cfg?.hold5sAction || 'TRIGGER_EMERGENCY',
+    });
+  };
+
+  const handleSaveBehavior = async () => {
+    if (!behaviorDevice) return;
+    setBehaviorSaving(true);
+    try {
+      const res = await api.put(`/devices/${behaviorDevice.deviceId}/behavior`, behaviorForm);
+      if (res.data?.success) {
+        toast.success(`Đã lưu hành vi cử chỉ nút [${behaviorDevice.deviceId}] thành công!`);
+        setBehaviorDevice(null);
+        await fetchData();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không thể lưu hành vi nút');
+    } finally {
+      setBehaviorSaving(false);
     }
   };
 
@@ -1250,6 +1415,18 @@ export const StoreDevicesPage: React.FC = () => {
                                 >
                                   <Activity className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
                                   <span>Telemetry & Nhật ký</span>
+                                </button>
+
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    handleOpenBehaviorModal(device);
+                                    setOpenMenuId(null);
+                                  }}
+                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer text-[#0E6BA8] dark:text-sky-400 font-medium"
+                                >
+                                  <Sliders className="w-3.5 h-3.5 text-[#0E6BA8] dark:text-sky-400" strokeWidth={1.5} />
+                                  <span>Hành vi nút (Behavior)</span>
                                 </button>
                               </div>
 
@@ -2984,6 +3161,227 @@ export const StoreDevicesPage: React.FC = () => {
     </AnimatePresence>,
     document.body
   )}
+
+      {/* ========================================================================= */}
+      {/* SMARTSUPPLY BEHAVIOR DESIGNER MODAL                                      */}
+      {/* ========================================================================= */}
+      {createPortal(
+        <AnimatePresence>
+          {behaviorDevice && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="fixed inset-0 bg-slate-950/70 backdrop-blur-sm cursor-pointer"
+                onClick={() => !behaviorSaving && setBehaviorDevice(null)}
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-[#101014] rounded-2xl max-w-lg w-full p-6 shadow-2xl border border-slate-200 dark:border-zinc-800 space-y-5 max-h-[90vh] overflow-y-auto"
+              >
+                {/* Header */}
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100 dark:border-zinc-800">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-9 h-9 rounded-xl bg-[#0E6BA8]/10 text-[#0E6BA8] dark:text-sky-400 flex items-center justify-center border border-[#0E6BA8]/20">
+                      <Sliders className="w-4 h-4 stroke-[2]" />
+                    </div>
+                    <div>
+                      <h3 className="text-base font-bold text-slate-900 dark:text-white">
+                        Thiết Lập Hành Vi Cử Chỉ Nút
+                      </h3>
+                      <p className="text-xs text-slate-500 dark:text-zinc-400">
+                        SmartSupply Designer · Mã nút: <span className="font-mono font-semibold text-slate-700 dark:text-zinc-300">{behaviorDevice.deviceId}</span>
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => !behaviorSaving && setBehaviorDevice(null)}
+                    className="p-1.5 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800 text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                {/* Gesture Configuration Cards */}
+                <div className="space-y-3">
+                  {GESTURE_ITEMS.map((g) => {
+                    const currentActionKey = behaviorForm[g.key] || g.defaultOption;
+                    const currentAction = ACTION_DEFINITIONS[currentActionKey] || ACTION_DEFINITIONS.NONE;
+                    const CurrentIcon = currentAction.icon;
+                    const isMenuOpen = openGestureMenu === g.menuKey;
+
+                    return (
+                      <div
+                        key={g.key}
+                        className={`p-3.5 rounded-xl border transition-all ${
+                          isMenuOpen
+                            ? 'border-[#0E6BA8]/50 bg-slate-50/80 dark:bg-zinc-900/60 shadow-xs'
+                            : 'border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/30'
+                        }`}
+                      >
+                        {/* Gesture Header */}
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2">
+                            <div className={`flex items-center gap-1 px-2 py-0.5 rounded-md ${g.badgeClass}`}>
+                              <g.BadgeIcon className="w-3.5 h-3.5 stroke-[2.2]" />
+                              <span className="text-[11px] font-bold font-mono">{g.badgeLabel}</span>
+                            </div>
+                            <div>
+                              <div className="text-xs font-semibold text-slate-900 dark:text-white">
+                                {g.title}
+                              </div>
+                              <div className="text-[11px] text-slate-500 dark:text-zinc-400">
+                                {g.subtitle}
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Action Selector Trigger */}
+                        <button
+                          type="button"
+                          onClick={() => setOpenGestureMenu(isMenuOpen ? null : g.menuKey)}
+                          className={`w-full flex items-center justify-between gap-2.5 px-3 py-2 rounded-lg border text-left transition-all cursor-pointer ${
+                            isMenuOpen
+                              ? 'border-[#0E6BA8] ring-2 ring-[#0E6BA8]/20 bg-white dark:bg-zinc-900'
+                              : 'border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 hover:border-slate-300 dark:hover:border-zinc-700'
+                          }`}
+                        >
+                          <div className="flex items-center gap-2.5 min-w-0">
+                            <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 border ${currentAction.iconClass}`}>
+                              <CurrentIcon className="w-3.5 h-3.5 stroke-[2.2]" />
+                            </div>
+                            <div className="flex items-center gap-2 min-w-0">
+                              <span className="text-xs font-medium text-slate-900 dark:text-white truncate">
+                                {currentAction.label}
+                              </span>
+                              {currentActionKey === g.defaultOption && (
+                                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 dark:bg-zinc-800 text-slate-500 dark:text-zinc-400 shrink-0">
+                                  Mặc định
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          <ChevronDown
+                            className={`w-4 h-4 text-slate-400 shrink-0 transition-transform duration-200 ${
+                              isMenuOpen ? 'rotate-180 text-[#0E6BA8]' : ''
+                            }`}
+                          />
+                        </button>
+
+                        {/* Expandable Options List */}
+                        <AnimatePresence>
+                          {isMenuOpen && (
+                            <motion.div
+                              initial={{ opacity: 0, height: 0 }}
+                              animate={{ opacity: 1, height: 'auto' }}
+                              exit={{ opacity: 0, height: 0 }}
+                              transition={{ duration: 0.18, ease: 'easeOut' }}
+                              className="overflow-hidden pt-1.5"
+                            >
+                              <div className="p-1 rounded-xl bg-slate-100/70 dark:bg-zinc-800/50 border border-slate-200/80 dark:border-zinc-700/60 space-y-1">
+                                {g.options.map((optKey) => {
+                                  const opt = ACTION_DEFINITIONS[optKey] || ACTION_DEFINITIONS.NONE;
+                                  const OptIcon = opt.icon;
+                                  const isSelected = currentActionKey === optKey;
+
+                                  return (
+                                    <button
+                                      key={optKey}
+                                      type="button"
+                                      onClick={() => {
+                                        setBehaviorForm({ ...behaviorForm, [g.key]: optKey });
+                                        setOpenGestureMenu(null);
+                                      }}
+                                      className={`w-full flex items-center justify-between gap-2.5 p-2 rounded-lg text-left transition-all cursor-pointer ${
+                                        isSelected
+                                          ? 'bg-white dark:bg-zinc-900 shadow-xs border border-slate-200/80 dark:border-zinc-700'
+                                          : 'hover:bg-white/60 dark:hover:bg-zinc-800/60'
+                                      }`}
+                                    >
+                                      <div className="flex items-center gap-2.5 min-w-0">
+                                        <div className={`w-6 h-6 rounded-md flex items-center justify-center shrink-0 border ${opt.iconClass}`}>
+                                          <OptIcon className="w-3.5 h-3.5 stroke-[2.2]" />
+                                        </div>
+                                        <div className="min-w-0">
+                                          <div className="flex items-center gap-1.5">
+                                            <span
+                                              className={`text-xs truncate ${
+                                                isSelected
+                                                  ? 'font-semibold text-slate-900 dark:text-white'
+                                                  : 'font-medium text-slate-700 dark:text-zinc-300'
+                                              }`}
+                                            >
+                                              {opt.label}
+                                            </span>
+                                            {optKey === g.defaultOption && (
+                                              <span className="px-1.5 py-0.2 rounded text-[9px] font-medium bg-slate-200/60 dark:bg-zinc-700 text-slate-600 dark:text-zinc-300 shrink-0">
+                                                Mặc định
+                                              </span>
+                                            )}
+                                          </div>
+                                          <p className="text-[10px] text-slate-500 dark:text-zinc-400 truncate">
+                                            {opt.desc}
+                                          </p>
+                                        </div>
+                                      </div>
+                                      {isSelected && (
+                                        <div className="w-4 h-4 rounded-full bg-[#0E6BA8] text-white flex items-center justify-center shrink-0">
+                                          <Check className="w-2.5 h-2.5 stroke-[3]" />
+                                        </div>
+                                      )}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </motion.div>
+                          )}
+                        </AnimatePresence>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Footer */}
+                <div className="flex items-center justify-end gap-2.5 pt-3 border-t border-slate-100 dark:border-zinc-800">
+                  <button
+                    type="button"
+                    disabled={behaviorSaving}
+                    onClick={() => setBehaviorDevice(null)}
+                    className="px-4 py-2 rounded-lg text-xs font-medium text-slate-600 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="button"
+                    disabled={behaviorSaving}
+                    onClick={handleSaveBehavior}
+                    className="px-5 py-2 rounded-lg text-xs font-semibold text-white bg-[#0E6BA8] hover:bg-[#0B5586] shadow-xs transition-all active:scale-[0.98] disabled:opacity-60 flex items-center gap-1.5 cursor-pointer"
+                  >
+                    {behaviorSaving ? (
+                      <>
+                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                        <span>Đang lưu...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Check className="w-3.5 h-3.5" />
+                        <span>Lưu Cấu Hình Hành Vi</span>
+                      </>
+                    )}
+                  </button>
+                </div>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
 
       {/* Apple-Style AirPods White Device Pairing Modal */}
       <WhiteDeviceAirPodsModal

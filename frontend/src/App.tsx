@@ -14,8 +14,10 @@ import { StoreDashboard } from './pages/store/StoreDashboard';
 import { StoreDevicesPage } from './pages/store/StoreDevicesPage';
 import { StoreDeviceTemplatesPage } from './pages/store/StoreDeviceTemplatesPage';
 import { StoreProductsPage } from './pages/store/StoreProductsPage';
+import { StoreWalletPage } from './pages/store/StoreWalletPage';
 import { StoreAnalyticsPage } from './pages/store/StoreAnalyticsPage';
 import { CustomerHomePage } from './pages/customer/CustomerHomePage';
+import { ShopPage } from './pages/customer/ShopPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminSecurityHubPage } from './pages/admin/AdminSecurityHubPage';
 import { QuickSetupPage } from './pages/QuickSetupPage';
@@ -94,6 +96,7 @@ export const App: React.FC = () => {
       <div className={`flex-1 relative ${location.pathname === '/' ? '' : 'pt-16'}`}>
         <Routes>
           <Route path="/" element={<LandingPage />} />
+          <Route path="/shop" element={<ShopPage />} />
           <Route path="/quick-setup" element={<QuickSetupPage />} />
           <Route path="/login" element={<LoginPage />} />
           <Route path="/register" element={<RegisterPage />} />
@@ -116,6 +119,7 @@ export const App: React.FC = () => {
             <Route path="/store/device-templates" element={<StoreDeviceTemplatesPage />} />
             <Route path="/store/products" element={<StoreProductsPage />} />
             <Route path="/store/analytics" element={<StoreAnalyticsPage />} />
+            <Route path="/store/wallet" element={<StoreWalletPage />} />
           </Route>
 
           {/* Standalone Store Profile Route (No Trạm Điều Hành sidebar) */}
