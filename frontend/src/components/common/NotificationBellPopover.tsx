@@ -97,6 +97,7 @@ export const NotificationBellPopover: React.FC = () => {
 
   // Load real historical orders on initial mount
   useEffect(() => {
+    if (!user) return;
     let isMounted = true;
     const fetchRecentOrders = async () => {
       try {
@@ -169,6 +170,7 @@ export const NotificationBellPopover: React.FC = () => {
 
   // Realtime Socket Listener: New Orders & Cancellations
   useEffect(() => {
+    if (!user) return;
     const socket = getSocket();
 
     const handleOrderCreated = (payload: any) => {

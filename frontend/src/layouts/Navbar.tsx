@@ -381,7 +381,7 @@ export const Navbar: React.FC = () => {
           )}
 
           {/* Realtime Order & Cancellation Notification Bell */}
-          {!isCustomer && <NotificationBellPopover />}
+          {user && !isCustomer && <NotificationBellPopover />}
 
           {/* Dark/Light Mode Toggle */}
           {!isCustomer && <button
