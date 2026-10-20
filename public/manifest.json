@@ -1,0 +1,16 @@
+{
+  "short_name": "SmartOrder",
+  "name": "Smart Order Button Platform",
+  "icons": [
+    {
+      "src": "/assets/logo.png",
+      "type": "image/png",
+      "sizes": "192x192 512x512"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#0F172A",
+  "theme_color": "#2563EB",
+  "display": "standalone",
+  "orientation": "portrait"
+}
