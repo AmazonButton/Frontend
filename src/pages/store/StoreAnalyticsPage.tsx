@@ -36,8 +36,10 @@ import {
   FileSpreadsheet,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 
 export const StoreAnalyticsPage: React.FC = () => {
+  const { token } = useAuth();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
@@ -86,8 +88,9 @@ export const StoreAnalyticsPage: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!token) return;
     fetchData();
-  }, []);
+  }, [token]);
 
   const handleRefresh = () => {
     setRefreshing(true);

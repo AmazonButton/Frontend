@@ -38,7 +38,7 @@ import {
 import { StoreCatalogItem, getStoreCatalog, saveStoreCatalog } from '../../data/storeProductsData';
 
 export const StoreDashboard: React.FC = () => {
-  const { user } = useAuth();
+  const { user, token } = useAuth();
   const { announceStoreOrder, testStoreBankSpeaker } = useSound();
 
   const [orders, setOrders] = useState<Order[]>([]);
@@ -111,6 +111,7 @@ export const StoreDashboard: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!token) return;
     fetchOrders();
 
     if (user?.storeId) {

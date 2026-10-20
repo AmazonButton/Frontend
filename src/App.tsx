@@ -31,7 +31,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
   children,
   allowedRoles,
 }) => {
-  const { user, isLoading } = useAuth();
+  const { user, token, isLoading } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
@@ -45,7 +45,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
     );
   }
 
-  if (!user) {
+  if (!user || !token) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
