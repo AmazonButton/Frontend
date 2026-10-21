@@ -691,7 +691,7 @@ export const StoreDashboard: React.FC = () => {
               </div>
               {m.revenue !== undefined ? (
                 <div className="font-mono font-bold text-base sm:text-lg text-zinc-900 dark:text-zinc-100 leading-none">
-                  {m.revenue.toLocaleString()}
+                  {Number(m.revenue || 0).toLocaleString()}
                   <span className="text-xs font-medium text-zinc-400 ml-0.5">₫</span>
                 </div>
               ) : (
@@ -928,7 +928,7 @@ export const StoreDashboard: React.FC = () => {
                           </div>
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[10.5px] font-mono font-semibold">
                             <span className="text-zinc-500 dark:text-zinc-400">
-                              {order.totalAmount.toLocaleString()} ₫ ·
+                              {Number(order.totalAmount || (order as any).total_amount || 0).toLocaleString()} ₫ ·
                             </span>
                             {order.paymentStatus === 'REFUND_PENDING' ? (
                               <span className="text-rose-600 dark:text-rose-400">Đã nhận tiền · Chờ hoàn PayOS</span>

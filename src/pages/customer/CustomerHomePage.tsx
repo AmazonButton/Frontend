@@ -1043,7 +1043,7 @@ export const CustomerHomePage: React.FC = () => {
                 : getCleanProductCutout(product);
               const priceStr = isFirstDev
                 ? '68.000 ₫'
-                : (product ? `${((product.price || 0) * (cfg?.defaultQuantity || 1)).toLocaleString('vi-VN')} ₫` : null);
+                : (product ? `${Number(((product.price || 0) * (cfg?.defaultQuantity || 1)) || 0).toLocaleString('vi-VN')} ₫` : null);
 
               return (
                 <DeviceCardUI
@@ -1118,9 +1118,9 @@ export const CustomerHomePage: React.FC = () => {
                         </span>
                       </div>
                       <div className="mt-1.5 space-y-0.5">
-                        {order.items.map((it) => (
-                          <div key={it.id} className="text-xs text-zinc-600">
-                            <span>{it.quantity}× {it.productName}</span>
+                        {(Array.isArray(order.items) ? order.items : []).map((it) => (
+                          <div key={it.id || it.orderItemId || Math.random()} className="text-xs text-zinc-600">
+                            <span>{it.quantity}× {it.productName || it.name}</span>
                           </div>
                         ))}
                       </div>
@@ -1132,7 +1132,7 @@ export const CustomerHomePage: React.FC = () => {
                     </div>
                     <div className="text-right shrink-0 flex flex-col items-end justify-center">
                       <span className="text-sm font-semibold text-slate-900 tabular-nums">
-                        {order.totalAmount.toLocaleString('vi-VN')} ₫
+                        {Number(order.totalAmount || (order as any).total_amount || 0).toLocaleString('vi-VN')} ₫
                       </span>
                       {isPending && (
                         <motion.button
@@ -1620,7 +1620,7 @@ export const CustomerHomePage: React.FC = () => {
                       <option value="">-- Chọn sản phẩm --</option>
                       {availableProducts.map((p) => (
                         <option key={p.id} value={p.id}>
-                          {p.name} {p.unit ? `(${p.unit})` : ''} — {p.price?.toLocaleString('vi-VN')} đ
+                          {p.name} {p.unit ? `(${p.unit})` : ''} — {p.price != null ? Number(p.price).toLocaleString('vi-VN') : '0'} đ
                         </option>
                       ))}
                     </select>

@@ -449,7 +449,7 @@ export const StoreDashboard: React.FC = () => {
                   </span>
                   <span className="text-xs font-medium truncate">
                     {newOrderAlert.type === 'CREATE'
-                      ? `${newOrderAlert.customerName} · ${newOrderAlert.quantity}× ${newOrderAlert.productName} · ${newOrderAlert.totalAmount?.toLocaleString()} ₫`
+                      ? `${newOrderAlert.customerName || 'Khách hàng'} · ${newOrderAlert.quantity || 1}× ${newOrderAlert.productName || 'Sản phẩm'} · ${Number(newOrderAlert.totalAmount || 0).toLocaleString()} ₫`
                       : `Đơn #${newOrderAlert.orderNumber} đã hủy qua nút bấm — Đã hoàn kho`}
                   </span>
                 </div>
@@ -615,7 +615,7 @@ export const StoreDashboard: React.FC = () => {
               </div>
               {m.revenue !== undefined ? (
                 <div className="font-mono font-bold text-base sm:text-lg text-zinc-900 dark:text-zinc-100 leading-none">
-                  {m.revenue.toLocaleString()}
+                  {Number(m.revenue || 0).toLocaleString()}
                   <span className="text-xs font-medium text-zinc-400 ml-0.5">₫</span>
                 </div>
               ) : (
@@ -840,7 +840,7 @@ export const StoreDashboard: React.FC = () => {
                             )}
                           </div>
                           <div className="text-[10.5px] font-mono font-semibold text-zinc-500 dark:text-zinc-400 mt-0.5">
-                            {order.totalAmount.toLocaleString()} ₫ · COD
+                            {Number(order.totalAmount || (order as any).total_amount || 0).toLocaleString()} ₫ · COD
                           </div>
                         </td>
 
@@ -1195,7 +1195,7 @@ export const StoreDashboard: React.FC = () => {
                         </h4>
                         <div className="text-[12px] text-[#64748B] dark:text-zinc-400 font-normal flex items-center gap-1.5 mt-0.5 flex-wrap">
                           <span className="font-semibold text-[#0F172A] dark:text-white tabular-nums">
-                            {item.price.toLocaleString('vi-VN')} ₫
+                            {Number(item.price || (item as any).unitPrice || 0).toLocaleString('vi-VN')} ₫
                           </span>
                           <span className="text-slate-300 dark:text-zinc-600">·</span>
                           <span>{item.unit}</span>
