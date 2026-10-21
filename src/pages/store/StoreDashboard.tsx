@@ -138,6 +138,22 @@ export const StoreDashboard: React.FC = () => {
         deliveryAddress: payload.order?.deliveryAddress || payload.deliveryAddress,
         orderId: payload.order?.id || payload.orderId || payload.id,
       });
+
+      // Instantly insert into local state without waiting for F5
+      if (payload.order) {
+        setOrders((prev) => {
+          const exists = prev.some(
+            (o) => o.id === payload.order.id || o.orderNumber === payload.order.orderNumber
+          );
+          if (exists) return prev;
+          const safeOrder = {
+            ...payload.order,
+            items: Array.isArray(payload.order.items) ? payload.order.items : [],
+          };
+          return [safeOrder, ...prev];
+        });
+      }
+
       fetchOrders();
     };
 
@@ -154,6 +170,11 @@ export const StoreDashboard: React.FC = () => {
         orderNumber,
         reason: payload.reason || payload.cancellationReason || 'Khách hủy qua nút bấm · Đã tự động hoàn kho',
       });
+      if (payload.order?.id) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === payload.order.id ? { ...o, status: 'CANCELLED' as any } : o))
+        );
+      }
       fetchOrders();
 
       if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
@@ -163,9 +184,14 @@ export const StoreDashboard: React.FC = () => {
     };
 
     const handleOrderUpdated = (data?: any) => {
+      const updated = data?.order || data;
+      if (updated && updated.id) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o))
+        );
+      }
       fetchOrders();
 
-      const updated = data?.order || data;
       if (updated && updated.status && updated.status !== 'PENDING') {
         setNewOrderAlert((currentAlert: any) => {
           if (!currentAlert) return null;
@@ -191,7 +217,13 @@ export const StoreDashboard: React.FC = () => {
     socket.on('order:updated', handleOrderUpdated);
     socket.on('ORDER_CANCELLED', handleOrderCancelled);
 
+    // Continuous 3.5s background polling ensures real-time parity even if WebSocket drops
+    const pollTimer = setInterval(() => {
+      fetchOrders();
+    }, 3500);
+
     return () => {
+      clearInterval(pollTimer);
       socket.off('ORDER_CREATED', handleOrderCreated);
       socket.off('ORDER_STATUS_CHANGED', handleOrderUpdated);
       socket.off('ORDER_PAYMENT_CHANGED', handleOrderUpdated);
@@ -374,7 +406,7 @@ export const StoreDashboard: React.FC = () => {
         o.customerName.toLowerCase().includes(q) ||
         (o.customerPhone && o.customerPhone.includes(q)) ||
         o.deliveryAddress.toLowerCase().includes(q) ||
-        o.items.some((it) => it.productName.toLowerCase().includes(q));
+        (Array.isArray(o.items) && o.items.some((it) => it.productName?.toLowerCase().includes(q)));
       return matchStatus && matchSearch;
     })
     .sort((a, b) => {
@@ -822,8 +854,9 @@ export const StoreDashboard: React.FC = () => {
                   className="divide-y divide-zinc-100 dark:divide-zinc-800/60 text-xs"
                 >
                   {paginatedOrders.map((order) => {
-                    const firstItem = order.items[0];
-                    const otherCount = order.items.length - 1;
+                    const items = Array.isArray(order.items) ? order.items : [];
+                    const firstItem = items[0];
+                    const otherCount = Math.max(0, items.length - 1);
                     return (
                       <motion.tr
                         key={order.id}

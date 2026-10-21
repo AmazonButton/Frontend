@@ -466,7 +466,13 @@ export const CustomerHomePage: React.FC = () => {
     socket.on('device:claimed', handleDeviceClaimed);
     socket.on('device:wifi_changed', handleDeviceClaimed);
 
+    // Continuous 4s background polling ensures real-time parity even if WebSocket drops
+    const pollInterval = setInterval(() => {
+      fetchData();
+    }, 4000);
+
     return () => {
+      clearInterval(pollInterval);
       window.removeEventListener('sob_device_claimed_success', handleDeviceClaimed);
       socket.off('ORDER_CREATED', handleOrderCreated);
       socket.off('ORDER_STATUS_CHANGED', handleOrderUpdated);
