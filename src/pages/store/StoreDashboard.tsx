@@ -91,6 +91,8 @@ export const StoreDashboard: React.FC = () => {
 
     if (user?.storeId) {
       subscribeToStore(user.storeId);
+    } else {
+      subscribeToStore('1');
     }
 
     const socket = getSocket();
@@ -101,12 +103,28 @@ export const StoreDashboard: React.FC = () => {
         type: 'CREATE',
         orderNumber: payload.order?.orderNumber,
         customerName: payload.customerName || payload.order?.customerName,
-        productName: payload.productName,
-        quantity: payload.quantity,
+        productName: payload.productName || payload.order?.items?.[0]?.productName,
+        quantity: payload.quantity || payload.order?.items?.[0]?.quantity || 1,
         totalAmount: payload.order?.totalAmount,
-        deliveryAddress: payload.order?.deliveryAddress,
+        deliveryAddress: payload.order?.deliveryAddress || payload.order?.shippingAddress,
         orderId: payload.order?.id,
       });
+
+      // Instantly insert into local state without waiting for F5 or network roundtrip
+      if (payload.order) {
+        setOrders((prev) => {
+          const exists = prev.some(
+            (o) => o.id === payload.order.id || o.orderNumber === payload.order.orderNumber
+          );
+          if (exists) return prev;
+          const safeOrder = {
+            ...payload.order,
+            items: Array.isArray(payload.order.items) ? payload.order.items : [],
+          };
+          return [safeOrder, ...prev];
+        });
+      }
+
       fetchOrders();
     };
 
@@ -117,13 +135,23 @@ export const StoreDashboard: React.FC = () => {
         orderNumber: payload.order?.orderNumber,
         reason: payload.reason || 'Khách bấm nút hủy đơn trên ESP32',
       });
+      if (payload.order?.id) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === payload.order.id ? { ...o, status: 'CANCELLED' as any } : o))
+        );
+      }
       fetchOrders();
       setTimeout(() => {
         setNewOrderAlert(null);
       }, 8000);
     };
 
-    const handleOrderUpdated = () => {
+    const handleOrderUpdated = (payload?: any) => {
+      if (payload?.order?.id) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === payload.order.id ? { ...o, ...payload.order } : o))
+        );
+      }
       fetchOrders();
     };
 
@@ -131,7 +159,13 @@ export const StoreDashboard: React.FC = () => {
     socket.on('ORDER_STATUS_CHANGED', handleOrderUpdated);
     socket.on('ORDER_CANCELLED', handleOrderCancelled);
 
+    // Continuous 3.5s background polling ensures real-time parity even if WebSocket drops
+    const pollTimer = setInterval(() => {
+      fetchOrders();
+    }, 3500);
+
     return () => {
+      clearInterval(pollTimer);
       socket.off('ORDER_CREATED', handleOrderCreated);
       socket.off('ORDER_STATUS_CHANGED', handleOrderUpdated);
       socket.off('ORDER_CANCELLED', handleOrderCancelled);
@@ -292,7 +326,7 @@ export const StoreDashboard: React.FC = () => {
         o.customerName.toLowerCase().includes(q) ||
         (o.customerPhone && o.customerPhone.includes(q)) ||
         o.deliveryAddress.toLowerCase().includes(q) ||
-        o.items.some((it) => it.productName.toLowerCase().includes(q));
+        (Array.isArray(o.items) && o.items.some((it) => it.productName?.toLowerCase().includes(q)));
       return matchStatus && matchSearch;
     })
     .sort((a, b) => {
@@ -743,8 +777,9 @@ export const StoreDashboard: React.FC = () => {
                   className="divide-y divide-zinc-100 dark:divide-zinc-800/60 text-xs"
                 >
                   {filteredOrders.map((order) => {
-                    const firstItem = order.items[0];
-                    const otherCount = order.items.length - 1;
+                    const items = Array.isArray(order.items) ? order.items : [];
+                    const firstItem = items[0];
+                    const otherCount = Math.max(0, items.length - 1);
                     return (
                       <motion.tr
                         key={order.id}
