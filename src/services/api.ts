@@ -14,15 +14,26 @@ export const resolveApiUrl = (): string => {
       if (stored) {
         return stored.trim().replace(/\/+$/, '');
       }
+
+      // Automatically default to live backend HTTPS tunnel when on Vercel
+      if (window.location.hostname.includes('vercel.app')) {
+        return 'https://produces-accurately-received-recovered.trycloudflare.com';
+      }
     } catch {
       // Ignore localStorage read errors in restricted contexts
     }
   }
-  return (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000';
+
+  const envUrl = (import.meta as any).env?.VITE_API_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.startsWith('http')) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+
+  return 'https://produces-accurately-received-recovered.trycloudflare.com';
 };
 
 export const API_URL = resolveApiUrl();
-export const API_PREFIX = (import.meta as any).env?.VITE_API_PREFIX || '/api';
+export const API_PREFIX = (import.meta as any).env?.VITE_API_PREFIX || '/api/v1';
 
 export const api = axios.create({
   baseURL: `${API_URL}${API_PREFIX}`,
