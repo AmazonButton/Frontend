@@ -402,10 +402,10 @@ export const StoreDashboard: React.FC = () => {
       const q = searchQuery.toLowerCase().trim();
       const matchSearch =
         !q ||
-        o.orderNumber.toLowerCase().includes(q) ||
-        o.customerName.toLowerCase().includes(q) ||
+        (o.orderNumber && o.orderNumber.toLowerCase().includes(q)) ||
+        (o.customerName && o.customerName.toLowerCase().includes(q)) ||
         (o.customerPhone && o.customerPhone.includes(q)) ||
-        o.deliveryAddress.toLowerCase().includes(q) ||
+        (o.deliveryAddress && o.deliveryAddress.toLowerCase().includes(q)) ||
         (Array.isArray(o.items) && o.items.some((it) => it.productName?.toLowerCase().includes(q)));
       return matchStatus && matchSearch;
     })
