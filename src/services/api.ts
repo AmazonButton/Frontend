@@ -11,13 +11,15 @@ export const resolveApiUrl = (): string => {
         return clean;
       }
       const stored = localStorage.getItem('smart_order_api_url');
-      if (stored) {
+      if (stored && stored.includes('produces-accurately-received-recovered')) {
+        localStorage.removeItem('smart_order_api_url');
+      } else if (stored) {
         return stored.trim().replace(/\/+$/, '');
       }
 
       // Automatically default to live backend HTTPS tunnel when on Vercel
       if (window.location.hostname.includes('vercel.app')) {
-        return 'https://produces-accurately-received-recovered.trycloudflare.com';
+        return 'https://dense-pgp-row-polls.trycloudflare.com';
       }
     } catch {
       // Ignore localStorage read errors in restricted contexts
@@ -29,7 +31,7 @@ export const resolveApiUrl = (): string => {
     return envUrl.trim().replace(/\/+$/, '');
   }
 
-  return 'https://produces-accurately-received-recovered.trycloudflare.com';
+  return 'https://dense-pgp-row-polls.trycloudflare.com';
 };
 
 export const API_URL = resolveApiUrl();
