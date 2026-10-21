@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, CheckCircle2, Minus, Plus, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Minus, PackageCheck, Plus, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
 import { api } from '../../services/api';
 
 const deliveryHeroBackground = '/assets/products/delivery-hero-pastel.png';
@@ -31,6 +31,7 @@ export const ShopPage: React.FC = () => {
   const [flyingProduct, setFlyingProduct] = useState<{ product: Product; x: number; y: number } | null>(null);
   const [form, setForm] = useState({ customerName: '', customerPhone: '', deliveryAddress: '', paymentMethod: 'PAYOS' });
   const [cartBump, setCartBump] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
 
   useEffect(() => { localStorage.setItem(CART_KEY, JSON.stringify(cart)); }, [cart]);
 
@@ -329,12 +330,48 @@ export const ShopPage: React.FC = () => {
         const line = cart.find((item) => item.product.id === product.id);
         const stock = Math.max(0, product.stock - product.reservedStock);
         return <article key={product.id} className="group overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-          <div className="relative aspect-square bg-slate-50">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover transition group-hover:scale-[1.03]"/> : <div className="grid h-full place-items-center text-5xl">🛍️</div>}<span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-slate-600"><Store className="mr-1 inline" size={12}/>{product.store.name}</span></div>
-          <div className="p-3 sm:p-4"><p className="truncate text-[11px] font-semibold uppercase tracking-wide text-teal-700">{product.category}</p><h3 className="mt-1 line-clamp-2 min-h-10 text-sm font-semibold">{product.name}</h3><p className="mt-1 truncate text-xs text-slate-500">{product.brand || product.unit}</p><div className="mt-3 flex items-end justify-between gap-2"><div><p className="text-base font-bold text-[#287DA8]">{money(product.price)}</p><p className="text-[11px] text-slate-400">Còn {stock} {product.unit || 'sản phẩm'}</p></div><button type="button" onClick={() => buyNow(product)} disabled={!stock} className="mt-2 w-auto shrink-0 rounded-lg border bg-[#287DA8] px-2 py-1.5 text-xs font-semibold text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:opacity-40">Mua ngay</button>{line ? <div className="flex items-center gap-2 rounded-lg bg-[#EAF4F9] p-1"><button onClick={() => changeQuantity(product,-1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white"><Minus size={15}/></button><span className="min-w-4 text-center text-sm font-semibold">{line.quantity}</span><button disabled={line.quantity >= stock} onClick={() => changeQuantity(product,1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white disabled:opacity-40"><Plus size={15}/></button></div> : <button disabled={!stock || (!!cartStore && cartStore !== product.storeId)} title={cartStore && cartStore !== product.storeId ? 'Hoàn tất giỏ hiện tại trước khi chọn cửa hàng khác' : ''} onClick={(event) => addWithAnimation(product, event)} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#287DA8] text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:bg-slate-300"><Plus size={18}/></button>}</div></div>
+          <button type="button" onClick={() => setSelectedProduct(product)} className="relative block aspect-square w-full overflow-hidden bg-slate-50 text-left">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover transition group-hover:scale-[1.03]"/> : <div className="grid h-full place-items-center text-5xl">🛍️</div>}<span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-slate-600"><Store className="mr-1 inline" size={12}/>{product.store.name}</span></button>
+          <div className="p-3 sm:p-4"><p className="truncate text-[11px] font-semibold uppercase tracking-wide text-teal-700">{product.category}</p><h3 className="mt-1 min-h-10 text-sm font-semibold"><button type="button" onClick={() => setSelectedProduct(product)} className="line-clamp-2 text-left hover:text-[#287DA8] hover:underline">{product.name}</button></h3><p className="mt-1 truncate text-xs text-slate-500">{product.brand || product.unit}</p><div className="mt-3 flex items-end justify-between gap-2"><div><p className="text-base font-bold text-[#287DA8]">{money(product.price)}</p><p className="text-[11px] text-slate-400">Còn {stock} {product.unit || 'sản phẩm'}</p></div><button type="button" onClick={() => buyNow(product)} disabled={!stock} className="mt-2 w-auto shrink-0 rounded-lg border bg-[#287DA8] px-2 py-1.5 text-xs font-semibold text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:opacity-40">Mua ngay</button>{line ? <div className="flex items-center gap-2 rounded-lg bg-[#EAF4F9] p-1"><button onClick={() => changeQuantity(product,-1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white"><Minus size={15}/></button><span className="min-w-4 text-center text-sm font-semibold">{line.quantity}</span><button disabled={line.quantity >= stock} onClick={() => changeQuantity(product,1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white disabled:opacity-40"><Plus size={15}/></button></div> : <button disabled={!stock || (!!cartStore && cartStore !== product.storeId)} title={cartStore && cartStore !== product.storeId ? 'Hoàn tất giỏ hiện tại trước khi chọn cửa hàng khác' : ''} onClick={(event) => addWithAnimation(product, event)} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#287DA8] text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:bg-slate-300"><Plus size={18}/></button>}</div></div>
         </article>;
       })}</div>}
       <p className="mt-8 text-center text-xs text-slate-400">Bạn có thể xem sản phẩm mà không cần tài khoản. Đơn hàng trực tuyến sẽ được gửi trực tiếp đến cửa hàng bán sản phẩm.</p>
     </section>
+
+    {/* Product detail — opened from a product image or name */}
+    <AnimatePresence>
+      {selectedProduct && (() => {
+        const stock = Math.max(0, selectedProduct.stock - selectedProduct.reservedStock);
+        const quantity = cart.find((item) => item.product.id === selectedProduct.id)?.quantity || 0;
+        return (
+          <div className="fixed inset-0 z-[70] overflow-y-auto p-3 sm:p-6" role="dialog" aria-modal="true" aria-label={`Chi tiết ${selectedProduct.name}`}>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-slate-950/55 backdrop-blur-sm" onClick={() => setSelectedProduct(null)} />
+            <motion.div initial={{ opacity: 0, y: 24, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.97 }} transition={{ type: 'spring', damping: 28, stiffness: 300 }} className="relative mx-auto flex min-h-full max-w-5xl items-center">
+              <div className="relative my-auto grid w-full overflow-hidden rounded-3xl bg-white shadow-2xl md:grid-cols-2">
+                <button type="button" onClick={() => setSelectedProduct(null)} className="absolute right-4 top-4 z-10 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-slate-500 shadow-sm transition hover:bg-slate-100 hover:text-slate-900" aria-label="Đóng chi tiết sản phẩm"><X size={19}/></button>
+                <div className="flex min-h-[300px] items-center justify-center bg-slate-50 p-8 sm:min-h-[500px] sm:p-12">
+                  {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} alt={selectedProduct.name} className="max-h-[430px] w-full object-contain" /> : <span className="text-7xl">🛍️</span>}
+                </div>
+                <div className="flex flex-col p-6 sm:p-9">
+                  <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#287DA8]"><Store size={15}/>{selectedProduct.store.name}</div>
+                  <p className="text-sm font-medium text-slate-500">{selectedProduct.category}{selectedProduct.brand ? ` · ${selectedProduct.brand}` : ''}</p>
+                  <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{selectedProduct.name}</h2>
+                  <p className="mt-4 text-3xl font-bold text-[#287DA8]">{money(selectedProduct.price)}</p>
+                  <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">
+                    <p>Đơn vị: <strong className="text-slate-800">{selectedProduct.unit || 'Sản phẩm'}</strong></p>
+                    <p className="mt-1">Sản phẩm được cung cấp bởi {selectedProduct.store.name}, cập nhật tồn kho theo thời gian thực.</p>
+                  </div>
+                  <div className="mt-5 flex items-center gap-2 text-sm"><PackageCheck size={18} className={stock ? 'text-emerald-600' : 'text-rose-500'} /><span className={stock ? 'text-emerald-700' : 'text-rose-600'}>{stock ? `Còn hàng · ${stock} ${selectedProduct.unit || 'sản phẩm'}` : 'Tạm hết hàng'}</span></div>
+                  <div className="mt-auto grid gap-3 pt-8 sm:grid-cols-2">
+                    {quantity > 0 ? <div className="flex items-center justify-center gap-4 rounded-xl border border-[#287DA8]/25 bg-[#EAF4F9] py-3"><button type="button" onClick={() => changeQuantity(selectedProduct, -1)} className="grid h-8 w-8 place-items-center rounded-lg bg-white text-[#287DA8] shadow-sm"><Minus size={17}/></button><span className="min-w-5 text-center font-bold">{quantity}</span><button type="button" disabled={quantity >= stock} onClick={() => changeQuantity(selectedProduct, 1)} className="grid h-8 w-8 place-items-center rounded-lg bg-white text-[#287DA8] shadow-sm disabled:opacity-40"><Plus size={17}/></button></div> : <button type="button" disabled={!stock || (!!cartStore && cartStore !== selectedProduct.storeId)} onClick={() => changeQuantity(selectedProduct, 1)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#287DA8] py-3 font-semibold text-[#287DA8] transition hover:bg-[#EAF4F9] disabled:cursor-not-allowed disabled:opacity-40"><ShoppingCart size={18}/>Thêm vào giỏ</button>}
+                    <button type="button" disabled={!stock} onClick={() => { buyNow(selectedProduct); setSelectedProduct(null); }} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#287DA8] py-3 font-semibold text-white shadow-sm transition hover:bg-[#206588] disabled:cursor-not-allowed disabled:opacity-40">Mua ngay <ArrowRight size={18}/></button>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        );
+      })()}
+    </AnimatePresence>
 
     {/* Cart Drawer */}
     <AnimatePresence>

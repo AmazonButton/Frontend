@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { Link } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
@@ -6,9 +7,11 @@ import { api } from '../../services/api';
 import { subscribeToStore, getSocket } from '../../services/socket';
 import { useAuth } from '../../context/AuthContext';
 import { useSound } from '../../context/OrderSoundContext';
+import { toast } from '../../context/ToastContext';
 import { AnalyticsChart } from '../../components/AnalyticsChart';
 import { Order } from '../../types';
 import {
+  Wallet,
   ShoppingBag,
   Clock,
   CheckCircle2,
@@ -160,7 +163,7 @@ export const StoreDashboard: React.FC = () => {
       if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
       cancelAlertTimerRef.current = setTimeout(() => {
         setNewOrderAlert(null);
-      }, 5000);
+      }, 4000);
     };
 
     const handleOrderUpdated = (data?: any) => {
@@ -169,7 +172,10 @@ export const StoreDashboard: React.FC = () => {
       const updated = data?.order || data;
       if (updated && updated.status && updated.status !== 'PENDING') {
         setNewOrderAlert((currentAlert: any) => {
-          if (!currentAlert) return null;
+          // A cancellation alert must remain visible for its timer. A status
+          // event normally follows ORDER_CANCELLED and previously cleared it
+          // immediately before the user could see it.
+          if (!currentAlert || currentAlert.type !== 'CREATE') return currentAlert;
           const matchId =
             currentAlert.orderId &&
             (currentAlert.orderId === updated.id || currentAlert.orderId === updated.orderId);
@@ -225,7 +231,13 @@ export const StoreDashboard: React.FC = () => {
 
     try {
       const res = await api.patch(`/orders/${orderId}/status`, { status: nextStatus });
-      if (!res.data.success) {
+      if (res.data.success) {
+        if (nextStatus === 'CONFIRMED') {
+          toast.success('Đơn hàng đã được tiếp nhận.', { title: 'Đã nhận đơn', duration: 4000 });
+        } else if (nextStatus === 'CANCELLED' || nextStatus === 'REJECTED') {
+          toast.info('Đơn hàng đã được hủy.', { title: 'Đã hủy đơn', duration: 4000 });
+        }
+      } else {
         fetchOrders();
       }
     } catch (e: any) {
@@ -589,6 +601,14 @@ export const StoreDashboard: React.FC = () => {
               Kho Hàng
               <span className="font-mono text-zinc-400 dark:text-zinc-600">({inventoryList.length})</span>
             </motion.button>
+
+            <Link
+              to="/store/wallet"
+              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-zinc-700 dark:text-zinc-300 hover:text-emerald-700 dark:hover:text-emerald-300 border border-zinc-200 dark:border-zinc-700 hover:border-emerald-300 text-xs font-semibold transition-all cursor-pointer shadow-2xs"
+            >
+              <Wallet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
+              Ví & Rút Tiền
+            </Link>
 
             <button
               type="button"

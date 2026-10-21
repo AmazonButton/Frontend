@@ -4,6 +4,77 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { Play, Pause, Volume2, VolumeX, ArrowRight, ShieldCheck, Zap, Battery, CheckCircle2, ShoppingCart, Droplets, Star, Shield, Check, Sparkles, MousePointerClick, SearchX, Cog, Truck, ChevronLeft, ChevronRight } from 'lucide-react';
 import { InteractiveHeroBackground } from '../components/InteractiveHeroBackground';
 import { api } from '../services/api';
+import { toast } from '../context/ToastContext';
+
+/**
+ * Store owners can upload PNG cut-outs with a large transparent canvas around
+ * the product. `object-cover` then crops the actual product out of the card.
+ * Trim transparent borders in the browser before displaying data-URL images.
+ */
+const StorefrontProductImage: React.FC<{ src: string; alt: string }> = ({ src, alt }) => {
+  const [displaySrc, setDisplaySrc] = useState(src);
+  const processedSourceRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    setDisplaySrc(src);
+    processedSourceRef.current = null;
+  }, [src]);
+
+  const trimTransparentCanvas = (event: React.SyntheticEvent<HTMLImageElement>) => {
+    if (!src.startsWith('data:image/') || processedSourceRef.current === src) return;
+    processedSourceRef.current = src;
+
+    try {
+      const image = event.currentTarget;
+      const width = image.naturalWidth;
+      const height = image.naturalHeight;
+      if (!width || !height) return;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = width;
+      canvas.height = height;
+      const context = canvas.getContext('2d', { willReadFrequently: true });
+      if (!context) return;
+      context.drawImage(image, 0, 0);
+      const pixels = context.getImageData(0, 0, width, height).data;
+      let left = width;
+      let top = height;
+      let right = -1;
+      let bottom = -1;
+
+      for (let y = 0; y < height; y += 1) {
+        for (let x = 0; x < width; x += 1) {
+          if (pixels[(y * width + x) * 4 + 3] > 8) {
+            left = Math.min(left, x);
+            top = Math.min(top, y);
+            right = Math.max(right, x);
+            bottom = Math.max(bottom, y);
+          }
+        }
+      }
+
+      if (right < left || bottom < top) return;
+      const padding = Math.max(4, Math.ceil(Math.max(right - left + 1, bottom - top + 1) * 0.06));
+      const cropLeft = Math.max(0, left - padding);
+      const cropTop = Math.max(0, top - padding);
+      const cropRight = Math.min(width, right + padding + 1);
+      const cropBottom = Math.min(height, bottom + padding + 1);
+
+      // Avoid a needless re-encode for images that already fill their canvas.
+      if (cropLeft === 0 && cropTop === 0 && cropRight === width && cropBottom === height) return;
+
+      const cropped = document.createElement('canvas');
+      cropped.width = cropRight - cropLeft;
+      cropped.height = cropBottom - cropTop;
+      cropped.getContext('2d')?.drawImage(canvas, cropLeft, cropTop, cropped.width, cropped.height, 0, 0, cropped.width, cropped.height);
+      setDisplaySrc(cropped.toDataURL('image/png'));
+    } catch {
+      // Keep the original image if the browser cannot read the canvas.
+    }
+  };
+
+  return <img src={displaySrc} alt={alt} onLoad={trimTransparentCanvas} className="w-full h-full object-cover transition-all duration-500 ease-out group-hover:scale-105" loading="lazy" />;
+};
 
 const PARTNER_BRANDS = [
   {
@@ -91,7 +162,7 @@ export const LandingPage: React.FC = () => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(true);
-  const [orderedProduct, setOrderedProduct] = useState<string | null>(null);
+  const [addedProductId, setAddedProductId] = useState<string | null>(null);
   const [storefrontProducts, setStorefrontProducts] = useState<any[]>([]);
   const [productsLoading, setProductsLoading] = useState(true);
   const [cartCount, setCartCount] = useState(0);
@@ -116,8 +187,9 @@ export const LandingPage: React.FC = () => {
     try {
       const saved = JSON.parse(localStorage.getItem('sob_storefront_cart_v1') || '[]');
       if (saved[0]?.product?.storeId && saved[0].product.storeId !== product.storeId) {
-        setOrderedProduct('Giỏ hàng chỉ nhận sản phẩm của một cửa hàng');
-        window.setTimeout(() => setOrderedProduct(null), 2200);
+        toast.warning('Mỗi đơn hàng chỉ có thể chứa sản phẩm của cùng một cửa hàng.', {
+          title: 'Lưu ý giỏ hàng',
+        });
         return;
       }
       const existing = saved.find((line: any) => line.product?.id === product.id);
@@ -128,10 +200,17 @@ export const LandingPage: React.FC = () => {
       setCartCount(next.reduce((sum: number, line: any) => sum + Number(line.quantity || 0), 0));
       setCartPulse(true);
       window.setTimeout(() => setCartPulse(false), 650);
-      setOrderedProduct(product.name);
-      window.setTimeout(() => setOrderedProduct(null), 2200);
+
+      setAddedProductId(product.id);
+      window.setTimeout(() => setAddedProductId(null), 2000);
+
+      toast.success(`Đã thêm "${product.name}" vào giỏ hàng thành công.`, {
+        title: 'Thêm vào giỏ hàng',
+      });
     } catch {
-      setOrderedProduct('Không thể thêm sản phẩm vào giỏ hàng');
+      toast.error('Có lỗi xảy ra khi cập nhật giỏ hàng. Vui lòng thử lại.', {
+        title: 'Không thể thêm vào giỏ',
+      });
     }
   };
 
@@ -147,12 +226,6 @@ export const LandingPage: React.FC = () => {
     }
   };
 
-  const handleQuickOrder = (title: string) => {
-    setOrderedProduct(title);
-    setTimeout(() => {
-      setOrderedProduct(null);
-    }, 2800);
-  };
 
   const togglePlay = () => {
     if (videoRef.current) {
@@ -423,28 +496,6 @@ export const LandingPage: React.FC = () => {
       {/* 4. PRODUCT CATEGORIES (4-COLUMN GRID)                                     */}
       {/* ========================================================================= */}
       <section id="categories" className="py-16 sm:py-24 bg-white/70 dark:bg-zinc-950/60 backdrop-blur-md border-b border-slate-200/80 dark:border-zinc-800 relative scroll-mt-20">
-        {/* Floating Quick Order Confirmation Toast */}
-        <AnimatePresence>
-          {orderedProduct && (
-            <motion.div
-              initial={{ opacity: 0, y: 50, scale: 0.95 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: 20, scale: 0.95 }}
-              transition={{ type: 'spring', damping: 25, stiffness: 300 }}
-              className="fixed bottom-8 right-8 z-50 bg-[#0F172A] text-white px-5 py-3.5 rounded-2xl shadow-2xl border border-slate-700/80 flex items-center gap-3 backdrop-blur-lg"
-            >
-              <div className="w-8 h-8 rounded-full bg-emerald-500/20 text-emerald-400 flex items-center justify-center shrink-0 border border-emerald-500/30">
-                <Check className="w-4 h-4" />
-              </div>
-              <div>
-                <p className="text-xs font-bold text-white">Đã thiết lập nút bấm thông minh!</p>
-                <p className="text-[11px] text-slate-300">
-                  {orderedProduct} đã sẵn sàng cho lượt bấm đặt tiếp theo.
-                </p>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
 
@@ -503,7 +554,7 @@ export const LandingPage: React.FC = () => {
           {!productsLoading && storefrontProducts.length === 0 && <div className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center text-sm text-slate-500 dark:border-zinc-700 dark:bg-zinc-900">Hiện chưa có sản phẩm đang bán. Vui lòng thêm sản phẩm trong trang quản lý cửa hàng.</div>}
           {!productsLoading && storefrontProducts.length > 0 && <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-7">
             {storefrontProducts.slice(0, 8).map((product, index) => {
-              const isSelected = orderedProduct === product.name;
+              const isSelected = addedProductId === product.id;
               const stock = Math.max(0, Number(product.stock || 0) - Number(product.reservedStock || 0));
 
               return (
@@ -523,7 +574,7 @@ export const LandingPage: React.FC = () => {
                   >
                     {/* Image Area with 4:3 Aspect Ratio, Floating Badge, and Zoom on Hover */}
                     <div className="relative w-full aspect-[4/3] rounded-xl overflow-hidden mb-3.5 bg-slate-100 dark:bg-zinc-800">
-                      {product.imageUrl ? <img src={product.imageUrl} alt={product.name} className="w-full h-full object-cover transition-all duration-500 ease-out group-hover:scale-105" loading="lazy" /> : <div className="grid h-full place-items-center text-5xl">🛍️</div>}
+                      {product.imageUrl ? <StorefrontProductImage src={product.imageUrl} alt={product.name} /> : <div className="grid h-full place-items-center text-5xl">🛍️</div>}
 
                       {/* Top-Left Floating Badge */}
                       <div className="absolute top-3 left-3 z-10">
