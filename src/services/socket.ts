@@ -1,13 +1,14 @@
 import { io, Socket } from 'socket.io-client';
-import { API_URL } from './api';
+import { API_URL, resolveApiUrl } from './api';
 
 let socket: Socket | null = null;
 let subscribedStoreId: string | null = null;
 let subscribedCustomerId: string | null = null;
 
 export function getSocket(): Socket {
+  const targetUrl = typeof resolveApiUrl === 'function' ? resolveApiUrl() : API_URL;
   if (!socket) {
-    socket = io(API_URL, {
+    socket = io(targetUrl, {
       autoConnect: true,
       transports: ['websocket', 'polling'],
       reconnection: true,
