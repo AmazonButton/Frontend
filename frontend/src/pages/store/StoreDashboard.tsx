@@ -344,7 +344,7 @@ export const StoreDashboard: React.FC = () => {
     .reduce((sum, o) => sum + o.totalAmount, 0);
 
   const pendingCount = orders.filter((o) => o.status === 'PENDING').length;
-  const inProgressCount = orders.filter((o) => ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY'].includes(o.status)).length;
+  const inProgressCount = orders.filter((o) => ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY', 'SHIPPING', 'READY_FOR_DELIVERY'].includes(o.status)).length;
   const completedCount = orders.filter((o) => o.status === 'COMPLETED' || (o.status as string) === 'DELIVERED').length;
 
   const priorityMap: Record<string, number> = {
@@ -352,6 +352,8 @@ export const StoreDashboard: React.FC = () => {
     CONFIRMED: 2,
     PREPARING: 3,
     OUT_FOR_DELIVERY: 4,
+    SHIPPING: 4,
+    READY_FOR_DELIVERY: 4,
     COMPLETED: 5,
     DELIVERED: 5,
     CANCELLED: 6,
@@ -363,7 +365,8 @@ export const StoreDashboard: React.FC = () => {
       const matchStatus =
         statusFilter === 'ALL' ||
         o.status === statusFilter ||
-        (statusFilter === 'COMPLETED' && (o.status as string) === 'DELIVERED');
+        (statusFilter === 'COMPLETED' && (o.status as string) === 'DELIVERED') ||
+        (statusFilter === 'OUT_FOR_DELIVERY' && ['SHIPPING', 'READY_FOR_DELIVERY'].includes(o.status as string));
       const q = searchQuery.toLowerCase().trim();
       const matchSearch =
         !q ||
@@ -457,6 +460,8 @@ export const StoreDashboard: React.FC = () => {
           </span>
         );
       case 'OUT_FOR_DELIVERY':
+      case 'READY_FOR_DELIVERY':
+      case 'SHIPPING':
         return (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
             <span className="w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0"></span>
@@ -945,7 +950,7 @@ export const StoreDashboard: React.FC = () => {
                               Xuất Giao
                             </motion.button>
                           )}
-                          {order.status === 'OUT_FOR_DELIVERY' && (
+                          {(order.status === 'OUT_FOR_DELIVERY' || order.status === 'SHIPPING' || order.status === 'READY_FOR_DELIVERY') && (
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
