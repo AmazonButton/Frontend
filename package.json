@@ -9,6 +9,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
+    "@react-oauth/google": "^0.13.5",
     "@types/three": "^0.186.0",
     "axios": "^1.7.9",
     "canvas-confetti": "^1.9.4",

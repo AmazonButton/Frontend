@@ -41,7 +41,7 @@ export const Sidebar: React.FC = () => {
     },
     {
       to: '/store/wallet',
-      label: 'Ví Cửa Hàng',
+      label: 'Ví & Rút Tiền',
       icon: Wallet,
     },
   ];

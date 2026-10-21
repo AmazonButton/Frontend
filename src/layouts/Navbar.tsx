@@ -4,13 +4,13 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useSound } from '../context/OrderSoundContext';
-import { LogOut, Shield, ShieldAlert, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X, ShoppingCart, ReceiptText, ChevronDown } from 'lucide-react';
+import { LogOut, Shield, ShieldAlert, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X, ShoppingCart, ReceiptText, ChevronDown, ShoppingBag, Package, Wallet, BarChart3 } from 'lucide-react';
 import { WhiteDeviceAirPodsModal } from '../components/devices/WhiteDeviceAirPodsModal';
 import { HeaderNavigation } from '../components/common/HeaderNavigation';
 import { LogoutConfirmModal } from '../components/common/LogoutConfirmModal';
 import { NotificationBellPopover } from '../components/common/NotificationBellPopover';
 
-const MotionLink = motion(Link);
+const MotionLink = (motion.create || motion)(Link);
 
 export const Navbar: React.FC = () => {
   const { user, logout } = useAuth();
@@ -23,9 +23,10 @@ export const Navbar: React.FC = () => {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
-  const [customerMenuOpen, setCustomerMenuOpen] = useState(false);
-  const customerMenuRef = useRef<HTMLDivElement>(null);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
   const isCustomer = user?.role === 'CUSTOMER';
+  const isStoreUser = ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(user?.role || '');
 
   // Auto-dismiss logout modal if route goes to login or user is logged out
   useEffect(() => {
@@ -48,16 +49,16 @@ export const Navbar: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    const closeCustomerMenu = (event: MouseEvent) => {
-      if (customerMenuRef.current && !customerMenuRef.current.contains(event.target as Node)) setCustomerMenuOpen(false);
+    const closeUserMenu = (event: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(event.target as Node)) setUserMenuOpen(false);
     };
     const closeWithEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setCustomerMenuOpen(false);
+      if (event.key === 'Escape') setUserMenuOpen(false);
     };
-    document.addEventListener('mousedown', closeCustomerMenu);
+    document.addEventListener('mousedown', closeUserMenu);
     document.addEventListener('keydown', closeWithEscape);
     return () => {
-      document.removeEventListener('mousedown', closeCustomerMenu);
+      document.removeEventListener('mousedown', closeUserMenu);
       document.removeEventListener('keydown', closeWithEscape);
     };
   }, []);
@@ -136,7 +137,7 @@ export const Navbar: React.FC = () => {
     <header
       data-navbar="true"
       className={`fixed top-0 left-0 w-full z-30 transition-[background-color,border-color,box-shadow] duration-200 ease-in-out ${
-        isCustomer || isScrolled
+        isCustomer || isStoreUser || isScrolled
           ? 'bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shadow-md border-b border-slate-200/80 dark:border-zinc-800'
           : 'bg-transparent border-b border-transparent backdrop-blur-sm'
       }`}
@@ -144,10 +145,9 @@ export const Navbar: React.FC = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
 
         {/* ================================================================= */}
-        {/* LEFT: Clean Brand + Core Navigation Links                         */}
+        {/* LEFT: Clean Brand Logo & Name                                     */}
         {/* ================================================================= */}
         <div className="flex items-center gap-6 shrink-0">
-          {/* Brand Logo & Name */}
           <Link to="/" className="flex items-center gap-2.5 group">
             <div className="w-8 h-8 rounded-xl overflow-hidden border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-1 flex items-center justify-center shrink-0">
               <img
@@ -160,120 +160,11 @@ export const Navbar: React.FC = () => {
               Smart Order Button
             </span>
           </Link>
-
-          {/* Primary Nav Links based on login role */}
-          {user && !isCustomer && (
-            <nav className="hidden md:flex items-center gap-1 pl-3 border-l border-slate-200 dark:border-zinc-800">
-              {user.role === 'CUSTOMER' && (
-                <>
-                  <Link
-                    to="/customer/home"
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/customer/home')
-                      ? 'bg-[#287DA8]/10 text-[#287DA8] border border-[#287DA8]/30 shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
-                      }`}
-                  >
-                    <Smartphone className="w-3.5 h-3.5" />
-                    <span>Nút Của Tôi</span>
-                  </Link>
-                  <MotionLink
-                    to="/shop"
-                    whileHover={{ y: -1, scale: 1.02 }}
-                    whileTap={{ scale: 0.97 }}
-                    transition={{ type: 'spring', stiffness: 420, damping: 22 }}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/shop')
-                      ? 'bg-[#287DA8]/10 text-[#287DA8] border border-[#287DA8]/30 shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
-                      }`}
-                  >
-                    <ShoppingCart className="w-3.5 h-3.5" />
-                    <span>Mua Sắm</span>
-                  </MotionLink>
-                  <Link
-                    to="/customer/orders"
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/customer/orders')
-                      ? 'bg-[#287DA8]/10 text-[#287DA8] border border-[#287DA8]/30 shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
-                      }`}
-                  >
-                    <ReceiptText className="w-3.5 h-3.5" />
-                    <span>Đơn Hàng Của Tôi</span>
-                  </Link>
-                  <Link
-                    to="/customer/profile"
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/customer/profile')
-                      ? 'bg-[#287DA8]/10 text-[#287DA8] border border-[#287DA8]/30 shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
-                      }`}
-                  >
-                    <UserIcon className="w-3.5 h-3.5" />
-                    <span>Hồ Sơ Của Tôi</span>
-                  </Link>
-                </>
-              )}
-
-              {['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(user.role) && (
-                <>
-                  <Link
-                    to="/store/dashboard"
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/store/dashboard')
-                      ? 'bg-[#287DA8]/10 text-[#287DA8] border border-[#287DA8]/30 shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
-                      }`}
-                  >
-                    <Store className="w-3.5 h-3.5" />
-                    <span>Quản Lý Cửa Hàng</span>
-                  </Link>
-                  <Link
-                    to="/store/devices"
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/store/devices')
-                      ? 'bg-[#287DA8]/10 text-[#287DA8] border border-[#287DA8]/30 shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
-                      }`}
-                  >
-                    <span>Thiết Bị</span>
-                  </Link>
-                  <Link
-                    to="/store/profile"
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/store/profile')
-                      ? 'bg-[#287DA8]/10 text-[#287DA8] border border-[#287DA8]/30 shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
-                      }`}
-                  >
-                    <UserIcon className="w-3.5 h-3.5" />
-                    <span>Hồ Sơ</span>
-                  </Link>
-                </>
-              )}
-
-              {user.role === 'SUPER_ADMIN' && (
-                <>
-                  <Link
-                    to="/admin/dashboard"
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/admin/dashboard')
-                      ? 'bg-blue-50 dark:bg-sky-500/15 text-[#0E6BA8] dark:text-[#38a5da] border border-[#0E6BA8]/30 shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800/60'
-                      }`}
-                  >
-                    <Shield className="w-3.5 h-3.5" />
-                    <span>Admin Hub</span>
-                  </Link>
-                  <Link
-                    to="/admin/security/devices"
-                    className={`flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg transition-all ${isActive('/admin/security/devices')
-                      ? 'bg-rose-50 dark:bg-rose-500/15 text-rose-600 dark:text-rose-400 border border-rose-200/80 dark:border-rose-500/30 shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800/60'
-                      }`}
-                  >
-                    <ShieldAlert className="w-3.5 h-3.5" />
-                    <span>Security Hub</span>
-                  </Link>
-                </>
-              )}
-            </nav>
-          )}
         </div>
 
+        {/* ================================================================= */}
+        {/* CENTER: Clean Minimalist Navigation Pill                          */}
+        {/* ================================================================= */}
         {isCustomer && (
           <nav aria-label="Điều hướng khách hàng" className="hidden md:flex items-center gap-1 rounded-xl border border-slate-200/80 bg-slate-50/70 p-1 dark:border-zinc-800 dark:bg-zinc-900/70">
             {[
@@ -281,7 +172,15 @@ export const Navbar: React.FC = () => {
               { to: '/customer/home', label: 'Nút của tôi', icon: Smartphone },
               { to: '/customer/orders', label: 'Đơn hàng', icon: ReceiptText },
             ].map(({ to, label, icon: Icon }) => (
-              <Link key={to} to={to} className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${isActive(to) ? 'bg-white text-[#0E6BA8] shadow-xs dark:bg-zinc-800 dark:text-sky-400' : 'text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white'}`}>
+              <Link
+                key={to}
+                to={to}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
+                  isActive(to)
+                    ? 'bg-white text-[#0E6BA8] shadow-xs dark:bg-zinc-800 dark:text-sky-400'
+                    : 'text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white'
+                }`}
+              >
                 <Icon className="w-3.5 h-3.5" />
                 {label}
               </Link>
@@ -289,168 +188,183 @@ export const Navbar: React.FC = () => {
           </nav>
         )}
 
-        {/* ================================================================= */}
-        {/* CENTER: Minimalist Navigation with Smooth Shared Layout Pill      */}
-        {/* ================================================================= */}
+        {isStoreUser && (
+          <nav aria-label="Điều hướng cửa hàng" className="hidden md:flex items-center gap-1 rounded-xl border border-slate-200/80 bg-slate-50/70 p-1 dark:border-zinc-800 dark:bg-zinc-900/70">
+            {[
+              { to: '/store/dashboard', label: 'Đơn hàng', icon: ShoppingBag },
+              { to: '/store/products', label: 'Sản phẩm', icon: Package },
+              { to: '/store/devices', label: 'Thiết bị nút', icon: Smartphone },
+              { to: '/store/wallet', label: 'Ví & Rút tiền', icon: Wallet },
+              { to: '/store/analytics', label: 'Báo cáo', icon: BarChart3 },
+            ].map(({ to, label, icon: Icon }) => (
+              <Link
+                key={to}
+                to={to}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
+                  isActive(to)
+                    ? 'bg-white text-[#0E6BA8] shadow-xs dark:bg-zinc-800 dark:text-sky-400'
+                    : 'text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {label}
+              </Link>
+            ))}
+          </nav>
+        )}
+
+        {user && user.role === 'SUPER_ADMIN' && (
+          <nav aria-label="Điều hướng admin" className="hidden md:flex items-center gap-1 rounded-xl border border-slate-200/80 bg-slate-50/70 p-1 dark:border-zinc-800 dark:bg-zinc-900/70">
+            {[
+              { to: '/admin/dashboard', label: 'Admin Hub', icon: Shield },
+              { to: '/admin/security/devices', label: 'Security Hub', icon: ShieldAlert },
+            ].map(({ to, label, icon: Icon }) => (
+              <Link
+                key={to}
+                to={to}
+                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
+                  isActive(to)
+                    ? 'bg-white text-[#0E6BA8] shadow-xs dark:bg-zinc-800 dark:text-sky-400'
+                    : 'text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white'
+                }`}
+              >
+                <Icon className="w-3.5 h-3.5" />
+                {label}
+              </Link>
+            ))}
+          </nav>
+        )}
+
         {!user && (
           <div className="hidden md:flex items-center justify-center">
-            
             <HeaderNavigation />
           </div>
         )}
 
         {/* ================================================================= */}
-        {/* RIGHT: Utilities, Status & User Account                           */}
+        {/* RIGHT: Realtime Notifications & Clean Profile Dropdown            */}
         {/* ================================================================= */}
         <div className="flex items-center gap-2 sm:gap-3">
-
-          {isCustomer && user && (
-            <div ref={customerMenuRef} className="flex items-center gap-1.5 sm:gap-2">
+          {user ? (
+            <div ref={userMenuRef} className="flex items-center gap-1.5 sm:gap-2">
               <NotificationBellPopover />
+
               <div className="relative">
-                <button type="button" onClick={() => setCustomerMenuOpen((open) => !open)} aria-expanded={customerMenuOpen} aria-haspopup="menu" aria-label="Mở menu tài khoản" className="flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-1.5 sm:px-2.5 text-left transition hover:border-slate-300 hover:bg-slate-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => setUserMenuOpen((open) => !open)}
+                  aria-expanded={userMenuOpen}
+                  aria-haspopup="menu"
+                  aria-label="Mở menu tài khoản"
+                  className="flex min-h-10 items-center gap-2 rounded-xl border border-slate-200 bg-white px-1.5 sm:px-2.5 text-left transition hover:border-slate-300 hover:bg-slate-50 dark:border-zinc-700 dark:bg-zinc-900 dark:hover:bg-zinc-800 cursor-pointer"
+                >
                   <span className="w-7 h-7 rounded-lg bg-[#0E6BA8] text-white flex items-center justify-center overflow-hidden text-[11px] font-bold">
-                    {userAvatar ? <img src={userAvatar} alt="" className="w-full h-full object-cover" onError={() => setUserAvatar(null)} /> : getInitials(user.fullName)}
+                    {userAvatar ? (
+                      <img src={userAvatar} alt="" className="w-full h-full object-cover" onError={() => setUserAvatar(null)} />
+                    ) : (
+                      getInitials(user.fullName)
+                    )}
                   </span>
-                  <span className="hidden lg:block max-w-28 truncate text-xs font-semibold text-slate-700 dark:text-zinc-200">{getDisplayName(user.fullName)}</span>
-                  <ChevronDown className={`hidden sm:block w-3.5 h-3.5 text-slate-400 transition-transform ${customerMenuOpen ? 'rotate-180' : ''}`} />
+                  <span className="hidden lg:block max-w-28 truncate text-xs font-semibold text-slate-700 dark:text-zinc-200">
+                    {getDisplayName(user.fullName)}
+                  </span>
+                  <ChevronDown className={`hidden sm:block w-3.5 h-3.5 text-slate-400 transition-transform ${userMenuOpen ? 'rotate-180' : ''}`} />
                 </button>
+
                 <AnimatePresence>
-                  {customerMenuOpen && (
-                    <motion.div initial={{ opacity: 0, y: -6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.16 }} role="menu" className="absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-lg dark:border-zinc-700 dark:bg-zinc-900">
-                      <div className="px-3 py-2.5 border-b border-slate-100 dark:border-zinc-800"><p className="truncate text-xs font-bold text-slate-900 dark:text-white">{getDisplayName(user.fullName)}</p><p className="mt-0.5 truncate text-[11px] text-slate-400">{user.email}</p></div>
-                      <Link role="menuitem" to="/customer/profile" onClick={() => setCustomerMenuOpen(false)} className="mt-1 flex min-h-10 items-center gap-2 rounded-lg px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"><UserIcon className="w-3.5 h-3.5" />Hồ sơ của tôi</Link>
-                      <button role="menuitem" type="button" onClick={toggleTheme} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white">{theme === 'dark' ? <Sun className="w-3.5 h-3.5" /> : <Moon className="w-3.5 h-3.5" />}{theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}</button>
+                  {userMenuOpen && (
+                    <motion.div
+                      initial={{ opacity: 0, y: -6 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: -6 }}
+                      transition={{ duration: 0.16 }}
+                      role="menu"
+                      className="absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900 z-50"
+                    >
+                      <div className="px-3 py-2.5 border-b border-slate-100 dark:border-zinc-800">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="truncate text-xs font-bold text-slate-900 dark:text-white">
+                            {getDisplayName(user.fullName)}
+                          </p>
+                          <span className={`text-[9.5px] font-medium px-1.5 py-0.5 rounded-[4px] border shrink-0 ${getRoleBadge(user.role).color}`}>
+                            {getRoleBadge(user.role).label}
+                          </span>
+                        </div>
+                        <p className="mt-0.5 truncate text-[11px] text-slate-400">{user.email}</p>
+                      </div>
+
+                      <div className="py-1">
+                        <Link
+                          role="menuitem"
+                          to={getProfileRoute(user.role)}
+                          onClick={() => setUserMenuOpen(false)}
+                          className="flex min-h-9 items-center gap-2 rounded-lg px-3 text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white"
+                        >
+                          <UserIcon className="w-3.5 h-3.5" />
+                          {isStoreUser ? 'Hồ sơ cửa hàng' : 'Hồ sơ của tôi'}
+                        </Link>
+
+                        {isStoreUser && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setUserMenuOpen(false);
+                                setShowAirPodsModal(true);
+                              }}
+                              className="flex min-h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white cursor-pointer"
+                            >
+                              <Bluetooth className="w-3.5 h-3.5 text-sky-500" />
+                              Nút Trắng Bluetooth
+                            </button>
+
+                            <button
+                              type="button"
+                              onClick={() => {
+                                toggleSound();
+                              }}
+                              className="flex min-h-9 w-full items-center justify-between rounded-lg px-3 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white cursor-pointer"
+                            >
+                              <span className="flex items-center gap-2">
+                                {isSoundEnabled ? <Volume2 className="w-3.5 h-3.5 text-emerald-500" /> : <VolumeX className="w-3.5 h-3.5 text-slate-400" />}
+                                Chuông đơn hàng
+                              </span>
+                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isSoundEnabled ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40' : 'bg-slate-100 text-slate-400 dark:bg-zinc-800'}`}>
+                                {isSoundEnabled ? 'BẬT' : 'TẮT'}
+                              </span>
+                            </button>
+                          </>
+                        )}
+
+                        <button
+                          role="menuitem"
+                          type="button"
+                          onClick={toggleTheme}
+                          className="flex min-h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white cursor-pointer"
+                        >
+                          {theme === 'dark' ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-slate-600" />}
+                          {theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}
+                        </button>
+                      </div>
+
                       <div className="my-1 border-t border-slate-100 dark:border-zinc-800" />
-                      <button role="menuitem" type="button" onClick={() => { setCustomerMenuOpen(false); setShowLogoutModal(true); }} className="flex min-h-10 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30"><LogOut className="w-3.5 h-3.5" />Đăng xuất</button>
+
+                      <button
+                        role="menuitem"
+                        type="button"
+                        onClick={() => {
+                          setUserMenuOpen(false);
+                          setShowLogoutModal(true);
+                        }}
+                        className="flex min-h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-semibold text-rose-600 hover:bg-rose-50 dark:text-rose-400 dark:hover:bg-rose-950/30 cursor-pointer"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        Đăng xuất
+                      </button>
                     </motion.div>
                   )}
                 </AnimatePresence>
               </div>
-            </div>
-          )}
-
-          {/* Internal Utilities (Only for logged in users) */}
-          {user && !isCustomer && (
-            <>
-              {/* Bluetooth Nút Trắng (AirPods-style sleek pill) */}
-              <button
-                type="button"
-                onClick={() => setShowAirPodsModal(true)}
-                className="flex items-center gap-2 px-3 py-1.5 text-xs font-medium text-slate-700 dark:text-zinc-200 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800/80 dark:hover:bg-zinc-800 border border-slate-200 dark:border-zinc-700 rounded-lg transition-all group cursor-pointer whitespace-nowrap shrink-0"
-                title="Ghép nối Nút Bấm Trắng qua Bluetooth (AirPods Mode)"
-              >
-                <Bluetooth className="w-3.5 h-3.5 text-blue-600 dark:text-sky-400 group-hover:scale-110 transition-transform shrink-0" />
-                <span className="whitespace-nowrap">Nút Trắng Bluetooth</span>
-              </button>
-
-              {/* Sound Notification Toggle & Test */}
-              <button
-                onClick={() => {
-                  if (!isSoundEnabled) {
-                    toggleSound();
-                  } else {
-                    testSound();
-                  }
-                }}
-                onContextMenu={(e) => {
-                  e.preventDefault();
-                  toggleSound();
-                }}
-                className={`p-2 rounded-lg transition-all relative group cursor-pointer ${isSoundEnabled
-                  ? 'text-emerald-600 dark:text-emerald-400 hover:bg-emerald-50 dark:hover:bg-emerald-950/30'
-                  : 'text-slate-400 hover:text-slate-600 dark:hover:text-zinc-300 hover:bg-slate-100 dark:hover:bg-zinc-800'
-                  }`}
-                title={
-                  isSoundEnabled
-                    ? '🔔 Chuông đơn hàng: Đang BẬT (Bấm chuột trái để nghe thử, Chuột phải để Tắt)'
-                    : '🔕 Chuông đơn hàng: Đang TẮT (Bấm để Bật)'
-                }
-                aria-label="Sound Notification"
-              >
-                {isSoundEnabled ? (
-                  <Volume2 className="w-4 h-4 transition-transform group-hover:scale-110" />
-                ) : (
-                  <VolumeX className="w-4 h-4 text-slate-400" />
-                )}
-                {isSoundEnabled && (
-                  <span className="absolute top-1.5 right-1.5 w-1.5 h-1.5 bg-emerald-500 rounded-full animate-ping" />
-                )}
-              </button>
-            </>
-          )}
-
-          {/* Realtime Order & Cancellation Notification Bell */}
-          {user && !isCustomer && <NotificationBellPopover />}
-
-          {/* Dark/Light Mode Toggle */}
-          {!isCustomer && <button
-            onClick={toggleTheme}
-            className="p-2 rounded-lg text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
-            title={theme === 'dark' ? 'Chuyển sang Giao diện Sáng' : 'Chuyển sang Giao diện Tối'}
-            aria-label="Toggle theme"
-          >
-            {theme === 'dark' ? (
-              <Sun className="w-4 h-4 text-amber-400" />
-            ) : (
-              <Moon className="w-4 h-4 text-slate-700" />
-            )}
-          </button>}
-
-          {/* User Account / Auth Section */}
-          {user ? (
-            <div className={`${isCustomer ? 'hidden' : 'flex'} items-center gap-2.5 pl-2 sm:pl-3 border-l border-slate-200 dark:border-zinc-800`}>
-              {/* Clickable Profile Link (Avatar + Name) */}
-              <Link
-                to={getProfileRoute(user.role)}
-                className="flex items-center gap-2.5 group cursor-pointer"
-                title="Nhấn để xem và chỉnh sửa hồ sơ cá nhân"
-              >
-                {/* User Avatar with Image / Initials & Micro-animation */}
-                <motion.div
-                  whileHover={{ scale: 1.06 }}
-                  whileTap={{ scale: 0.95 }}
-                  className="w-8 h-8 rounded-full bg-slate-900 text-white flex items-center justify-center font-semibold text-xs shadow-sm shrink-0 ring-2 ring-transparent group-hover:ring-[#0E6BA8]/40 transition-all overflow-hidden"
-                >
-                  {userAvatar ? (
-                    <img
-                      src={userAvatar}
-                      alt={user.fullName}
-                      className="w-full h-full object-cover"
-                      onError={() => setUserAvatar(null)}
-                    />
-                  ) : (
-                    getInitials(user.fullName)
-                  )}
-                </motion.div>
-
-                {/* User Name & Role Info */}
-                <div className="text-left hidden sm:block shrink-0">
-                  <div className="leading-tight">
-                    <span
-                      className="text-xs font-semibold text-slate-900 dark:text-white truncate max-w-[160px] block group-hover:text-[#0E6BA8] dark:group-hover:text-[#38a5da] transition-colors"
-                      title={getDisplayName(user.fullName) || user.fullName}
-                    >
-                      {getDisplayName(user.fullName) || user.fullName}
-                    </span>
-                  </div>
-                  <div className="mt-0.5">
-                    <span className={`text-[9.5px] font-medium px-1.5 py-0.5 rounded-[4px] border whitespace-nowrap shrink-0 inline-block ${getRoleBadge(user.role).color}`}>
-                      {getRoleBadge(user.role).label}
-                    </span>
-                  </div>
-                </div>
-              </Link>
-
-              {/* Logout Button */}
-              <button
-                type="button"
-                onClick={() => setShowLogoutModal(true)}
-                className="p-1.5 text-slate-400 hover:text-red-600 dark:hover:text-red-400 rounded-lg hover:bg-red-50 dark:hover:bg-red-950/30 transition-colors ml-1 cursor-pointer"
-                title="Đăng xuất"
-              >
-                <LogOut className="w-4 h-4" />
-              </button>
             </div>
           ) : (
             <div className="flex items-center gap-2 sm:gap-3">
@@ -478,9 +392,7 @@ export const Navbar: React.FC = () => {
               </button>
             </div>
           )}
-
         </div>
-
       </div>
 
       {/* Mobile Navigation Dropdown (Guest only) */}

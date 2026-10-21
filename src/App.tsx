@@ -94,14 +94,14 @@ export const App: React.FC = () => {
     <div className="min-h-screen bg-surface-bg dark:bg-cyber-bg text-navy-900 dark:text-slate-100 flex flex-col transition-colors duration-200 relative overflow-x-hidden">
       {/* 36. Animated Background — Premium 3D Atmosphere */}
       <Atmosphere3DBackground variant={getAtmosphereVariant()} />
-      <Navbar />
-      <div className={`flex-1 relative ${location.pathname === '/' ? '' : 'pt-16'} ${user?.role === 'CUSTOMER' ? 'pb-16 md:pb-0' : ''}`}>
+      {!isAuth && <Navbar />}
+      <div className={`flex-1 relative ${location.pathname === "/" || isAuth ? "" : "pt-16"} ${user?.role === "CUSTOMER" && !isAuth ? "pb-16 md:pb-0" : ""}`}>
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route path="/shop" element={<ShopPage />} />
           <Route path="/quick-setup" element={<QuickSetupPage />} />
-          <Route path="/login" element={<LoginPage />} />
-          <Route path="/register" element={<RegisterPage />} />
+          <Route path="/login" element={<LoginPage initialMode="login" />} />
+          <Route path="/register" element={<RegisterPage initialMode="register" />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
