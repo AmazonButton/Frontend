@@ -1,6 +1,27 @@
 import axios from 'axios';
 
-export const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000';
+export const resolveApiUrl = (): string => {
+  if (typeof window !== 'undefined') {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const queryApi = urlParams.get('api') || urlParams.get('apiUrl') || urlParams.get('backend');
+      if (queryApi) {
+        const clean = queryApi.trim().replace(/\/+$/, '');
+        localStorage.setItem('smart_order_api_url', clean);
+        return clean;
+      }
+      const stored = localStorage.getItem('smart_order_api_url');
+      if (stored) {
+        return stored.trim().replace(/\/+$/, '');
+      }
+    } catch {
+      // Ignore localStorage read errors in restricted contexts
+    }
+  }
+  return (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000';
+};
+
+export const API_URL = resolveApiUrl();
 export const API_PREFIX = (import.meta as any).env?.VITE_API_PREFIX || '/api';
 
 export const api = axios.create({
@@ -10,8 +31,12 @@ export const api = axios.create({
   },
 });
 
-// Request interceptor to attach JWT Access Token
+// Request interceptor to attach JWT Access Token and ensure baseURL stays in sync
 api.interceptors.request.use((config) => {
+  const currentBase = resolveApiUrl();
+  if (config.baseURL && !config.baseURL.startsWith(currentBase)) {
+    config.baseURL = `${currentBase}${API_PREFIX}`;
+  }
   const token = localStorage.getItem('smart_order_token');
   if (token) {
     config.headers.Authorization = `Bearer ${token}`;
