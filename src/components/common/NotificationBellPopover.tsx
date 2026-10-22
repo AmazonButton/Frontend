@@ -7,9 +7,10 @@ import {
   Inbox,
 } from 'lucide-react';
 import { api } from '../../services/api';
-import { getSocket } from '../../services/socket';
+import { getSocket, subscribeToStore, subscribeToCustomer } from '../../services/socket';
 import { useAuth } from '../../context/AuthContext';
 import { useSound } from '../../context/OrderSoundContext';
+import { toast } from '../../context/ToastContext';
 import { useNavigate } from 'react-router-dom';
 
 export interface AppNotification {
@@ -173,14 +174,22 @@ export const NotificationBellPopover: React.FC = () => {
   // Realtime Socket Listener: New Orders & Cancellations
   useEffect(() => {
     if (!user) return;
+    if (user.storeId) {
+      subscribeToStore(user.storeId);
+    }
+    if (user.customerProfileId) {
+      subscribeToCustomer(user.customerProfileId);
+    }
+
     const socket = getSocket();
 
     const handleOrderCreated = (payload: any) => {
       const order = payload.order || payload;
       const firstItem = order.items?.[0];
-      const productName = firstItem?.product?.name || firstItem?.productName || 'Nhu yếu phẩm';
+      const productName = firstItem?.product?.name || firstItem?.productName || firstItem?.productNameSnapshot || 'Nhu yếu phẩm';
       const qty = firstItem?.quantity || 1;
-      const orderNum = order.orderNumber || (order.id ? String(order.id).slice(-6) : 'SOB');
+      const orderNum = order.orderNumber || order.orderCode || (order.id ? String(order.id).slice(-6) : 'SOB');
+      const customerName = order.customerName || order.customer?.user?.fullName || payload.customerName || 'Khách hàng';
 
       const newNotif: AppNotification = {
         id: `notif_rt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -191,19 +200,27 @@ export const NotificationBellPopover: React.FC = () => {
         productName,
         quantity: qty,
         totalAmount: order.totalAmount,
-        customerName: order.customerName || 'Khách hàng',
+        customerName,
         status: order.status || 'PENDING',
         isRead: false,
         timestamp: new Date().toISOString(),
       };
 
       setNotifications((prev) => [newNotif, ...prev]);
+
+      const isStoreStaff = user && ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN'].includes(user.role);
+      if (isStoreStaff) {
+        toast.success(`Khách ${customerName} vừa đặt đơn #${orderNum} (${qty}x ${productName})`, {
+          title: '🔔 Đơn hàng mới!',
+          duration: 5000,
+        });
+      }
     };
 
     const handleOrderCancelled = (payload: any) => {
       const orderId = payload.orderId || payload.id;
-      const orderNum = payload.orderNumber || (orderId ? String(orderId).slice(-6) : 'SOB');
-      const reason = payload.reason || payload.cancellationReason || 'Khách hủy trong 60 giây đầu';
+      const orderNum = payload.orderNumber || payload.orderCode || (orderId ? String(orderId).slice(-6) : 'SOB');
+      const reason = payload.reason || payload.cancellationReason || 'Khách hủy đơn';
 
       const cancelNotif: AppNotification = {
         id: `notif_rt_cancel_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
@@ -219,6 +236,14 @@ export const NotificationBellPopover: React.FC = () => {
       };
 
       setNotifications((prev) => [cancelNotif, ...prev]);
+
+      const isStoreStaff = user && ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN'].includes(user.role);
+      if (isStoreStaff) {
+        toast.info(`Đơn hàng #${orderNum} đã bị hủy: ${reason}`, {
+          title: 'Đơn hàng đã hủy',
+          duration: 5000,
+        });
+      }
     };
 
     socket.on('ORDER_CREATED', handleOrderCreated);

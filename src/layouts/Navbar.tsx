@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useSound } from '../context/OrderSoundContext';
-import { LogOut, Shield, ShieldAlert, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X, ShoppingCart, ReceiptText, ChevronDown, ShoppingBag, Package, Wallet, BarChart3 } from 'lucide-react';
+import { LogOut, Shield, ShieldAlert, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, BadgeCheck, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X, ShoppingCart, ReceiptText, ChevronDown, ShoppingBag, Package, Wallet, BarChart3 } from 'lucide-react';
 import { WhiteDeviceAirPodsModal } from '../components/devices/WhiteDeviceAirPodsModal';
 import { HeaderNavigation } from '../components/common/HeaderNavigation';
 import { LogoutConfirmModal } from '../components/common/LogoutConfirmModal';
@@ -168,6 +168,7 @@ export const Navbar: React.FC = () => {
         {isCustomer && (
           <nav aria-label="Điều hướng khách hàng" className="hidden md:flex items-center gap-1 rounded-xl border border-slate-200/80 bg-slate-50/70 p-1 dark:border-zinc-800 dark:bg-zinc-900/70">
             {[
+              { to: '/customer/verification', label: 'Xác minh', icon: BadgeCheck },
               { to: '/shop', label: 'Mua sắm', icon: ShoppingCart },
               { to: '/customer/home', label: 'Nút của tôi', icon: Smartphone },
               { to: '/customer/orders', label: 'Đơn hàng', icon: ReceiptText },
@@ -450,10 +451,10 @@ export const Navbar: React.FC = () => {
       <LogoutConfirmModal
         isOpen={showLogoutModal && !!user}
         onClose={() => setShowLogoutModal(false)}
-        onConfirm={async () => {
+        onConfirm={() => {
           setShowLogoutModal(false);
-          await logout();
-          navigate('/login');
+          logout();
+          navigate('/login', { replace: true });
         }}
         user={user}
       />

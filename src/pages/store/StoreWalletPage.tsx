@@ -668,12 +668,12 @@ export const StoreWalletPage: React.FC = () => {
                   <input
                     required
                     type="number"
-                    min="10000"
+                    min="50000"
                     step="1000"
                     max={availableBalance || undefined}
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
-                    placeholder="Nhập số tiền (tối thiểu 10.000 ₫)"
+                    placeholder="Nhập số tiền (tối thiểu 50.000 ₫)"
                     className="w-full rounded-xl border border-zinc-200 bg-white px-3.5 py-3 text-base font-mono font-bold shadow-2xs focus:border-[#287DA8] focus:outline-hidden focus:ring-2 focus:ring-[#287DA8]/20 dark:border-zinc-700 dark:bg-zinc-800"
                   />
                   <div className="absolute inset-y-0 right-3.5 flex items-center text-xs font-bold text-zinc-400">

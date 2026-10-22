@@ -18,6 +18,8 @@ import {
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../context/ToastContext';
+import { useAuth } from '../../context/AuthContext';
+import { getSocket, subscribeToCustomer } from '../../services/socket';
 import { Order } from '../../types';
 
 type OrderFilter = 'ALL' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
@@ -42,6 +44,7 @@ const formatDate = (value: string) =>
   new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 
 export const CustomerOrdersPage: React.FC = () => {
+  const { user } = useAuth();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -69,22 +72,78 @@ export const CustomerOrdersPage: React.FC = () => {
 
   useEffect(() => {
     loadOrders();
-  }, []);
+
+    const customerId = user?.customerProfileId || (user?.role === 'CUSTOMER' ? user?.id : undefined);
+    if (customerId) {
+      subscribeToCustomer(customerId);
+    }
+
+    const socket = getSocket();
+
+    const handleStatusChanged = (payload: any) => {
+      loadOrders();
+      const updatedOrder = payload?.order || payload;
+      const orderNum = updatedOrder?.orderNumber || updatedOrder?.orderCode || '';
+      const newStatus = updatedOrder?.status || payload?.status;
+      // Không spam thông báo khi đơn tự động chuyển sang CONFIRMED ở background
+      if (orderNum && newStatus && !['PENDING', 'CONFIRMED'].includes(newStatus)) {
+        const label = statusMeta[newStatus]?.label || newStatus;
+        toast.info(`Đơn hàng #${orderNum} đã chuyển sang: ${label}`, { title: 'Cập nhật trạng thái đơn hàng' });
+      }
+    };
+
+    const handleOrderCreated = () => {
+      loadOrders();
+    };
+
+    const handleOrderCancelled = () => {
+      loadOrders();
+    };
+
+    const handlePaymentConfirmed = (payload: any) => {
+      loadOrders();
+      const orderNum = payload?.orderNumber || payload?.orderCode || '';
+      if (orderNum) {
+        toast.success(`Thanh toán đơn hàng #${orderNum} đã được xác nhận thành công!`);
+      }
+    };
+
+    socket.on('ORDER_STATUS_CHANGED', handleStatusChanged);
+    socket.on('ORDER_CREATED', handleOrderCreated);
+    socket.on('ORDER_CANCELLED', handleOrderCancelled);
+    socket.on('ORDER_PAYMENT_CONFIRMED', handlePaymentConfirmed);
+    socket.on('ORDER_DELIVERED', handleStatusChanged);
+
+    return () => {
+      socket.off('ORDER_STATUS_CHANGED', handleStatusChanged);
+      socket.off('ORDER_CREATED', handleOrderCreated);
+      socket.off('ORDER_CANCELLED', handleOrderCancelled);
+      socket.off('ORDER_PAYMENT_CONFIRMED', handlePaymentConfirmed);
+      socket.off('ORDER_DELIVERED', handleStatusChanged);
+    };
+  }, [user]);
+
+  const getOrderStatus = (o: any) => o?.status || o?.orderStatus || 'PENDING';
 
   const confirmCancellation = async () => {
     if (!orderToCancel) return;
 
     setIsCancelling(true);
+    const targetId = orderToCancel.id || (orderToCancel as any).orderId;
+    const targetCode = orderToCancel.orderNumber || (orderToCancel as any).orderCode || targetId;
     try {
-      const response = await api.post(`/orders/${orderToCancel.id}/cancel`, {
-        reason: 'Khách hàng hủy đơn',
+      const response = await api.post(`/orders/${targetId}/cancel`, {
+        reason: 'Khách hàng hủy đơn khi chưa hoàn tất thanh toán/tiếp nhận',
       });
       const updatedOrder = response.data?.data;
-      setOrders((current) => current.map((order) => order.id === orderToCancel.id
-        ? { ...order, ...updatedOrder, status: 'CANCELLED' }
-        : order));
+      setOrders((current) => current.map((order) => {
+        const oId = order.id || (order as any).orderId;
+        return oId === targetId
+          ? { ...order, ...updatedOrder, status: 'CANCELLED', orderStatus: 'CANCELLED' }
+          : order;
+      }));
       setExpandedOrder(null);
-      toast.success(`Đã hủy đơn hàng #${orderToCancel.orderNumber}.`);
+      toast.success(`Đã hủy đơn hàng #${targetCode}.`);
       setOrderToCancel(null);
     } catch (requestError: any) {
       toast.error(requestError.response?.data?.message || 'Không thể hủy đơn hàng lúc này.');
@@ -96,18 +155,19 @@ export const CustomerOrdersPage: React.FC = () => {
 
   const summary = useMemo(() => ({
     total: orders.length,
-    active: orders.filter((order) => isActiveOrder(order.status)).length,
-    completed: orders.filter((order) => order.status === 'COMPLETED').length,
+    active: orders.filter((order) => isActiveOrder(getOrderStatus(order))).length,
+    completed: orders.filter((order) => getOrderStatus(order) === 'COMPLETED').length,
   }), [orders]);
 
   const filteredOrders = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase('vi-VN');
     return orders.filter((order) => {
+      const currentStatus = getOrderStatus(order);
       const filterMatches =
         filter === 'ALL' ||
-        (filter === 'ACTIVE' && isActiveOrder(order.status)) ||
-        (filter === 'COMPLETED' && order.status === 'COMPLETED') ||
-        (filter === 'CANCELLED' && ['CANCELLED', 'REJECTED'].includes(order.status));
+        (filter === 'ACTIVE' && isActiveOrder(currentStatus)) ||
+        (filter === 'COMPLETED' && currentStatus === 'COMPLETED') ||
+        (filter === 'CANCELLED' && ['CANCELLED', 'REJECTED'].includes(currentStatus));
       const searchMatches = !normalizedQuery || [
         order.orderNumber,
         order.deliveryAddress,
@@ -141,7 +201,7 @@ export const CustomerOrdersPage: React.FC = () => {
     { id: 'ALL', label: 'Tất cả', count: summary.total },
     { id: 'ACTIVE', label: 'Đang xử lý', count: summary.active },
     { id: 'COMPLETED', label: 'Đã giao', count: summary.completed },
-    { id: 'CANCELLED', label: 'Đã hủy', count: orders.filter((order) => ['CANCELLED', 'REJECTED'].includes(order.status)).length },
+    { id: 'CANCELLED', label: 'Đã hủy', count: orders.filter((order) => ['CANCELLED', 'REJECTED'].includes(getOrderStatus(order))).length },
   ];
 
   return (
@@ -240,13 +300,19 @@ export const CustomerOrdersPage: React.FC = () => {
           ) : (
             <div className="divide-y divide-slate-100 dark:divide-zinc-800">
               {paginatedOrders.map((order, index) => {
-                const meta = statusMeta[order.status] || { label: order.status, badge: 'bg-slate-50 text-slate-600 border-slate-200', icon: Clock3 };
+                const currentStatus = getOrderStatus(order);
+                const meta = statusMeta[currentStatus] || { label: currentStatus, badge: 'bg-slate-50 text-slate-600 border-slate-200', icon: Clock3 };
                 const StatusIcon = meta.icon;
                 const isExpanded = expandedOrder === order.id;
-                const canCancel = order.status === 'PENDING' && !['PAID', 'REFUND_PENDING'].includes(order.paymentStatus || '');
+
+                const isUnpaid = order.paymentStatus === 'UNPAID' || (order.paymentStatus !== 'PAID' && order.paymentMethod !== 'COD' && order.paymentMethod !== 'CASH_ON_DELIVERY');
+                const canCancel = currentStatus !== 'CANCELLED' && currentStatus !== 'REJECTED' && (
+                  isUnpaid || ['PENDING', 'CONFIRMED'].includes(currentStatus)
+                );
+                const canPayNow = isUnpaid && order.paymentMethod === 'PAYOS' && currentStatus !== 'CANCELLED' && currentStatus !== 'REJECTED';
                 const itemSummary = order.items.slice(0, 2).map((item) => `${item.quantity}× ${item.productName}`).join(', ');
                 return (
-                  <motion.article key={order.id} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(index * 0.035, 0.22) }}>
+                  <motion.article key={order.id || order.orderNumber || index} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(index * 0.035, 0.22) }}>
                     <button
                       type="button"
                       onClick={() => setExpandedOrder(isExpanded ? null : order.id)}
@@ -266,7 +332,9 @@ export const CustomerOrdersPage: React.FC = () => {
                         <div className="shrink-0 flex items-center gap-2 sm:gap-3">
                           <div className="text-right">
                             <p className="text-sm font-bold text-slate-900 tabular-nums dark:text-white">{formatPrice(order.totalAmount)}</p>
-                            <p className="mt-1 text-[10px] text-slate-400">{order.paymentStatus === 'PAID' ? 'Đã thanh toán' : order.paymentMethod === 'CASH_ON_DELIVERY' ? 'Thanh toán khi nhận' : 'Chờ thanh toán'}</p>
+                            <p className={`mt-1 text-[10px] ${isUnpaid ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
+                              {order.paymentStatus === 'PAID' ? 'Đã thanh toán' : (order.paymentMethod === 'COD' || order.paymentMethod === 'CASH_ON_DELIVERY') ? 'Thanh toán khi nhận' : 'Chờ thanh toán'}
+                            </p>
                           </div>
                           <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                         </div>
@@ -280,29 +348,71 @@ export const CustomerOrdersPage: React.FC = () => {
                               <div>
                                 <p className="text-[11px] font-bold uppercase tracking-[0.12em] text-slate-400">Sản phẩm</p>
                                 <div className="mt-2.5 space-y-2">
-                                  {order.items.map((item) => <div key={item.id} className="flex justify-between gap-4 text-xs"><span className="text-slate-600 dark:text-zinc-300">{item.quantity}× {item.productName}</span><span className="font-semibold tabular-nums text-slate-800 dark:text-zinc-100">{formatPrice(item.totalPrice)}</span></div>)}
+                                  {order.items.map((item, itemIdx) => (
+                                    <div
+                                      key={item.id || (item as any).orderItemId || `${item.productId || 'item'}-${itemIdx}`}
+                                      className="flex justify-between gap-4 text-xs"
+                                    >
+                                      <span className="text-slate-600 dark:text-zinc-300">{item.quantity}× {item.productName}</span>
+                                      <span className="font-semibold tabular-nums text-slate-800 dark:text-zinc-100">{formatPrice(item.totalPrice)}</span>
+                                    </div>
+                                  ))}
                                 </div>
                               </div>
                               <div className="md:w-64 space-y-3 text-xs">
                                 <div className="flex gap-2 text-slate-500 dark:text-zinc-400"><MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-slate-400" /><span>{order.deliveryAddress || 'Chưa cập nhật địa chỉ giao hàng'}</span></div>
-                                <div className="flex gap-2 text-slate-500 dark:text-zinc-400"><CreditCard className="w-3.5 h-3.5 shrink-0 text-slate-400" /><span>{order.paymentMethod === 'CASH_ON_DELIVERY' ? 'Thanh toán khi nhận hàng' : 'Thanh toán PayOS'}</span></div>
+                                <div className="flex gap-2 text-slate-500 dark:text-zinc-400"><CreditCard className="w-3.5 h-3.5 shrink-0 text-slate-400" /><span>{order.paymentMethod === 'COD' || order.paymentMethod === 'CASH_ON_DELIVERY' ? 'Thanh toán khi nhận hàng (COD)' : 'Thanh toán PayOS'}</span></div>
                               </div>
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-200/70 flex justify-between text-sm font-bold text-slate-900 dark:border-zinc-700 dark:text-white"><span>Tổng thanh toán</span><span className="tabular-nums">{formatPrice(order.totalAmount)}</span></div>
-                            {canCancel && (
+                            {(canCancel || canPayNow) && (
                               <div className="mt-4 pt-3 border-t border-slate-200/70 dark:border-zinc-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                                <p className="text-[11px] text-slate-400">Đơn chưa được cửa hàng tiếp nhận, bạn vẫn có thể hủy.</p>
-                                <button
-                                  type="button"
-                                  onClick={(event) => {
-                                    event.stopPropagation();
-                                    setOrderToCancel(order);
-                                  }}
-                                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 hover:border-rose-300 dark:bg-zinc-900 dark:border-rose-900/70 dark:text-rose-400 dark:hover:bg-rose-950/30"
-                                >
-                                  <CircleAlert className="w-3.5 h-3.5" />
-                                  Hủy đơn hàng
-                                </button>
+                                <p className="text-[11px] text-slate-400">
+                                  {isUnpaid
+                                    ? 'Đơn hàng chưa hoàn tất thanh toán. Bạn có thể thanh toán ngay hoặc hủy đơn hàng.'
+                                    : 'Đơn hàng đang chờ xử lý, bạn vẫn có thể hủy đơn nếu muốn thay đổi.'}
+                                </p>
+                                <div className="flex items-center gap-2 self-end sm:self-auto">
+                                  {canPayNow && (
+                                    <button
+                                      type="button"
+                                      onClick={async (event) => {
+                                        event.stopPropagation();
+                                        try {
+                                          toast.info('Đang mở liên kết thanh toán PayOS...');
+                                          const res = await api.post('/payments/payos/create-link', {
+                                            orderId: order.id || (order as any).orderId,
+                                          });
+                                          const checkoutUrl = res.data?.data?.checkoutUrl || res.data?.checkoutUrl;
+                                          if (checkoutUrl) {
+                                            window.location.href = checkoutUrl;
+                                          } else {
+                                            toast.error('Không tìm thấy liên kết thanh toán.');
+                                          }
+                                        } catch (err: any) {
+                                          toast.error(err.response?.data?.message || 'Không thể tạo liên kết thanh toán PayOS.');
+                                        }
+                                      }}
+                                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-[#0B5586]"
+                                    >
+                                      <CreditCard className="w-3.5 h-3.5" />
+                                      Thanh toán ngay
+                                    </button>
+                                  )}
+                                  {canCancel && (
+                                    <button
+                                      type="button"
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setOrderToCancel(order);
+                                      }}
+                                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-rose-200 bg-white px-3 py-2 text-xs font-semibold text-rose-600 transition hover:bg-rose-50 hover:border-rose-300 dark:bg-zinc-900 dark:border-rose-900/70 dark:text-rose-400 dark:hover:bg-rose-950/30"
+                                    >
+                                      <CircleAlert className="w-3.5 h-3.5" />
+                                      Hủy đơn hàng
+                                    </button>
+                                  )}
+                                </div>
                               </div>
                             )}
                           </div>

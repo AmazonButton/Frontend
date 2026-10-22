@@ -71,10 +71,31 @@ export const walletService = {
    * Cập nhật tài khoản ngân hàng thụ hưởng nhận tiền rút
    */
   async updateBankAccount(data: UpdateBankAccountDto, storeId?: string | number) {
-    const res = await api.put('/store/wallet/bank-account', data, {
-      params: storeId ? { storeId } : undefined,
-    });
-    return res.data;
+    // Backend.git DTO: { bankName, bankAccountNumber, bankAccountHolder }
+    // Main.git DTO:    { bankName, bankBin, accountNumber, accountHolderName }
+    try {
+      const res = await api.put('/store/wallet/bank-account', {
+        bankName: data.bankName,
+        bankAccountNumber: data.accountNumber,
+        bankAccountHolder: data.accountHolderName,
+      }, {
+        params: storeId ? { storeId } : undefined,
+      });
+      return res.data;
+    } catch (err: any) {
+      if (err.response?.status === 400) {
+        const res = await api.put('/store/wallet/bank-account', {
+          bankName: data.bankName,
+          bankBin: data.bankBin,
+          accountNumber: data.accountNumber,
+          accountHolderName: data.accountHolderName,
+        }, {
+          params: storeId ? { storeId } : undefined,
+        });
+        return res.data;
+      }
+      throw err;
+    }
   },
 
   /**
@@ -92,10 +113,25 @@ export const walletService = {
    */
   async requestWithdrawal(data: RequestWithdrawalDto, storeId?: string | number) {
     const idempotencyKey = `wd_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    const res = await api.post('/store/wallet/withdrawals', data, {
+    const payload: any = {
+      amount: data.amount,
+      note: data.note,
+    };
+    if (data.bankName) payload.bankName = data.bankName;
+    if (data.accountNumber) {
+      payload.bankAccountNumber = data.accountNumber;
+      payload.accountNumber = data.accountNumber;
+    }
+    if (data.accountHolderName) {
+      payload.bankAccountHolder = data.accountHolderName;
+      payload.accountHolderName = data.accountHolderName;
+    }
+
+    const res = await api.post('/store/wallet/withdrawals', payload, {
       params: storeId ? { storeId } : undefined,
       headers: {
         'idempotency-key': idempotencyKey,
+        'x-idempotency-key': idempotencyKey,
       },
     });
     return res.data;

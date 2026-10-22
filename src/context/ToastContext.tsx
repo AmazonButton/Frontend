@@ -63,10 +63,13 @@ function dispatchGlobalToast(type: ToastType, message: string, options?: ToastOp
 }
 
 // Single Toast Card Component
-const ToastCard: React.FC<{
-  item: ToastItem;
-  onClose: (id: string) => void;
-}> = ({ item, onClose }) => {
+const ToastCard = React.forwardRef<
+  HTMLDivElement,
+  {
+    item: ToastItem;
+    onClose: (id: string) => void;
+  }
+>(({ item, onClose }, ref) => {
   const [progress, setProgress] = useState(100);
 
   useEffect(() => {
@@ -113,6 +116,7 @@ const ToastCard: React.FC<{
 
   return (
     <motion.div
+      ref={ref}
       layout
       initial={{ opacity: 0, x: 48, y: 12, scale: 0.94, filter: 'blur(4px)' }}
       animate={{ opacity: 1, x: 0, y: 0, scale: 1, filter: 'blur(0px)' }}
@@ -163,7 +167,9 @@ const ToastCard: React.FC<{
       </div>
     </motion.div>
   );
-};
+});
+
+ToastCard.displayName = 'ToastCard';
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);

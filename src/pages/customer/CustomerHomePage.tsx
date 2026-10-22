@@ -13,7 +13,7 @@ import { Floating3DCard } from '../../components/3d/Floating3DCard';
 import { WebBluetoothProvisioner } from '../../components/devices/WebBluetoothProvisioner';
 import { WhiteDeviceAirPodsModal } from '../../components/devices/WhiteDeviceAirPodsModal';
 import { OrderSuccessModal } from '../../components/orders/OrderSuccessModal';
-import { CustomerStoreSelectorModal, StoreItem, MOCK_STORES } from '../../components/customer/CustomerStoreSelectorModal';
+import { CustomerStoreSelectorModal, StoreItem } from '../../components/customer/CustomerStoreSelectorModal';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 
 
@@ -226,7 +226,7 @@ export const CustomerHomePage: React.FC = () => {
       const cached = localStorage.getItem('smart_order_customer_store');
       if (cached) return JSON.parse(cached);
     } catch {}
-    return MOCK_STORES[0]; // LeBao Store by default
+    return null;
   });
 
   // Device Onboarding (Code / QR) Modal state
@@ -1234,8 +1234,8 @@ export const CustomerHomePage: React.FC = () => {
                         </span>
                       </div>
                       <div className="mt-1 space-y-0.5">
-                        {order.items.map((it) => (
-                          <div key={it.id} className="text-xs text-slate-600">
+                        {order.items.map((it, itemIdx) => (
+                          <div key={it.id || it.productId || itemIdx} className="text-xs text-slate-600">
                             <span>{it.quantity}× {it.productName}</span>
                           </div>
                         ))}

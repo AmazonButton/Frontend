@@ -165,69 +165,8 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   // 🎙️ Phát giọng đọc tiếng Việt gốc (Chuẩn Google tự nhiên, trong trẻo, không bị méo/vang)
   const playVietnameseVoiceAudio = (text: string) => {
     if (!isVoiceEnabledRef.current) return;
-
-    // Check if running on HTTPS while API_URL is HTTP (Mixed Content prevention)
-    const isHttpsFrontend = typeof window !== 'undefined' && window.location.protocol === 'https:';
-    const isInsecureApi = API_URL.startsWith('http://');
-
-    if (isHttpsFrontend && isInsecureApi) {
-      // In production HTTPS without a secure TTS backend URL, safely use native SpeechSynthesis
-      speakViaSynthesis(text);
-      return;
-    }
-
-    // Safely stop previous audio only if its play promise is settled
-    if (currentPlayingAudio) {
-      const prevAudio = currentPlayingAudio;
-      currentPlayingAudio = null;
-      if (currentPlayPromise) {
-        currentPlayPromise
-          .then(() => {
-            try {
-              prevAudio.pause();
-              prevAudio.currentTime = 0;
-            } catch (_) {}
-          })
-          .catch(() => {});
-      } else {
-        try {
-          prevAudio.pause();
-          prevAudio.currentTime = 0;
-        } catch (_) {}
-      }
-    }
-
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-    }
-
-    try {
-      const audioUrl = `${API_URL}/api/tts?text=${encodeURIComponent(text)}`;
-      const audio = new Audio(audioUrl);
-      currentPlayingAudio = audio;
-
-      audio.onended = () => {
-        if (currentPlayingAudio === audio) {
-          currentPlayingAudio = null;
-          currentPlayPromise = null;
-        }
-      };
-
-      const playPromise = audio.play();
-      currentPlayPromise = playPromise;
-
-      if (playPromise !== undefined) {
-        playPromise.catch((err) => {
-          // AbortError is intentional (e.g. paused for a newer audio or user action) - ignore it safely
-          if (err && err.name === 'AbortError') {
-            return;
-          }
-          console.warn('Audio stream failed, fallback to SpeechSynthesis:', err);
-          speakViaSynthesis(text);
-        });
-      }
-    } catch (e) {
-      console.warn('TTS playback error:', e);
       speakViaSynthesis(text);
     }
   };
@@ -349,7 +288,6 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         }
       }
 
-      console.log('🔔 [LIVE AUDIO] New order triggered! Payload:', payload);
       const isStore = user && ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN'].includes(user.role);
 
       if (isStore) {
@@ -360,12 +298,13 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           totalAmount: payload?.order?.totalAmount,
           orderNumber: payload?.order?.orderNumber,
         });
-      } else {
-        playOrderChime(true);
       }
     };
 
     const handleOrderCancelled = (payload?: any) => {
+      const isStore = user && ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN'].includes(user.role);
+      if (!isStore) return;
+
       const cancelId = payload?.orderId || payload?.order?.id || payload?.id;
       if (cancelId) {
         const key = `cancel_${cancelId}`;

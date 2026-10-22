@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Play, Pause, Volume2, VolumeX, ArrowRight, ShieldCheck, Zap, Battery, CheckCircle2, ShoppingCart, Droplets, Star, Shield, Check, Sparkles, MousePointerClick, SearchX, Cog, Truck, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Play, Pause, Volume2, VolumeX, ArrowRight, ShieldCheck, Zap, Battery, CheckCircle2, ShoppingCart, Droplets, Star, Shield, Check, Sparkles, MousePointerClick, SearchX, Cog, Truck, ChevronLeft, ChevronRight, X } from 'lucide-react';
 import { InteractiveHeroBackground } from '../components/InteractiveHeroBackground';
 import { api } from '../services/api';
+import { getSocket } from '../services/socket';
 import { toast } from '../context/ToastContext';
 
 /**
@@ -11,7 +12,7 @@ import { toast } from '../context/ToastContext';
  * the product. `object-cover` then crops the actual product out of the card.
  * Trim transparent borders in the browser before displaying data-URL images.
  */
-const StorefrontProductImage: React.FC<{ src: string; alt: string }> = ({ src, alt }) => {
+const StorefrontProductImage: React.FC<{ src: string; alt: string; className?: string }> = ({ src, alt, className = 'w-full h-full object-cover transition-all duration-500 ease-out group-hover:scale-105' }) => {
   const [displaySrc, setDisplaySrc] = useState(src);
   const processedSourceRef = useRef<string | null>(null);
 
@@ -73,7 +74,7 @@ const StorefrontProductImage: React.FC<{ src: string; alt: string }> = ({ src, a
     }
   };
 
-  return <img src={displaySrc} alt={alt} onLoad={trimTransparentCanvas} className="w-full h-full object-cover transition-all duration-500 ease-out group-hover:scale-105" loading="lazy" />;
+  return <img src={displaySrc} alt={alt} onLoad={trimTransparentCanvas} className={className} loading="lazy" />;
 };
 
 const PARTNER_BRANDS = [
@@ -167,20 +168,42 @@ export const LandingPage: React.FC = () => {
   const [productsLoading, setProductsLoading] = useState(true);
   const [cartCount, setCartCount] = useState(0);
   const [cartPulse, setCartPulse] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
   const brandScrollRef = useRef<HTMLDivElement>(null);
 
-  useEffect(() => {
-    let active = true;
+  const fetchStorefrontProducts = () => {
     api.get('/products/storefront/catalog')
-      .then(({ data }) => { if (active) setStorefrontProducts(data.data || []); })
-      .catch(() => { if (active) setStorefrontProducts([]); })
-      .finally(() => { if (active) setProductsLoading(false); });
+      .then(({ data }) => { setStorefrontProducts(data.data || []); })
+      .catch(() => { setStorefrontProducts([]); })
+      .finally(() => { setProductsLoading(false); });
+  };
+
+  useEffect(() => {
+    fetchStorefrontProducts();
 
     try {
       const saved = JSON.parse(localStorage.getItem('sob_storefront_cart_v1') || '[]');
       setCartCount(saved.reduce((sum: number, line: any) => sum + Number(line.quantity || 0), 0));
     } catch { setCartCount(0); }
-    return () => { active = false; };
+
+    const socket = getSocket();
+    const handleProductChange = () => {
+      fetchStorefrontProducts();
+    };
+
+    socket.on('PRODUCT_CREATED', handleProductChange);
+    socket.on('PRODUCT_UPDATED', handleProductChange);
+    socket.on('PRODUCT_DELETED', handleProductChange);
+    socket.on('PRODUCT_STOCK_CHANGED', handleProductChange);
+    socket.on('CATALOG_UPDATED', handleProductChange);
+
+    return () => {
+      socket.off('PRODUCT_CREATED', handleProductChange);
+      socket.off('PRODUCT_UPDATED', handleProductChange);
+      socket.off('PRODUCT_DELETED', handleProductChange);
+      socket.off('PRODUCT_STOCK_CHANGED', handleProductChange);
+      socket.off('CATALOG_UPDATED', handleProductChange);
+    };
   }, []);
 
   const addProductToCart = (product: any) => {
@@ -364,6 +387,34 @@ export const LandingPage: React.FC = () => {
           </div>
         </div>
       </section>
+
+      <AnimatePresence>
+        {selectedProduct && (
+          <div className="fixed inset-0 z-[100] overflow-y-auto p-3 sm:p-6" role="dialog" aria-modal="true" aria-label={`Chi tiết ${selectedProduct.name}`}>
+            <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} exit={{ opacity: 0 }} className="fixed inset-0 bg-slate-950/55 backdrop-blur-sm" onClick={() => setSelectedProduct(null)} />
+            <motion.div initial={{ opacity: 0, y: 24, scale: 0.97 }} animate={{ opacity: 1, y: 0, scale: 1 }} exit={{ opacity: 0, y: 16, scale: 0.97 }} transition={{ type: 'spring', damping: 28, stiffness: 300 }} className="relative mx-auto flex min-h-full max-w-4xl items-center">
+              <div className="relative my-auto grid w-full overflow-hidden rounded-3xl bg-white shadow-2xl md:grid-cols-2">
+                <button type="button" onClick={() => setSelectedProduct(null)} className="absolute right-4 top-4 z-10 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-slate-500 shadow-sm transition hover:bg-slate-100 hover:text-slate-900" aria-label="Đóng chi tiết sản phẩm"><X size={19}/></button>
+                <div className="flex min-h-[300px] items-center justify-center bg-slate-50 p-8 sm:min-h-[440px] sm:p-12">
+                  {selectedProduct.imageUrl ? <StorefrontProductImage src={selectedProduct.imageUrl} alt={selectedProduct.name} className="max-h-[380px] w-full object-contain" /> : <span className="text-7xl">🛍️</span>}
+                </div>
+                <div className="flex flex-col p-6 sm:p-9">
+                  <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#1976D2]"><ShoppingCart className="h-4 w-4"/>{selectedProduct.store?.name || 'Cửa hàng đối tác'}</div>
+                  <p className="mt-5 text-sm font-medium text-slate-500">{selectedProduct.category}{selectedProduct.brand ? ` · ${selectedProduct.brand}` : ''}</p>
+                  <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{selectedProduct.name}</h2>
+                  <p className="mt-4 text-3xl font-bold text-[#1976D2]">{Number(selectedProduct.price).toLocaleString('vi-VN')} ₫</p>
+                  <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600"><p>Đơn vị: <strong className="text-slate-800">{selectedProduct.unit || 'Sản phẩm'}</strong></p><p className="mt-1">Sản phẩm được cập nhật giá và tồn kho trực tiếp từ cửa hàng.</p></div>
+                  <p className="mt-4 text-sm font-medium text-emerald-700">{Math.max(0, Number(selectedProduct.stock || 0) - Number(selectedProduct.reservedStock || 0)) > 0 ? `Còn hàng · ${Math.max(0, Number(selectedProduct.stock || 0) - Number(selectedProduct.reservedStock || 0))} sản phẩm` : 'Tạm hết hàng'}</p>
+                  <div className="mt-auto grid gap-3 pt-8 sm:grid-cols-2">
+                    <button type="button" disabled={Math.max(0, Number(selectedProduct.stock || 0) - Number(selectedProduct.reservedStock || 0)) <= 0} onClick={() => addProductToCart(selectedProduct)} className="inline-flex items-center justify-center gap-2 rounded-xl border border-[#1976D2] py-3 font-semibold text-[#1976D2] transition hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-40"><ShoppingCart className="h-4 w-4"/>Thêm vào giỏ</button>
+                    <Link to="/shop?cart=open" onClick={() => addProductToCart(selectedProduct)} className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#287DA8] py-3 font-semibold text-white shadow-sm transition hover:bg-[#206588]">Mua ngay <ArrowRight className="h-4 w-4"/></Link>
+                  </div>
+                </div>
+              </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
 
       {/* ========================================================================= */}
       {/* 3. PARTNER BRANDS SECTION (100% Matching Image Mockup)                    */}
@@ -567,10 +618,11 @@ export const LandingPage: React.FC = () => {
                   whileHover={{ y: -8 }}
                   className="group rounded-2xl bg-white dark:bg-zinc-900 border border-slate-100 dark:border-zinc-800/90 p-4 sm:p-4.5 flex flex-col justify-between shadow-xs hover:shadow-xl hover:shadow-slate-200/70 dark:hover:shadow-black/50 hover:border-slate-300 dark:hover:border-zinc-700 transition-all duration-300 relative"
                 >
-                  <Link
-                    to={`/shop?search=${encodeURIComponent(product.name)}`}
-                    onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
-                    className="block group/link cursor-pointer focus:outline-none"
+                  <button
+                    type="button"
+                    onClick={() => setSelectedProduct(product)}
+                    className="block w-full text-left group/link cursor-pointer focus:outline-none"
+                    aria-label={`Xem chi tiết ${product.name}`}
                   >
                     {/* Image Area with 4:3 Aspect Ratio, Floating Badge, and Zoom on Hover */}
                     <div className="relative w-full aspect-[4/3] rounded-xl overflow-hidden mb-3.5 bg-slate-100 dark:bg-zinc-800">
@@ -603,7 +655,7 @@ export const LandingPage: React.FC = () => {
                       {product.brand || product.unit || product.category}
                       <span className="mt-1 block text-[11px] text-slate-400">Còn {stock}</span>
                     </p>
-                  </Link>
+                  </button>
 
                   {/* Card Button */}
                   <div className="pt-4 mt-2">

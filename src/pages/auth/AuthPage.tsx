@@ -135,13 +135,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
         login(token, user, refreshToken);
 
         if (['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(user.role)) {
-          navigate('/store/dashboard');
+          navigate('/store/dashboard', { replace: true });
         } else if (user.role === 'CUSTOMER') {
-          navigate('/customer/home');
-        } else if (user.role === 'SUPER_ADMIN') {
-          navigate('/admin/dashboard');
+          navigate('/customer/home', { replace: true });
+        } else if (['SUPER_ADMIN', 'ADMIN', 'SYSTEM_ADMIN'].includes(user.role)) {
+          navigate('/admin/dashboard', { replace: true });
         } else {
-          navigate('/');
+          navigate('/', { replace: true });
         }
       }
     } catch (err: any) {
@@ -152,15 +152,6 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
     } finally {
       setLoginLoading(false);
     }
-  };
-
-  const setDemoAccount = (demoId: string) => {
-    setIdentifier(demoId);
-    setLoginPassword('Password123!');
-    setLoginError(null);
-    setSuccessNotice(null);
-    setIdentifierTouched(false);
-    setPasswordTouched(false);
   };
 
   // ==========================================
@@ -242,7 +233,21 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
         payload.address = address.trim() || undefined;
       }
 
-      const res = await api.post('/auth/google', payload);
+      const requestBody = {
+        token: (tokenResponse as any).access_token,
+        ...payload,
+      };
+
+      let res;
+      try {
+        res = await api.post('/auth/google-login', requestBody);
+      } catch (e: any) {
+        if (e.response?.status === 404 || e.response?.status === 400) {
+          res = await api.post('/auth/google', requestBody);
+        } else {
+          throw e;
+        }
+      }
 
       if (res.data?.success) {
         const token = res.data.accessToken || res.data.token || res.data.data?.accessToken;
@@ -258,7 +263,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
                 : 'Đăng nhập Google thành công!')
           );
 
-          if (['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role)) {
+          if (['SUPER_ADMIN', 'ADMIN', 'SYSTEM_ADMIN'].includes(user?.role)) {
+            navigate('/admin/dashboard');
+          } else if (['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role)) {
             navigate('/store/dashboard');
           } else {
             navigate('/customer/home');
@@ -600,7 +607,10 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
                   <button
                     key={demo.id}
                     type="button"
-                    onClick={() => setDemoAccount(demo.id)}
+                    onClick={() => {
+                      setIdentifier(demo.id);
+                      setLoginPassword('Password123!');
+                    }}
                     className={`py-2 px-1 text-xs rounded-md transition-all font-medium text-center truncate cursor-pointer ${
                       isSelected
                         ? 'bg-white dark:bg-slate-900 text-slate-900 dark:text-white shadow-xs font-semibold'

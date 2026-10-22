@@ -23,6 +23,7 @@ import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminSecurityHubPage } from './pages/admin/AdminSecurityHubPage';
 import { QuickSetupPage } from './pages/QuickSetupPage';
 import { ProfilePage } from './pages/profile/ProfilePage';
+import { AdminPayoutsPage, CustomerVerificationPage, DriverShiftPage, StoreFinancePage } from './pages/operations/OperationsPages';
 import { useAuth } from './context/AuthContext';
 import { Atmosphere3DBackground, AtmosphereVariant } from './components/3d/Atmosphere3DBackground';
 
@@ -34,7 +35,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
   const { user, token, isLoading } = useAuth();
   const location = useLocation();
 
-  if (isLoading) {
+  if (isLoading && !user) {
     return (
       <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">
@@ -122,6 +123,7 @@ export const App: React.FC = () => {
             <Route path="/store/products" element={<StoreProductsPage />} />
             <Route path="/store/analytics" element={<StoreAnalyticsPage />} />
             <Route path="/store/wallet" element={<StoreWalletPage />} />
+            <Route path="/store/finance" element={<ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER']}><StoreFinancePage /></ProtectedRoute>} />
           </Route>
 
           {/* Standalone Store Profile Route (No Trạm Điều Hành sidebar) */}
@@ -152,6 +154,23 @@ export const App: React.FC = () => {
             }
           />
           <Route
+            path="/customer/verification"
+            element={
+              <ProtectedRoute allowedRoles={['CUSTOMER']}>
+                <CustomerVerificationPage />
+              </ProtectedRoute>
+            }
+          />
+
+          <Route
+            path="/driver/shifts"
+            element={
+              <ProtectedRoute allowedRoles={['STAFF_DELIVERY']}>
+                <DriverShiftPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
             path="/customer/profile"
             element={
               <ProtectedRoute allowedRoles={['CUSTOMER']}>
@@ -174,6 +193,14 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
                 <AdminSecurityHubPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/admin/payouts"
+            element={
+              <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+                <AdminPayoutsPage />
               </ProtectedRoute>
             }
           />

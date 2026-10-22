@@ -881,7 +881,7 @@ export const StoreDashboard: React.FC = () => {
                           </div>
                           <div className="text-[10px] font-mono text-zinc-400 flex items-center gap-1 mt-0.5">
                             <Phone className="w-2.5 h-2.5" />
-                            {order.customerPhone || '—'}
+                            {order.customerPhone || (order as any).customer?.phoneNumber || '—'}
                           </div>
                         </td>
 

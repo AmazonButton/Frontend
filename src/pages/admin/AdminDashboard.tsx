@@ -569,8 +569,12 @@ export const AdminDashboard: React.FC = () => {
       }
       if (unassignedRes.data.success) setUnassignedDevices(unassignedRes.data.data || []);
       if (storesRes.data.success) setAllStores(storesRes.data.data || []);
-      if (usersRes.data?.success && usersRes.data.data.length > 0) {
-        setUsersList(usersRes.data.data);
+      if (usersRes.data?.success && Array.isArray(usersRes.data.data)) {
+        const mapped = usersRes.data.data.map((u: any) => ({
+          ...u,
+          isActive: u.isActive !== undefined ? Boolean(u.isActive) : u.status === 'ACTIVE',
+        }));
+        setUsersList(mapped);
       }
       if (secRes?.data?.success && Array.isArray(secRes.data.data)) {
         setSecurityIncidents(secRes.data.data);
@@ -696,11 +700,23 @@ export const AdminDashboard: React.FC = () => {
   // Toggle user status
   const handleToggleUserStatus = async (userId: string) => {
     try {
-      await api.post(`/admin/users/${userId}/toggle-status`).catch(() => {});
+      const res = await api.post(`/admin/users/${userId}/toggle-status`);
+      const nextActive =
+        res.data?.data?.isActive !== undefined
+          ? res.data.data.isActive
+          : res.data?.data?.status === 'ACTIVE';
+
       setUsersList((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, isActive: !u.isActive } : u))
+        prev.map((u) =>
+          u.id === userId
+            ? { ...u, isActive: nextActive, status: nextActive ? 'ACTIVE' : 'INACTIVE' }
+            : u
+        )
       );
-    } catch (_) {}
+      toast.success(res.data?.message || 'Đã cập nhật trạng thái tài khoản');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không thể cập nhật trạng thái');
+    }
   };
 
   // Change user role
@@ -1452,20 +1468,20 @@ export const AdminDashboard: React.FC = () => {
                     </td>
                     <td className="py-2 px-3">
                       <span className="inline-flex items-center gap-1.5 text-xs font-medium">
-                        <span className={`w-1.5 h-1.5 rounded-full ${u.isActive ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                        <span className="text-zinc-700 dark:text-zinc-300">{u.isActive ? 'Hoạt động' : 'Đã khóa'}</span>
+                        <span className={`w-1.5 h-1.5 rounded-full ${(u.isActive ?? (u.status === 'ACTIVE')) ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                        <span className="text-zinc-700 dark:text-zinc-300">{(u.isActive ?? (u.status === 'ACTIVE')) ? 'Hoạt động' : 'Đã khóa'}</span>
                       </span>
                     </td>
                     <td className="py-2 px-3 text-right">
                       <button
                         onClick={() => handleToggleUserStatus(u.id)}
                         className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-all cursor-pointer active:scale-[0.97] ${
-                          u.isActive
+                          (u.isActive ?? (u.status === 'ACTIVE'))
                             ? 'border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-rose-950/40'
                             : 'border-[#0E6BA8] bg-[#0E6BA8] text-white hover:bg-[#0B5586] shadow-sm'
                         }`}
                       >
-                        {u.isActive ? 'Khóa TK' : 'Mở Khóa'}
+                        {(u.isActive ?? (u.status === 'ACTIVE')) ? 'Khóa TK' : 'Mở Khóa'}
                       </button>
                     </td>
                   </motion.tr>
