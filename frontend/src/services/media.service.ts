@@ -41,7 +41,7 @@ export const mediaService = {
 
     const res = await api.post('/media/upload', formData, {
       headers: {
-        'Content-Type': 'multipart/form-data',
+        'Content-Type': undefined,
       },
     });
     return res.data;
@@ -59,7 +59,7 @@ export const mediaService = {
 
     const res = await api.post('/media/upload-pod', formData, {
       headers: {
-        'Content-Type': 'multipart/form-data',
+        'Content-Type': undefined,
       },
     });
     return res.data;

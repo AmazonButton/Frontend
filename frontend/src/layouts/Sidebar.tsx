@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import ReactDOM from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, LayoutGroup, AnimatePresence } from 'framer-motion';
-import { ShoppingBag, Cpu, Package, BarChart3, ShieldCheck, Layers, Store, Menu, Wallet, User as UserIcon } from 'lucide-react';
+import { ShoppingBag, Cpu, Package, BarChart3, ShieldCheck, Layers, Store, Menu, Wallet, Landmark, User as UserIcon } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSidebar } from '../context/SidebarContext';
 
@@ -44,6 +44,11 @@ export const Sidebar: React.FC = () => {
       label: 'Ví & Rút Tiền',
       icon: Wallet,
     },
+    ...(user?.role === 'STORE_OWNER' || user?.role === 'STORE_MANAGER' ? [{
+      to: '/store/finance',
+      label: 'Gói & Ngân hàng',
+      icon: Landmark,
+    }] : []),
   ];
 
   const isLinkActive = (path: string) => {

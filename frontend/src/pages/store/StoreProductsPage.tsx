@@ -2,7 +2,9 @@ import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { api, productsService } from '../../services';
+import { api, productsService, mediaService } from '../../services';
+import { useAuth } from '../../context/AuthContext';
+import { getSocket, subscribeToStore } from '../../services/socket';
 import { Product } from '../../types';
 import {
   Package,
@@ -42,6 +44,7 @@ const tableRowVariants: Variants = {
 };
 
 export const StoreProductsPage: React.FC = () => {
+  const { user } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
   const [searchQuery, setSearchQuery] = useState('');
@@ -57,6 +60,7 @@ export const StoreProductsPage: React.FC = () => {
   const [price, setPrice] = useState('68000');
   const [stock, setStock] = useState('100');
   const [imageUrl, setImageUrl] = useState('');
+  const [imageUploading, setImageUploading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -84,11 +88,29 @@ export const StoreProductsPage: React.FC = () => {
   const fetchProducts = async () => {
     try {
       const res = await api.get('/products');
-      if (res.data.success) {
-        setProducts(res.data.data);
+      if (res.data?.success && Array.isArray(res.data?.data)) {
+        setProducts(
+          res.data.data.map((p: any) => ({
+            ...p,
+            id: String(p.id || p.productId),
+            name: p.name || p.productName || 'Sản phẩm',
+            sku: p.sku || p.productCode || '—',
+            brand: p.brand || 'Khác',
+            category: p.category?.categoryName || (typeof p.category === 'string' ? p.category : 'Nhu yếu phẩm'),
+            unit: p.unit || 'Đơn vị',
+            price: Number(p.price || p.basePrice || 0),
+            stock: Number(p.stock !== undefined ? p.stock : (p.inventory?.quantityOnHand ?? 0)),
+            reservedStock: Number(p.reservedStock ?? p.inventory?.reservedQuantity ?? 0),
+            minStockAlert: Number(p.minStockAlert ?? p.inventory?.minStockAlert ?? 5),
+            imageUrl: p.imageUrl || p.thumbnailUrl || (p.images?.[0]?.imageUrl || ''),
+          }))
+        );
+      } else {
+        setProducts([]);
       }
     } catch (e) {
       console.error('Failed to fetch store products:', e);
+      setProducts([]);
     } finally {
       setLoading(false);
     }
@@ -96,63 +118,70 @@ export const StoreProductsPage: React.FC = () => {
 
   useEffect(() => {
     fetchProducts();
-  }, []);
 
-  // Xử lý đọc file ảnh tải lên từ máy tính (convert sang Base64 Data URL)
+    if (user?.storeId) {
+      subscribeToStore(user.storeId);
+    }
+
+    const socket = getSocket();
+    const handleRefresh = () => {
+      fetchProducts();
+    };
+
+    socket.on('PRODUCT_CREATED', handleRefresh);
+    socket.on('PRODUCT_UPDATED', handleRefresh);
+    socket.on('PRODUCT_DELETED', handleRefresh);
+    socket.on('PRODUCT_STOCK_CHANGED', handleRefresh);
+    socket.on('ORDER_CREATED', handleRefresh);
+
+    return () => {
+      socket.off('PRODUCT_CREATED', handleRefresh);
+      socket.off('PRODUCT_UPDATED', handleRefresh);
+      socket.off('PRODUCT_DELETED', handleRefresh);
+      socket.off('PRODUCT_STOCK_CHANGED', handleRefresh);
+      socket.off('ORDER_CREATED', handleRefresh);
+    };
+  }, [user?.storeId]);
+
+  // Xử lý upload ảnh sản phẩm lên Cloudinary
   const handleImageFileChange = (e: React.ChangeEvent<HTMLInputElement>, isEdit = false) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
-    if (!file.type.startsWith('image/')) {
-      alert('Vui lòng chọn file hình ảnh (PNG, JPG, WebP, SVG...)');
+    if (!file.type.startsWith('image/') && !['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/svg+xml'].includes(file.type)) {
+      alert('Vui lòng chọn file hình ảnh (PNG, JPG, WebP, SVG, GIF...)');
       return;
     }
 
-    if (file.size > 15 * 1024 * 1024) {
-      alert('Dung lượng ảnh tối đa là 15MB. Vui lòng chọn ảnh nhỏ hơn.');
+    if (file.size > 5 * 1024 * 1024) {
+      alert('Dung lượng ảnh tối đa là 5MB. Vui lòng chọn ảnh nhỏ hơn.');
       return;
     }
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const rawData = reader.result as string;
-      const img = new Image();
-      img.onload = () => {
-        const maxDimension = 1200;
-        let { width, height } = img;
-        if (width > maxDimension || height > maxDimension) {
-          if (width > height) {
-            height = Math.round((height * maxDimension) / width);
-            width = maxDimension;
-          } else {
-            width = Math.round((width * maxDimension) / height);
-            height = maxDimension;
-          }
-        }
-        const canvas = document.createElement('canvas');
-        canvas.width = width;
-        canvas.height = height;
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.drawImage(img, 0, 0, width, height);
-          const compressed = canvas.toDataURL('image/jpeg', 0.85);
+    // Tải ảnh trực tiếp lên Cloudinary qua API /media/upload của Backend
+    setImageUploading(true);
+    mediaService.uploadImage(file)
+      .then((res: any) => {
+        const uploadedUrl =
+          res?.data?.secureUrl ||
+          res?.data?.url ||
+          res?.data?.data?.secureUrl ||
+          res?.data?.data?.url ||
+          res?.secureUrl ||
+          res?.url;
+        if (uploadedUrl) {
           if (isEdit) {
-            setEditImageUrl(compressed);
+            setEditImageUrl(uploadedUrl);
           } else {
-            setImageUrl(compressed);
+            setImageUrl(uploadedUrl);
           }
-          return;
         }
-        if (isEdit) setEditImageUrl(rawData);
-        else setImageUrl(rawData);
-      };
-      img.onerror = () => {
-        if (isEdit) setEditImageUrl(rawData);
-        else setImageUrl(rawData);
-      };
-      img.src = rawData;
-    };
-    reader.readAsDataURL(file);
+      })
+      .catch((error: any) => {
+        const message = error.response?.data?.message || 'Tải ảnh thất bại. Vui lòng thử lại.';
+        alert(Array.isArray(message) ? message.join(', ') : message);
+      })
+      .finally(() => setImageUploading(false));
   };
 
   const resetAddForm = () => {
@@ -169,6 +198,14 @@ export const StoreProductsPage: React.FC = () => {
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (imageUploading) {
+      alert('Image is still uploading. Please wait before saving the product.');
+      return;
+    }
+    if (imageUrl.startsWith('data:')) {
+      alert('Image upload did not complete. Please upload the image again before saving.');
+      return;
+    }
     setSubmitLoading(true);
 
     try {
@@ -210,6 +247,14 @@ export const StoreProductsPage: React.FC = () => {
   const handleUpdateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingProduct) return;
+    if (imageUploading) {
+      alert('Image is still uploading. Please wait before saving the product.');
+      return;
+    }
+    if (editImageUrl.startsWith('data:')) {
+      alert('Image upload did not complete. Please upload the image again before saving.');
+      return;
+    }
     setEditLoading(true);
 
     try {
@@ -220,7 +265,7 @@ export const StoreProductsPage: React.FC = () => {
         unit: editUnit,
         price: parseFloat(editPrice),
         stock: parseInt(editStock, 10),
-        imageUrl: editImageUrl ? editImageUrl.trim() : null,
+        imageUrl: editImageUrl?.trim() || undefined,
       });
 
       if (res.data.success) {
@@ -294,22 +339,28 @@ export const StoreProductsPage: React.FC = () => {
   };
 
   // Metrics summary
-  const totalSkus = products.length;
-  const totalStockCount = products.reduce((acc, p) => acc + p.stock, 0);
-  const totalReserved = products.reduce((acc, p) => acc + p.reservedStock, 0);
-  const lowStockProducts = products.filter((p) => p.stock <= p.minStockAlert);
+  const totalSkus = (products || []).length;
+  const totalStockCount = (products || []).reduce((acc, p) => acc + (Number(p.stock) || 0), 0);
+  const totalReserved = (products || []).reduce((acc, p) => acc + (Number(p.reservedStock) || 0), 0);
+  const lowStockProducts = (products || []).filter((p) => (Number(p.stock) || 0) <= (Number(p.minStockAlert) || 5));
 
   // Filtered products
   const filteredProducts = useMemo(() => {
-    return products.filter((prod) => {
-      const matchesCategory = categoryFilter === 'ALL' || prod.category === categoryFilter;
+    const list = Array.isArray(products) ? products : [];
+    return list.filter((prod) => {
+      const cat = prod.category || 'Nhu yếu phẩm';
+      const matchesCategory = categoryFilter === 'ALL' || cat === categoryFilter;
       const q = searchQuery.toLowerCase().trim();
+      if (!q) return matchesCategory;
+      const pName = (prod.name || '').toLowerCase();
+      const pSku = (prod.sku || '').toLowerCase();
+      const pBrand = (prod.brand || '').toLowerCase();
+      const pCat = cat.toLowerCase();
       const matchesSearch =
-        !q ||
-        prod.name.toLowerCase().includes(q) ||
-        prod.sku.toLowerCase().includes(q) ||
-        prod.brand.toLowerCase().includes(q) ||
-        prod.category.toLowerCase().includes(q);
+        pName.includes(q) ||
+        pSku.includes(q) ||
+        pBrand.includes(q) ||
+        pCat.includes(q);
       return matchesCategory && matchesSearch;
     });
   }, [products, categoryFilter, searchQuery]);
@@ -711,10 +762,11 @@ export const StoreProductsPage: React.FC = () => {
                             type="button"
                             whileTap={{ scale: 0.94 }}
                             onClick={() => handleDeleteProduct(prod.id, prod.name)}
-                            className="p-1.5 rounded-md text-zinc-400 hover:text-red-600 hover:bg-red-50 dark:hover:text-red-400 dark:hover:bg-red-950/50 transition-colors cursor-pointer"
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-zinc-500 hover:bg-red-50 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-red-950/50 dark:hover:text-red-400 transition-colors cursor-pointer"
                             title="Xóa sản phẩm"
                           >
                             <Trash2 className="w-3.5 h-3.5" />
+                            <span className="hidden sm:inline text-[11px] font-medium">Xóa</span>
                           </motion.button>
                         </div>
                       </td>

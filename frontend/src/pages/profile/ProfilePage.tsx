@@ -1455,10 +1455,10 @@ export const ProfilePage: React.FC = () => {
       <LogoutConfirmModal
         isOpen={showLogoutModal && !!user}
         onClose={() => setShowLogoutModal(false)}
-        onConfirm={async () => {
+        onConfirm={() => {
           setShowLogoutModal(false);
-          await logout();
-          navigate('/login');
+          logout();
+          navigate('/login', { replace: true });
         }}
         user={user}
       />

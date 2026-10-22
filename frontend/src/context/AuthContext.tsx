@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User } from '../types';
 import { api } from '../services/api';
+import { updateSocketAuth } from '../services/socket';
 
 interface AuthContextType {
   user: User | null;
@@ -9,7 +10,7 @@ interface AuthContextType {
   isLoading: boolean;
   isAuthenticated: boolean;
   login: (newToken: string, userData: User, newRefreshToken?: string) => void;
-  logout: () => Promise<void>;
+  logout: () => void | Promise<void>;
   refreshUser: () => Promise<void>;
 }
 
@@ -28,28 +29,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return null;
   });
 
-  const [token, setToken] = useState<string | null>(() =>
-    localStorage.getItem('smart_order_token')
-  );
+  const [token, setToken] = useState<string | null>(() => {
+    const savedToken = localStorage.getItem('smart_order_token');
+    if (savedToken) {
+      api.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`;
+    }
+    return savedToken;
+  });
+
   const [refreshToken, setRefreshToken] = useState<string | null>(() =>
     localStorage.getItem('smart_order_refresh_token')
   );
-  const [isLoading, setIsLoading] = useState(true);
 
-  const logout = useCallback(async () => {
-    try {
-      const activeRefreshToken = localStorage.getItem('smart_order_refresh_token');
-      if (activeRefreshToken) {
-        await api.post('/auth/logout', { refreshToken: activeRefreshToken }).catch(() => {});
-      }
-    } finally {
-      localStorage.removeItem('smart_order_token');
-      localStorage.removeItem('smart_order_refresh_token');
-      localStorage.removeItem('smart_order_user');
-      delete api.defaults.headers.common['Authorization'];
-      setToken(null);
-      setRefreshToken(null);
-      setUser(null);
+  // If user and token already exist in localStorage, do NOT block the UI with a full-screen spinner
+  const [isLoading, setIsLoading] = useState<boolean>(() => {
+    const savedToken = localStorage.getItem('smart_order_token');
+    const savedUser = localStorage.getItem('smart_order_user');
+    return !(savedToken && savedUser);
+  });
+
+  // Instant optimistic logout: clears storage and state immediately, notifies backend in background
+  const logout = useCallback(() => {
+    const activeToken = localStorage.getItem('smart_order_token');
+    const activeRefreshToken = localStorage.getItem('smart_order_refresh_token');
+
+    // 1. Instantly wipe client credentials & state (0ms UI transition)
+    localStorage.removeItem('smart_order_token');
+    localStorage.removeItem('smart_order_refresh_token');
+    localStorage.removeItem('smart_order_user');
+    delete api.defaults.headers.common['Authorization'];
+    setToken(null);
+    setRefreshToken(null);
+    setUser(null);
+    setIsLoading(false);
+    updateSocketAuth(null);
+
+    // 2. Fire-and-forget background revoke to server without blocking UI
+    if (activeRefreshToken || activeToken) {
+      api
+        .post(
+          '/auth/logout',
+          { refreshToken: activeRefreshToken },
+          {
+            headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+          }
+        )
+        .catch(() => {});
     }
   }, []);
 
@@ -82,7 +107,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (e: any) {
       if (e.response?.status === 401) {
-        await logout();
+        logout();
       }
     } finally {
       setIsLoading(false);
@@ -111,6 +136,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     localStorage.setItem('smart_order_user', JSON.stringify(normalizedUser));
     setUser(normalizedUser);
+    setIsLoading(false);
+    updateSocketAuth(newToken);
   };
 
   const isAuthenticated = Boolean(user && token);

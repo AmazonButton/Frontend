@@ -1,13 +1,44 @@
 import axios from 'axios';
 
-export const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000';
-export const API_PREFIX = (import.meta as any).env?.VITE_API_PREFIX || '/api';
+export const resolveApiUrl = (): string => {
+  if (typeof window !== 'undefined') {
+    try {
+      const urlParams = new URLSearchParams(window.location.search);
+      const queryApi = urlParams.get('api') || urlParams.get('apiUrl') || urlParams.get('backend');
+      if (queryApi) {
+        const clean = queryApi.trim().replace(/\/+$/, '');
+        localStorage.setItem('smart_order_api_url', clean);
+        return clean;
+      }
+      const stored = localStorage.getItem('smart_order_api_url');
+      if (stored && stored.includes('produces-accurately-received-recovered')) {
+        localStorage.removeItem('smart_order_api_url');
+      } else if (stored) {
+        return stored.trim().replace(/\/+$/, '');
+      }
+
+      // Automatically default to live backend HTTPS tunnel when on Vercel
+      if (window.location.hostname.includes('vercel.app')) {
+        return 'https://dense-pgp-row-polls.trycloudflare.com';
+      }
+    } catch {
+      // Ignore localStorage read errors in restricted contexts
+    }
+  }
+
+  const envUrl = (import.meta as any).env?.VITE_API_URL;
+  if (envUrl && typeof envUrl === 'string' && envUrl.startsWith('http')) {
+    return envUrl.trim().replace(/\/+$/, '');
+  }
+
+  return 'http://localhost:5000';
+};
+
+export const API_URL = resolveApiUrl();
+export const API_PREFIX = (import.meta as any).env?.VITE_API_PREFIX || '/api/v1';
 
 export const api = axios.create({
   baseURL: `${API_URL}${API_PREFIX}`,
-  headers: {
-    'Content-Type': 'application/json',
-  },
 });
 
 /**
@@ -80,8 +111,21 @@ export async function getOrRefreshValidToken(): Promise<string | null> {
   return null;
 }
 
-// Request interceptor to attach JWT Access Token proactively
+// Request interceptor to attach JWT Access Token proactively & ensure proper FormData handling
 api.interceptors.request.use(async (config) => {
+  // If request data is FormData, remove Content-Type header so the browser automatically sets multipart/form-data with the correct boundary
+  if (config.data instanceof FormData) {
+    if (config.headers) {
+      if (typeof (config.headers as any).delete === 'function') {
+        (config.headers as any).delete('Content-Type');
+        (config.headers as any).delete('content-type');
+      } else {
+        delete (config.headers as any)['Content-Type'];
+        delete (config.headers as any)['content-type'];
+      }
+    }
+  }
+
   const isAuthEndpoint =
     config.url?.includes('/auth/login') ||
     config.url?.includes('/auth/register') ||
@@ -129,6 +173,19 @@ api.interceptors.response.use(
       originalRequest?.url?.includes('/auth/login') ||
       originalRequest?.url?.includes('/auth/register') ||
       originalRequest?.url?.includes('/auth/refresh');
+
+    // Seamless Prefix Fallback: If 404 occurs on /api/v1, fallback to /api (or vice-versa)
+    if (error.response?.status === 404 && !originalRequest._prefixRetried && originalRequest.url) {
+      originalRequest._prefixRetried = true;
+      const currentBase = originalRequest.baseURL || `${API_URL}${API_PREFIX}`;
+      if (currentBase.includes('/api/v1')) {
+        originalRequest.baseURL = currentBase.replace('/api/v1', '/api');
+        return axios(originalRequest);
+      } else if (currentBase.endsWith('/api')) {
+        originalRequest.baseURL = currentBase.replace(/\/api$/, '/api/v1');
+        return axios(originalRequest);
+      }
+    }
 
     if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
       const refreshToken = localStorage.getItem('smart_order_refresh_token');

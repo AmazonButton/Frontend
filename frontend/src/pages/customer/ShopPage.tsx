@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, CheckCircle2, Minus, PackageCheck, Plus, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
 import { api } from '../../services/api';
+import { getSocket } from '../../services/socket';
+import { toast } from '../../context/ToastContext';
 
 const deliveryHeroBackground = '/assets/products/delivery-hero-pastel.png';
 
@@ -64,15 +66,40 @@ export const ShopPage: React.FC = () => {
     if (status === 'success') setNotice('PayOS đã chuyển bạn trở lại. Trạng thái thanh toán đang được xác nhận từ PayOS.');
     if (status === 'cancelled') setNotice('Bạn đã hủy thanh toán PayOS. Bạn có thể thử lại hoặc chọn thanh toán khi nhận hàng.');
   }, [location.search]);
-  useEffect(() => {
-    let active = true;
-    setLoading(true);
+  const fetchCatalog = useCallback(() => {
     api.get('/products/storefront/catalog', { params: { search: search.trim() || undefined } })
-      .then(({ data }) => { if (active) setProducts(data.data || []); })
-      .catch(() => { if (active) setError('Không tải được sản phẩm. Vui lòng thử lại sau.'); })
-      .finally(() => { if (active) setLoading(false); });
-    return () => { active = false; };
+      .then(({ data }) => { setProducts(data.data || []); })
+      .catch(() => { setError('Không tải được sản phẩm. Vui lòng thử lại sau.'); })
+      .finally(() => { setLoading(false); });
   }, [search]);
+
+  useEffect(() => {
+    setLoading(true);
+    fetchCatalog();
+  }, [fetchCatalog]);
+
+  useEffect(() => {
+    const socket = getSocket();
+    const handleProductChange = (payload: any) => {
+      fetchCatalog();
+      const pName = payload?.product?.name || payload?.product?.productName;
+      if (pName) {
+        toast.info(`Cửa hàng vừa cập nhật: ${pName}!`, { title: 'Hàng mới trên kệ 🛍️', duration: 4000 });
+      }
+    };
+    socket.on('PRODUCT_CREATED', handleProductChange);
+    socket.on('PRODUCT_UPDATED', handleProductChange);
+    socket.on('PRODUCT_DELETED', handleProductChange);
+    socket.on('PRODUCT_STOCK_CHANGED', handleProductChange);
+    socket.on('CATALOG_UPDATED', handleProductChange);
+    return () => {
+      socket.off('PRODUCT_CREATED', handleProductChange);
+      socket.off('PRODUCT_UPDATED', handleProductChange);
+      socket.off('PRODUCT_DELETED', handleProductChange);
+      socket.off('PRODUCT_STOCK_CHANGED', handleProductChange);
+      socket.off('CATALOG_UPDATED', handleProductChange);
+    };
+  }, [fetchCatalog]);
 
   const categories = useMemo(() => ['Tất cả', ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))], [products]);
   const shownProducts = products.filter((p) => category === 'Tất cả' || p.category === category);
@@ -99,6 +126,13 @@ export const ShopPage: React.FC = () => {
   const checkout = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!cart.length) return;
+    if (cart.some((line) => !/^\d+$/.test(String(line.product.id)) || !/^\d+$/.test(String(line.product.storeId)))) {
+      setCart([]);
+      setCheckoutOpen(false);
+      setCartOpen(false);
+      setNotice('Giỏ hàng có sản phẩm cũ không còn tồn tại trên hệ thống. Giỏ hàng đã được làm mới; vui lòng chọn lại sản phẩm thực tế.');
+      return;
+    }
     if (cart.some((line) => line.product.storeId !== cartStore)) { setNotice('Mỗi đơn hàng chỉ gồm sản phẩm của một cửa hàng.'); return; }
     setBusy(true); setNotice('');
     try {

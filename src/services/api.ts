@@ -1,9 +1,10 @@
 import axios from 'axios';
 
 export const API_URL = (import.meta as any).env?.VITE_API_URL || 'http://localhost:5000';
+export const API_PREFIX = (import.meta as any).env?.VITE_API_PREFIX || '/api/v1';
 
 export const api = axios.create({
-  baseURL: `${API_URL}/api`,
+  baseURL: `${API_URL}${API_PREFIX}`,
   headers: {
     'Content-Type': 'application/json',
   },
@@ -75,7 +76,7 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const res = await axios.post(`${API_URL}/api/auth/refresh`, {
+        const res = await axios.post(`${API_URL}${API_PREFIX}/auth/refresh`, {
           refreshToken,
         });
 
