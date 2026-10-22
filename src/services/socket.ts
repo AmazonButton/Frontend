@@ -2,19 +2,28 @@ import { io, Socket } from 'socket.io-client';
 import { API_URL, resolveApiUrl } from './api';
 
 let socket: Socket | null = null;
-let subscribedStoreId: string | null = null;
-let subscribedCustomerId: string | null = null;
+let subscribedStoreId: string | null = typeof window !== 'undefined' ? localStorage.getItem('smart_order_sub_store') : null;
+let subscribedCustomerId: string | null = typeof window !== 'undefined' ? localStorage.getItem('smart_order_sub_customer') : null;
+
+const getStoredToken = () => {
+  return typeof window !== 'undefined' ? localStorage.getItem('smart_order_token') : null;
+};
 
 export function getSocket(): Socket {
+  const targetUrl = typeof resolveApiUrl === 'function' ? resolveApiUrl() : API_URL;
+  const token = getStoredToken();
+
   if (!socket) {
-    const targetUrl = typeof resolveApiUrl === 'function' ? resolveApiUrl() : API_URL;
     socket = io(targetUrl, {
       autoConnect: true,
-      transports: ['websocket', 'polling'],
       auth: (cb) => {
-        const token = typeof window !== 'undefined' ? localStorage.getItem('smart_order_token') : null;
-        cb({ token });
+        const t = getStoredToken();
+        cb({ token: t ? `Bearer ${t}` : undefined });
       },
+      query: {
+        token: token ? `Bearer ${token}` : undefined,
+      },
+      transports: ['websocket', 'polling'],
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
@@ -24,18 +33,20 @@ export function getSocket(): Socket {
     let lastAuthRole: string | null = null;
 
     const resubscribe = () => {
-      if (subscribedStoreId) {
-        socket?.emit('subscribe:store', subscribedStoreId);
+      const storeId = subscribedStoreId || (typeof window !== 'undefined' ? localStorage.getItem('smart_order_sub_store') : null);
+      if (storeId) {
+        socket?.emit('subscribe:store', storeId);
       }
-      if (subscribedCustomerId) {
-        socket?.emit('subscribe:customer', subscribedCustomerId);
+      const custId = subscribedCustomerId || (typeof window !== 'undefined' ? localStorage.getItem('smart_order_sub_customer') : null);
+      if (custId) {
+        socket?.emit('subscribe:customer', custId);
       }
     };
 
     socket.on('connect', () => {
-      const token = typeof window !== 'undefined' ? localStorage.getItem('smart_order_token') : null;
-      if (token) {
-        socket?.emit('authenticate', { token });
+      const activeToken = getStoredToken();
+      if (activeToken) {
+        socket?.emit('authenticate', { token: activeToken });
       }
       resubscribe();
     });
@@ -73,15 +84,20 @@ export function getSocket(): Socket {
         }
       });
     }
+  } else {
+    // If token exists and socket auth is missing, update auth
+    if (token && socket.auth && (socket.auth as any).token !== `Bearer ${token}`) {
+      socket.auth = { token: `Bearer ${token}` };
+    }
   }
   return socket;
 }
 
 export function updateSocketAuth(token?: string | null) {
-  const currentToken = token !== undefined ? token : (typeof window !== 'undefined' ? localStorage.getItem('smart_order_token') : null);
+  const currentToken = token !== undefined ? token : getStoredToken();
   const s = getSocket();
   if (s) {
-    (s as any).auth = { token: currentToken };
+    (s as any).auth = { token: currentToken ? `Bearer ${currentToken}` : undefined };
     if (s.connected) {
       if (currentToken) {
         s.emit('authenticate', { token: currentToken });
@@ -94,16 +110,36 @@ export function updateSocketAuth(token?: string | null) {
 
 export function subscribeToStore(storeId: string) {
   subscribedStoreId = storeId;
+  if (typeof window !== 'undefined' && storeId) {
+    localStorage.setItem('smart_order_sub_store', storeId);
+  }
   const s = getSocket();
+  const token = getStoredToken();
+  if (token && s) {
+    s.auth = { token: `Bearer ${token}` };
+  }
   if (storeId && s.connected) {
     s.emit('subscribe:store', storeId);
+  }
+  if (s && !s.connected) {
+    s.connect();
   }
 }
 
 export function subscribeToCustomer(customerId: string) {
   subscribedCustomerId = customerId;
+  if (typeof window !== 'undefined' && customerId) {
+    localStorage.setItem('smart_order_sub_customer', customerId);
+  }
   const s = getSocket();
+  const token = getStoredToken();
+  if (token && s) {
+    s.auth = { token: `Bearer ${token}` };
+  }
   if (customerId && s.connected) {
     s.emit('subscribe:customer', customerId);
+  }
+  if (s && !s.connected) {
+    s.connect();
   }
 }

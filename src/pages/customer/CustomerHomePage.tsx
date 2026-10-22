@@ -465,7 +465,13 @@ export const CustomerHomePage: React.FC = () => {
     socket.on('device:claimed', handleDeviceClaimed);
     socket.on('device:wifi_changed', handleDeviceClaimed);
 
+    // Continuous 4s background polling ensures real-time parity even if WebSocket drops
+    const pollInterval = setInterval(() => {
+      fetchData();
+    }, 4000);
+
     return () => {
+      clearInterval(pollInterval);
       window.removeEventListener('sob_device_claimed_success', handleDeviceClaimed);
       socket.off('ORDER_CREATED', handleOrderCreated);
       socket.off('ORDER_STATUS_CHANGED', handleOrderUpdated);
@@ -1149,7 +1155,7 @@ export const CustomerHomePage: React.FC = () => {
               const quantity = cfg?.defaultQuantity || 1;
               const unitPrice = product?.price ?? 0;
               const totalPrice = unitPrice * quantity;
-              const priceStr = product ? `${totalPrice.toLocaleString('vi-VN')} ₫` : null;
+              const priceStr = product ? `${Number(totalPrice || 0).toLocaleString('vi-VN')} ₫` : null;
 
               const productDesc = product
                 ? `${product.name}${product.unit ? ` (${product.unit})` : ''}${quantity > 1 ? ` × ${quantity}` : ''}`
@@ -1234,9 +1240,9 @@ export const CustomerHomePage: React.FC = () => {
                         </span>
                       </div>
                       <div className="mt-1 space-y-0.5">
-                        {order.items.map((it, itemIdx) => (
-                          <div key={it.id || it.productId || itemIdx} className="text-xs text-slate-600">
-                            <span>{it.quantity}× {it.productName}</span>
+                        {(Array.isArray(order.items) ? order.items : []).map((it, itemIdx) => (
+                          <div key={it.id || it.productId || (it as any).orderItemId || itemIdx} className="text-xs text-slate-600">
+                            <span>{it.quantity}× {it.productName || (it as any).name}</span>
                           </div>
                         ))}
                       </div>
@@ -1248,7 +1254,7 @@ export const CustomerHomePage: React.FC = () => {
                     </div>
                     <div className="text-right shrink-0 flex flex-col items-end justify-center">
                       <span className="text-sm font-semibold text-slate-900 tabular-nums">
-                        {order.totalAmount.toLocaleString('vi-VN')} ₫
+                        {Number(order.totalAmount || (order as any).total_amount || 0).toLocaleString('vi-VN')} ₫
                       </span>
                       {isPending ? (
                         <div className="flex items-center gap-1.5 mt-2">
