@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User } from '../types';
 import { api } from '../services/api';
+import { updateSocketAuth } from '../services/socket';
 
 interface AuthContextType {
   user: User | null;
@@ -49,6 +50,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setToken(null);
       setRefreshToken(null);
       setUser(null);
+      updateSocketAuth(null);
     }
   }, []);
 
@@ -100,6 +102,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     localStorage.setItem('smart_order_user', JSON.stringify(normalizedUser));
     setUser(normalizedUser);
+    updateSocketAuth(newToken);
   };
 
   const isAuthenticated = Boolean(user && token);

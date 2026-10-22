@@ -31,6 +31,10 @@ export const resolveApiUrl = (): string => {
     return envUrl.trim().replace(/\/+$/, '');
   }
 
+  if (typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
+    return 'https://dense-pgp-row-polls.trycloudflare.com';
+  }
+
   return 'http://localhost:5000';
 };
 
@@ -113,6 +117,11 @@ export async function getOrRefreshValidToken(): Promise<string | null> {
 
 // Request interceptor to attach JWT Access Token proactively & ensure proper FormData handling
 api.interceptors.request.use(async (config) => {
+  const currentBase = resolveApiUrl();
+  if (config.baseURL && !config.baseURL.startsWith(currentBase)) {
+    config.baseURL = `${currentBase}${API_PREFIX}`;
+  }
+
   // If request data is FormData, remove Content-Type header so the browser automatically sets multipart/form-data with the correct boundary
   if (config.data instanceof FormData) {
     if (config.headers) {

@@ -91,6 +91,8 @@ export const StoreDashboard: React.FC = () => {
 
     if (user?.storeId) {
       subscribeToStore(user.storeId);
+    } else {
+      subscribeToStore('1');
     }
 
     const socket = getSocket();
@@ -101,12 +103,28 @@ export const StoreDashboard: React.FC = () => {
         type: 'CREATE',
         orderNumber: payload.order?.orderNumber,
         customerName: payload.customerName || payload.order?.customerName,
-        productName: payload.productName,
-        quantity: payload.quantity,
+        productName: payload.productName || payload.order?.items?.[0]?.productName,
+        quantity: payload.quantity || payload.order?.items?.[0]?.quantity || 1,
         totalAmount: payload.order?.totalAmount,
-        deliveryAddress: payload.order?.deliveryAddress,
+        deliveryAddress: payload.order?.deliveryAddress || payload.order?.shippingAddress,
         orderId: payload.order?.id,
       });
+
+      // Instantly insert into local state without waiting for F5 or network roundtrip
+      if (payload.order) {
+        setOrders((prev) => {
+          const exists = prev.some(
+            (o) => o.id === payload.order.id || o.orderNumber === payload.order.orderNumber
+          );
+          if (exists) return prev;
+          const safeOrder = {
+            ...payload.order,
+            items: Array.isArray(payload.order.items) ? payload.order.items : [],
+          };
+          return [safeOrder, ...prev];
+        });
+      }
+
       fetchOrders();
     };
 
@@ -117,13 +135,23 @@ export const StoreDashboard: React.FC = () => {
         orderNumber: payload.order?.orderNumber,
         reason: payload.reason || 'Khách bấm nút hủy đơn trên ESP32',
       });
+      if (payload.order?.id) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === payload.order.id ? { ...o, status: 'CANCELLED' as any } : o))
+        );
+      }
       fetchOrders();
       setTimeout(() => {
         setNewOrderAlert(null);
       }, 8000);
     };
 
-    const handleOrderUpdated = () => {
+    const handleOrderUpdated = (payload?: any) => {
+      if (payload?.order?.id) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === payload.order.id ? { ...o, ...payload.order } : o))
+        );
+      }
       fetchOrders();
     };
 
@@ -131,7 +159,13 @@ export const StoreDashboard: React.FC = () => {
     socket.on('ORDER_STATUS_CHANGED', handleOrderUpdated);
     socket.on('ORDER_CANCELLED', handleOrderCancelled);
 
+    // Continuous 3.5s background polling ensures real-time parity even if WebSocket drops
+    const pollTimer = setInterval(() => {
+      fetchOrders();
+    }, 3500);
+
     return () => {
+      clearInterval(pollTimer);
       socket.off('ORDER_CREATED', handleOrderCreated);
       socket.off('ORDER_STATUS_CHANGED', handleOrderUpdated);
       socket.off('ORDER_CANCELLED', handleOrderCancelled);
@@ -262,7 +296,7 @@ export const StoreDashboard: React.FC = () => {
     .reduce((sum, o) => sum + o.totalAmount, 0);
 
   const pendingCount = orders.filter((o) => o.status === 'PENDING').length;
-  const inProgressCount = orders.filter((o) => ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY'].includes(o.status)).length;
+  const inProgressCount = orders.filter((o) => ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY', 'SHIPPING', 'READY_FOR_DELIVERY'].includes(o.status)).length;
   const completedCount = orders.filter((o) => o.status === 'COMPLETED' || (o.status as string) === 'DELIVERED').length;
 
   const priorityMap: Record<string, number> = {
@@ -270,6 +304,8 @@ export const StoreDashboard: React.FC = () => {
     CONFIRMED: 2,
     PREPARING: 3,
     OUT_FOR_DELIVERY: 4,
+    SHIPPING: 4,
+    READY_FOR_DELIVERY: 4,
     COMPLETED: 5,
     DELIVERED: 5,
     CANCELLED: 6,
@@ -281,15 +317,16 @@ export const StoreDashboard: React.FC = () => {
       const matchStatus =
         statusFilter === 'ALL' ||
         o.status === statusFilter ||
-        (statusFilter === 'COMPLETED' && (o.status as string) === 'DELIVERED');
+        (statusFilter === 'COMPLETED' && (o.status as string) === 'DELIVERED') ||
+        (statusFilter === 'OUT_FOR_DELIVERY' && ['SHIPPING', 'READY_FOR_DELIVERY'].includes(o.status as string));
       const q = searchQuery.toLowerCase().trim();
       const matchSearch =
         !q ||
-        o.orderNumber.toLowerCase().includes(q) ||
-        o.customerName.toLowerCase().includes(q) ||
+        (o.orderNumber && o.orderNumber.toLowerCase().includes(q)) ||
+        (o.customerName && o.customerName.toLowerCase().includes(q)) ||
         (o.customerPhone && o.customerPhone.includes(q)) ||
-        o.deliveryAddress.toLowerCase().includes(q) ||
-        o.items.some((it) => it.productName.toLowerCase().includes(q));
+        (o.deliveryAddress && o.deliveryAddress.toLowerCase().includes(q)) ||
+        (Array.isArray(o.items) && o.items.some((it) => it.productName?.toLowerCase().includes(q)));
       return matchStatus && matchSearch;
     })
     .sort((a, b) => {
@@ -330,6 +367,8 @@ export const StoreDashboard: React.FC = () => {
           </span>
         );
       case 'OUT_FOR_DELIVERY':
+      case 'READY_FOR_DELIVERY':
+      case 'SHIPPING':
         return (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
             <span className="w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0"></span>
@@ -410,7 +449,7 @@ export const StoreDashboard: React.FC = () => {
                   </span>
                   <span className="text-xs font-medium truncate">
                     {newOrderAlert.type === 'CREATE'
-                      ? `${newOrderAlert.customerName} · ${newOrderAlert.quantity}× ${newOrderAlert.productName} · ${newOrderAlert.totalAmount?.toLocaleString()} ₫`
+                      ? `${newOrderAlert.customerName || 'Khách hàng'} · ${newOrderAlert.quantity || 1}× ${newOrderAlert.productName || 'Sản phẩm'} · ${Number(newOrderAlert.totalAmount || 0).toLocaleString()} ₫`
                       : `Đơn #${newOrderAlert.orderNumber} đã hủy qua nút bấm — Đã hoàn kho`}
                   </span>
                 </div>
@@ -576,7 +615,7 @@ export const StoreDashboard: React.FC = () => {
               </div>
               {m.revenue !== undefined ? (
                 <div className="font-mono font-bold text-base sm:text-lg text-zinc-900 dark:text-zinc-100 leading-none">
-                  {m.revenue.toLocaleString()}
+                  {Number(m.revenue || 0).toLocaleString()}
                   <span className="text-xs font-medium text-zinc-400 ml-0.5">₫</span>
                 </div>
               ) : (
@@ -738,8 +777,9 @@ export const StoreDashboard: React.FC = () => {
                   className="divide-y divide-zinc-100 dark:divide-zinc-800/60 text-xs"
                 >
                   {filteredOrders.map((order) => {
-                    const firstItem = order.items[0];
-                    const otherCount = order.items.length - 1;
+                    const items = Array.isArray(order.items) ? order.items : [];
+                    const firstItem = items[0];
+                    const otherCount = Math.max(0, items.length - 1);
                     return (
                       <motion.tr
                         key={order.id}
@@ -800,7 +840,7 @@ export const StoreDashboard: React.FC = () => {
                             )}
                           </div>
                           <div className="text-[10.5px] font-mono font-semibold text-zinc-500 dark:text-zinc-400 mt-0.5">
-                            {order.totalAmount.toLocaleString()} ₫ · COD
+                            {Number(order.totalAmount || (order as any).total_amount || 0).toLocaleString()} ₫ · COD
                           </div>
                         </td>
 
@@ -841,7 +881,7 @@ export const StoreDashboard: React.FC = () => {
                               Xuất Giao
                             </motion.button>
                           )}
-                          {order.status === 'OUT_FOR_DELIVERY' && (
+                          {(order.status === 'OUT_FOR_DELIVERY' || order.status === 'SHIPPING' || order.status === 'READY_FOR_DELIVERY') && (
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
@@ -1155,7 +1195,7 @@ export const StoreDashboard: React.FC = () => {
                         </h4>
                         <div className="text-[12px] text-[#64748B] dark:text-zinc-400 font-normal flex items-center gap-1.5 mt-0.5 flex-wrap">
                           <span className="font-semibold text-[#0F172A] dark:text-white tabular-nums">
-                            {item.price.toLocaleString('vi-VN')} ₫
+                            {Number(item.price || (item as any).unitPrice || 0).toLocaleString('vi-VN')} ₫
                           </span>
                           <span className="text-slate-300 dark:text-zinc-600">·</span>
                           <span>{item.unit}</span>

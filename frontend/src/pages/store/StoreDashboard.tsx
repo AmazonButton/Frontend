@@ -142,6 +142,22 @@ export const StoreDashboard: React.FC = () => {
         deliveryAddress: payload.order?.deliveryAddress || payload.deliveryAddress,
         orderId: payload.order?.id || payload.orderId || payload.id,
       });
+
+      // Instantly insert into local state without waiting for F5
+      if (payload.order) {
+        setOrders((prev) => {
+          const exists = prev.some(
+            (o) => o.id === payload.order.id || o.orderNumber === payload.order.orderNumber
+          );
+          if (exists) return prev;
+          const safeOrder = {
+            ...payload.order,
+            items: Array.isArray(payload.order.items) ? payload.order.items : [],
+          };
+          return [safeOrder, ...prev];
+        });
+      }
+
       fetchOrders();
     };
 
@@ -158,6 +174,11 @@ export const StoreDashboard: React.FC = () => {
         orderNumber,
         reason: payload.reason || payload.cancellationReason || 'Khách hủy qua nút bấm · Đã tự động hoàn kho',
       });
+      if (payload.order?.id) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === payload.order.id ? { ...o, status: 'CANCELLED' as any } : o))
+        );
+      }
       fetchOrders();
 
       if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
@@ -167,9 +188,14 @@ export const StoreDashboard: React.FC = () => {
     };
 
     const handleOrderUpdated = (data?: any) => {
+      const updated = data?.order || data;
+      if (updated && updated.id) {
+        setOrders((prev) =>
+          prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o))
+        );
+      }
       fetchOrders();
 
-      const updated = data?.order || data;
       if (updated && updated.status && updated.status !== 'PENDING') {
         setNewOrderAlert((currentAlert: any) => {
           // A cancellation alert must remain visible for its timer. A status
@@ -198,7 +224,13 @@ export const StoreDashboard: React.FC = () => {
     socket.on('order:updated', handleOrderUpdated);
     socket.on('ORDER_CANCELLED', handleOrderCancelled);
 
+    // Continuous 3.5s background polling ensures real-time parity even if WebSocket drops
+    const pollTimer = setInterval(() => {
+      fetchOrders();
+    }, 3500);
+
     return () => {
+      clearInterval(pollTimer);
       socket.off('ORDER_CREATED', handleOrderCreated);
       socket.off('ORDER_STATUS_CHANGED', handleOrderUpdated);
       socket.off('ORDER_PAYMENT_CHANGED', handleOrderUpdated);
@@ -357,7 +389,7 @@ export const StoreDashboard: React.FC = () => {
     .reduce((sum, o) => sum + o.totalAmount, 0);
 
   const pendingCount = orders.filter((o) => o.status === 'PENDING').length;
-  const inProgressCount = orders.filter((o) => ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY'].includes(o.status)).length;
+  const inProgressCount = orders.filter((o) => ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY', 'SHIPPING', 'READY_FOR_DELIVERY'].includes(o.status)).length;
   const completedCount = orders.filter((o) => o.status === 'COMPLETED' || (o.status as string) === 'DELIVERED').length;
 
   const priorityMap: Record<string, number> = {
@@ -365,6 +397,8 @@ export const StoreDashboard: React.FC = () => {
     CONFIRMED: 2,
     PREPARING: 3,
     OUT_FOR_DELIVERY: 4,
+    SHIPPING: 4,
+    READY_FOR_DELIVERY: 4,
     COMPLETED: 5,
     DELIVERED: 5,
     CANCELLED: 6,
@@ -376,15 +410,16 @@ export const StoreDashboard: React.FC = () => {
       const matchStatus =
         statusFilter === 'ALL' ||
         o.status === statusFilter ||
-        (statusFilter === 'COMPLETED' && (o.status as string) === 'DELIVERED');
+        (statusFilter === 'COMPLETED' && (o.status as string) === 'DELIVERED') ||
+        (statusFilter === 'OUT_FOR_DELIVERY' && ['SHIPPING', 'READY_FOR_DELIVERY'].includes(o.status as string));
       const q = searchQuery.toLowerCase().trim();
       const matchSearch =
         !q ||
-        o.orderNumber.toLowerCase().includes(q) ||
-        o.customerName.toLowerCase().includes(q) ||
+        (o.orderNumber && o.orderNumber.toLowerCase().includes(q)) ||
+        (o.customerName && o.customerName.toLowerCase().includes(q)) ||
         (o.customerPhone && o.customerPhone.includes(q)) ||
-        o.deliveryAddress.toLowerCase().includes(q) ||
-        o.items.some((it) => it.productName.toLowerCase().includes(q));
+        (o.deliveryAddress && o.deliveryAddress.toLowerCase().includes(q)) ||
+        (Array.isArray(o.items) && o.items.some((it) => it.productName?.toLowerCase().includes(q)));
       return matchStatus && matchSearch;
     })
     .sort((a, b) => {
@@ -470,6 +505,8 @@ export const StoreDashboard: React.FC = () => {
           </span>
         );
       case 'OUT_FOR_DELIVERY':
+      case 'READY_FOR_DELIVERY':
+      case 'SHIPPING':
         return (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
             <span className="w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0"></span>
@@ -675,7 +712,7 @@ export const StoreDashboard: React.FC = () => {
               </div>
               {m.revenue !== undefined ? (
                 <div className="font-mono font-bold text-base sm:text-lg text-zinc-900 dark:text-zinc-100 leading-none">
-                  {m.revenue.toLocaleString()}
+                  {Number(m.revenue || 0).toLocaleString()}
                   <span className="text-xs font-medium text-zinc-400 ml-0.5">₫</span>
                 </div>
               ) : (
@@ -838,8 +875,9 @@ export const StoreDashboard: React.FC = () => {
                   className="divide-y divide-zinc-100 dark:divide-zinc-800/60 text-xs"
                 >
                   {paginatedOrders.map((order) => {
-                    const firstItem = order.items[0];
-                    const otherCount = order.items.length - 1;
+                    const items = Array.isArray(order.items) ? order.items : [];
+                    const firstItem = items[0];
+                    const otherCount = Math.max(0, items.length - 1);
                     return (
                       <motion.tr
                         key={order.id}
@@ -911,7 +949,7 @@ export const StoreDashboard: React.FC = () => {
                           </div>
                           <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[10.5px] font-mono font-semibold">
                             <span className="text-zinc-500 dark:text-zinc-400">
-                              {order.totalAmount.toLocaleString()} ₫ ·
+                              {Number(order.totalAmount || (order as any).total_amount || 0).toLocaleString()} ₫ ·
                             </span>
                             {order.paymentStatus === 'REFUND_PENDING' ? (
                               <span className="text-rose-600 dark:text-rose-400">Đã nhận tiền · Chờ hoàn PayOS</span>
@@ -966,7 +1004,7 @@ export const StoreDashboard: React.FC = () => {
                               Xuất Giao
                             </motion.button>
                           )}
-                          {order.status === 'OUT_FOR_DELIVERY' && (
+                          {(order.status === 'OUT_FOR_DELIVERY' || (order.status as string) === 'SHIPPING' || (order.status as string) === 'READY_FOR_DELIVERY') && (
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}

@@ -59,8 +59,8 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   const defaultAddress = 'Căn hộ 1204, Tháp Sapphire, Sunwah Pearl, 90 Nguyễn Hữu Cảnh, P. 22, Bình Thạnh';
   const deliveryAddress = order.deliveryAddress || order.address || defaultAddress;
 
-  const formatPrice = (amount: number) => {
-    return `${amount.toLocaleString('vi-VN')} đ`;
+  const formatPrice = (amount?: number | null) => {
+    return `${Number(amount || 0).toLocaleString('vi-VN')} đ`;
   };
 
   const orderNumber = order.orderNumber || order.id?.slice(0, 8);
