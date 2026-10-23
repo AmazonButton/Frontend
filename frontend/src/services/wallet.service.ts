@@ -76,6 +76,7 @@ export const walletService = {
     try {
       const res = await api.put('/store/wallet/bank-account', {
         bankName: data.bankName,
+        bankBin: data.bankBin,
         bankAccountNumber: data.accountNumber,
         bankAccountHolder: data.accountHolderName,
       }, {
@@ -144,6 +145,11 @@ export const walletService = {
     const res = await api.get('/store/wallet/withdrawals', {
       params: storeId ? { storeId } : undefined,
     });
+    return res.data;
+  },
+
+  async lookupBankAccount(bankBin: string, accountNumber: string) {
+    const res = await api.post('/stores/bank-accounts/lookup', { bankBin, accountNumber });
     return res.data;
   },
 
