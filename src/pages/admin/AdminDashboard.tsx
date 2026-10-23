@@ -569,9 +569,11 @@ export const AdminDashboard: React.FC = () => {
       }
       if (unassignedRes.data.success) setUnassignedDevices(unassignedRes.data.data || []);
       if (storesRes.data.success) setAllStores(storesRes.data.data || []);
-      if (usersRes.data?.success && Array.isArray(usersRes.data.data)) {
+      if (usersRes.data?.success && Array.isArray(usersRes.data.data) && usersRes.data.data.length > 0) {
         const mapped = usersRes.data.data.map((u: any) => ({
           ...u,
+          id: String(u.id || u.userId),
+          userId: String(u.userId || u.id),
           isActive: u.isActive !== undefined ? Boolean(u.isActive) : u.status === 'ACTIVE',
         }));
         setUsersList(mapped);
@@ -700,7 +702,7 @@ export const AdminDashboard: React.FC = () => {
   // Toggle user status
   const handleToggleUserStatus = async (userId: string) => {
     try {
-      const res = await api.post(`/admin/users/${userId}/toggle-status`);
+      const res = await api.post(`/admin/users/${encodeURIComponent(userId)}/toggle-status`);
       const nextActive =
         res.data?.data?.isActive !== undefined
           ? res.data.data.isActive
@@ -708,7 +710,7 @@ export const AdminDashboard: React.FC = () => {
 
       setUsersList((prev) =>
         prev.map((u) =>
-          u.id === userId
+          u.id === userId || String(u.id) === String(userId) || String(u.userId) === String(userId)
             ? { ...u, isActive: nextActive, status: nextActive ? 'ACTIVE' : 'INACTIVE' }
             : u
         )
@@ -722,10 +724,15 @@ export const AdminDashboard: React.FC = () => {
   // Change user role
   const handleChangeUserRole = async (userId: string, newRole: string) => {
     try {
-      await api.post(`/admin/users/${userId}/role`, { role: newRole }).catch(() => {});
+      await api.post(`/admin/users/${encodeURIComponent(userId)}/role`, { role: newRole }).catch(() => {});
       setUsersList((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
+        prev.map((u) =>
+          u.id === userId || String(u.id) === String(userId) || String(u.userId) === String(userId)
+            ? { ...u, role: newRole }
+            : u
+        )
       );
+      toast.success(`Đã cập nhật vai trò người dùng thành ${newRole}`);
     } catch (_) {}
   };
 

@@ -213,7 +213,7 @@ export const ProfilePage: React.FC = () => {
             deliveryAddress: deliveryAddress.trim(),
           };
 
-      const res = await api.put('/auth/profile', payload);
+      const res = await api.patch('/auth/profile', payload);
       if (res.data?.success) {
         await refreshUser();
         setSuccessToast(

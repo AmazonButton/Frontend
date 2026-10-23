@@ -147,3 +147,15 @@ export function subscribeToCustomer(customerId: string) {
     s.connect();
   }
 }
+
+export function clearSocketSubscriptions() {
+  subscribedStoreId = null;
+  subscribedCustomerId = null;
+  if (typeof window !== 'undefined') {
+    try {
+      localStorage.removeItem('smart_order_sub_store');
+      localStorage.removeItem('smart_order_sub_customer');
+    } catch (_) {}
+  }
+}
+
