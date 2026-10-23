@@ -25,10 +25,9 @@ import {
   type WithdrawalItem,
 } from '../../services/wallet.service';
 import {
-  VIETNAMESE_BANKS,
-  findBankByBin,
   type VietnameseBank,
 } from '../../data/vietnameseBanks';
+import { api } from '../../services/api';
 
 const formatVND = (value = 0) => `${Number(value).toLocaleString('vi-VN')} ₫`;
 
@@ -41,10 +40,12 @@ export const StoreWalletPage: React.FC = () => {
 
   // Bank form state
   const [selectedBank, setSelectedBank] = useState<VietnameseBank | null>(null);
+  const [banks, setBanks] = useState<VietnameseBank[]>([]);
   const [bankSearch, setBankSearch] = useState('');
   const [isBankDropdownOpen, setIsBankDropdownOpen] = useState(false);
   const [accountNumber, setAccountNumber] = useState('');
   const [accountHolderName, setAccountHolderName] = useState('');
+  const [lookingUpAccount, setLookingUpAccount] = useState(false);
   const [isEditingBank, setIsEditingBank] = useState(false);
 
   // Withdrawal form state
@@ -62,33 +63,36 @@ export const StoreWalletPage: React.FC = () => {
 
   // Filter banks by search
   const filteredBanks = useMemo(() => {
-    if (!bankSearch.trim()) return VIETNAMESE_BANKS;
+    if (!bankSearch.trim()) return banks;
     const q = bankSearch.toLowerCase().trim();
-    return VIETNAMESE_BANKS.filter(
+    return banks.filter(
       (b) =>
         b.shortName.toLowerCase().includes(q) ||
         b.code.toLowerCase().includes(q) ||
         b.name.toLowerCase().includes(q) ||
         b.bin.includes(q)
     );
-  }, [bankSearch]);
+  }, [bankSearch, banks]);
 
   const refresh = useCallback(async () => {
     setError(null);
     try {
-      const [walletRes, transactionsRes, withdrawalsRes] = await Promise.all([
+      const [walletRes, transactionsRes, withdrawalsRes, banksRes] = await Promise.all([
         walletService.getWallet(),
         walletService.getTransactions(),
         walletService.getWithdrawals(),
+        api.get('/banks'),
       ]);
 
       const nextWallet = walletRes.data as StoreWalletInfo;
       setWallet(nextWallet);
       setTransactions(transactionsRes.data || []);
       setWithdrawals(withdrawalsRes.data || []);
+      const realBanks = (banksRes.data?.data || []) as VietnameseBank[];
+      setBanks(realBanks);
 
       if (nextWallet.bankAccount?.bankBin) {
-        const matched = findBankByBin(nextWallet.bankAccount.bankBin);
+        const matched = realBanks.find((bank) => bank.bin === nextWallet.bankAccount?.bankBin);
         if (matched) setSelectedBank(matched);
         setAccountNumber(nextWallet.bankAccount.accountNumber || '');
         setAccountHolderName(nextWallet.bankAccount.accountHolderName || '');
@@ -109,6 +113,28 @@ export const StoreWalletPage: React.FC = () => {
   useEffect(() => {
     refresh();
   }, [refresh]);
+
+  useEffect(() => {
+    const cleanAccountNumber = accountNumber.trim();
+    if (!selectedBank || cleanAccountNumber.length < 5) return;
+
+    const timer = window.setTimeout(async () => {
+      setLookingUpAccount(true);
+      setError(null);
+      try {
+        const response = await walletService.lookupBankAccount(selectedBank.bin, cleanAccountNumber);
+        if (response?.data?.accountName) {
+          setAccountHolderName(response.data.accountName);
+        }
+      } catch (err: any) {
+        console.warn('Bank lookup notice:', err.response?.data?.message || err.message);
+      } finally {
+        setLookingUpAccount(false);
+      }
+    }, 550);
+
+    return () => window.clearTimeout(timer);
+  }, [selectedBank, accountNumber]);
 
   // Handle save bank info
   const handleSaveBank = async (e: React.FormEvent) => {
@@ -552,7 +578,7 @@ export const StoreWalletPage: React.FC = () => {
                     Ngân hàng phổ biến:
                   </div>
                   <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {VIETNAMESE_BANKS.slice(0, 6).map((b) => (
+                    {banks.slice(0, 6).map((b) => (
                       <button
                         key={b.bin}
                         type="button"
@@ -585,7 +611,7 @@ export const StoreWalletPage: React.FC = () => {
                     inputMode="numeric"
                     value={accountNumber}
                     onChange={(e) =>
-                      setAccountNumber(e.target.value.replace(/\D/g, ''))
+                      setAccountNumber(e.target.value.replace(/[^0-9a-zA-Z]/g, ''))
                     }
                     placeholder="Ví dụ: 1903678912301"
                     className="mt-1.5 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-mono font-medium shadow-2xs focus:border-[#287DA8] focus:outline-hidden focus:ring-2 focus:ring-[#287DA8]/20 dark:border-zinc-700 dark:bg-zinc-800"
@@ -594,19 +620,27 @@ export const StoreWalletPage: React.FC = () => {
 
                 {/* Account Holder Name */}
                 <div>
-                  <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                    Họ và tên chủ tài khoản <span className="text-rose-500">*</span>
-                  </label>
+                  <div className="flex items-center justify-between">
+                    <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                      Họ và tên chủ tài khoản <span className="text-rose-500">*</span>
+                    </label>
+                    {lookingUpAccount && (
+                      <span className="text-[11px] text-[#287DA8] flex items-center gap-1 font-medium animate-pulse">
+                        <RefreshCw className="w-3 h-3 animate-spin" /> Đang tra cứu...
+                      </span>
+                    )}
+                  </div>
                   <input
                     required
                     type="text"
                     value={accountHolderName}
-                    onChange={(e) =>
-                      setAccountHolderName(e.target.value.toUpperCase())
-                    }
+                    onChange={(e) => setAccountHolderName(e.target.value.toUpperCase())}
                     placeholder="NGUYEN VAN A (viết hoa không dấu)"
                     className="mt-1.5 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs uppercase font-medium shadow-2xs focus:border-[#287DA8] focus:outline-hidden focus:ring-2 focus:ring-[#287DA8]/20 dark:border-zinc-700 dark:bg-zinc-800"
                   />
+                  <p className="mt-1 text-[11px] text-zinc-400">
+                    Tên chủ tài khoản được tự động tra cứu, bạn có thể chỉnh sửa nếu cần.
+                  </p>
                 </div>
 
                 <div className="flex items-center gap-2 pt-2">
