@@ -875,7 +875,7 @@ export const StoreDashboard: React.FC = () => {
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
-                              onClick={() => handleUpdateStatus(order.id, 'OUT_FOR_DELIVERY')}
+                              onClick={() => handleUpdateStatus(order.id, 'READY_FOR_DELIVERY')}
                               className="px-2.5 py-1 bg-[#287DA8] hover:bg-[#206588] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
                             >
                               Xuất Giao

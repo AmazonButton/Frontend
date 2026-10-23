@@ -1106,42 +1106,45 @@ export const AdminDashboard: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-2">
-                {pendingStores.map((store) => (
-                  <div
-                    key={store.id}
-                    className="p-3.5 border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900 flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-2xs"
-                  >
-                    <div className="space-y-1 text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-zinc-900 dark:text-white">{store.name}</span>
-                        <span className="font-mono text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.2 rounded border border-zinc-200 dark:border-zinc-700">
-                          {store.code}
-                        </span>
+                {pendingStores.map((store) => {
+                  const sId = String(store.id || store.storeId || '');
+                  return (
+                    <div
+                      key={sId}
+                      className="p-3.5 border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900 flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-2xs"
+                    >
+                      <div className="space-y-1 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-zinc-900 dark:text-white">{store.name}</span>
+                          <span className="font-mono text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.2 rounded border border-zinc-200 dark:border-zinc-700">
+                            {store.code}
+                          </span>
+                        </div>
+                        <p className="text-zinc-500 dark:text-zinc-400 text-[11px]">
+                          Chủ: <strong className="text-zinc-700 dark:text-zinc-200">{store.ownerName || store.owner?.fullName || 'Chủ shop'}</strong> • {store.phone} • {store.email}
+                        </p>
+                        <p className="text-zinc-400 dark:text-zinc-500 text-[11px]">Kho: {store.address}</p>
                       </div>
-                      <p className="text-zinc-500 dark:text-zinc-400 text-[11px]">
-                        Chủ: <strong className="text-zinc-700 dark:text-zinc-200">{store.ownerName}</strong> • {store.phone} • {store.email}
-                      </p>
-                      <p className="text-zinc-400 dark:text-zinc-500 text-[11px]">Kho: {store.address}</p>
-                    </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => handleApprove(store.id)}
-                        className="px-3 py-1.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-medium shadow-sm flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Phê Duyệt</span>
-                      </button>
-                      <button
-                        onClick={() => setRejectingStoreId(store.id)}
-                        className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 flex items-center gap-1.5 active:scale-[0.97] transition-all shadow-2xs cursor-pointer"
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                        <span>Từ Chối</span>
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => handleApprove(sId)}
+                          className="px-3 py-1.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-medium shadow-sm flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Phê Duyệt</span>
+                        </button>
+                        <button
+                          onClick={() => setRejectingStoreId(sId)}
+                          className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 flex items-center gap-1.5 active:scale-[0.97] transition-all shadow-2xs cursor-pointer"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                          <span>Từ Chối</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1179,19 +1182,23 @@ export const AdminDashboard: React.FC = () => {
                     animate="visible"
                     className="divide-y divide-zinc-200 dark:divide-zinc-800"
                   >
-                    {allStores.map((s) => (
-                      <motion.tr
-                        variants={tableRowVariants}
-                        key={s.id}
-                        className="hover:bg-zinc-50 dark:hover:bg-zinc-850/60 transition-colors"
-                      >
-                        <td className="py-2 px-3 font-semibold text-zinc-900 dark:text-white">{s.name}</td>
-                        <td className="py-2 px-3 font-mono font-medium text-xs text-zinc-700 dark:text-zinc-300">
-                          <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
-                            {s.code}
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 text-zinc-700 dark:text-zinc-300">{s.ownerName}</td>
+                    {allStores.map((s) => {
+                      const sId = s.id || s.storeId;
+                      return (
+                        <motion.tr
+                          variants={tableRowVariants}
+                          key={sId}
+                          className="hover:bg-zinc-50 dark:hover:bg-zinc-850/60 transition-colors"
+                        >
+                          <td className="py-2 px-3 font-semibold text-zinc-900 dark:text-white">{s.name}</td>
+                          <td className="py-2 px-3 font-mono font-medium text-xs text-zinc-700 dark:text-zinc-300">
+                            <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
+                              {s.code}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-zinc-700 dark:text-zinc-300">
+                            {s.ownerName || s.owner?.fullName || 'Chưa cập nhật'}
+                          </td>
                         <td className="py-2 px-3 font-mono text-zinc-500 dark:text-zinc-400 text-[11px]">
                           <div>{s.phone}</div>
                           <div className="text-[10px] text-zinc-400">{s.email}</div>
@@ -1204,7 +1211,8 @@ export const AdminDashboard: React.FC = () => {
                           </span>
                         </td>
                       </motion.tr>
-                    ))}
+                    );
+                  })}
                   </motion.tbody>
                 </table>
               </div>
@@ -2303,11 +2311,14 @@ export const AdminDashboard: React.FC = () => {
                       className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-900"
                     >
                       <option value="">-- Chọn Cửa Hàng --</option>
-                      {allStores.map((store) => (
-                        <option key={store.id} value={store.id}>
-                          {store.name} ({store.code}) - {store.ownerName}
-                        </option>
-                      ))}
+                      {allStores.map((store) => {
+                        const sId = store.id || store.storeId;
+                        return (
+                          <option key={sId} value={sId}>
+                            {store.name} ({store.code}) - {store.ownerName || store.owner?.fullName || 'Chủ shop'}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 

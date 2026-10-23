@@ -63,10 +63,13 @@ function dispatchGlobalToast(type: ToastType, message: string, options?: ToastOp
 }
 
 // Single Toast Card Component
-const ToastCard: React.FC<{
-  item: ToastItem;
-  onClose: (id: string) => void;
-}> = ({ item, onClose }) => {
+const ToastCard = React.forwardRef<
+  HTMLDivElement,
+  {
+    item: ToastItem;
+    onClose: (id: string) => void;
+  }
+>(({ item, onClose }, ref) => {
   const [progress, setProgress] = useState(100);
 
   useEffect(() => {
@@ -113,6 +116,7 @@ const ToastCard: React.FC<{
 
   return (
     <motion.div
+      ref={ref}
       layout
       initial={{ opacity: 0, x: 48, y: 12, scale: 0.94, filter: 'blur(4px)' }}
       animate={{ opacity: 1, x: 0, y: 0, scale: 1, filter: 'blur(0px)' }}
@@ -163,7 +167,9 @@ const ToastCard: React.FC<{
       </div>
     </motion.div>
   );
-};
+});
+
+ToastCard.displayName = 'ToastCard';
 
 export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
@@ -173,7 +179,10 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   }, []);
 
   const addToast = useCallback((item: ToastItem) => {
-    setToasts((prev) => [item, ...prev.slice(0, 3)]); // Keep max 4 toasts
+    // A toast is a transient status message, not an inbox. Keep one visible
+    // message only: repeated actions restart its timer, and newer outcomes
+    // (especially errors) replace stale success messages immediately.
+    setToasts([item]);
   }, []);
 
   const showToast = useCallback((type: ToastType, message: string, options?: ToastOptions) => {
@@ -216,9 +225,9 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     <ToastContext.Provider value={{ showToast, success, error, warning, info, removeToast }}>
       {children}
 
-      {/* Floating Bottom-Right Toast Stack */}
+      {/* Floating single status message. Full event history belongs in the notification bell. */}
       <div className="fixed bottom-5 right-5 z-[9999] flex flex-col-reverse items-end gap-2.5 pointer-events-none w-full max-w-sm sm:max-w-md px-4 sm:px-0">
-        <AnimatePresence mode="popLayout">
+        <AnimatePresence>
           {toasts.map((item) => (
             <ToastCard key={item.id} item={item} onClose={removeToast} />
           ))}

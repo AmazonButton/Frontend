@@ -2051,11 +2051,14 @@ export const AdminDashboard: React.FC = () => {
                       className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-900"
                     >
                       <option value="">-- Chọn Cửa Hàng --</option>
-                      {allStores.map((store) => (
-                        <option key={store.id} value={store.id}>
-                          {store.name} ({store.code}) - {store.ownerName}
-                        </option>
-                      ))}
+                      {allStores.map((store) => {
+                        const sId = store.id || store.storeId;
+                        return (
+                          <option key={sId} value={sId}>
+                            {store.name} ({store.code}) - {store.ownerName || store.owner?.fullName || 'Chủ shop'}
+                          </option>
+                        );
+                      })}
                     </select>
                   </div>
 

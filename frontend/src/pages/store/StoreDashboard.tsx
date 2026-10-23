@@ -217,12 +217,25 @@ export const StoreDashboard: React.FC = () => {
       }
     };
 
+    const handleDevicesAllocated = (payload: any) => {
+      if (user?.storeId && payload?.storeId && String(user.storeId) !== String(payload.storeId)) {
+        return;
+      }
+      fetchOrders();
+      toast.success(
+        payload.message || `Cửa hàng vừa nhận bàn giao ${payload.allocatedCount || ''} nút bấm mới vào kho!`,
+        { title: '📦 Thiết bị mới về kho 🎉', duration: 7000 }
+      );
+    };
+
     socket.on('ORDER_CREATED', handleOrderCreated);
     socket.on('ORDER_STATUS_CHANGED', handleOrderUpdated);
     socket.on('ORDER_PAYMENT_CHANGED', handleOrderUpdated);
     socket.on('order:status_changed', handleOrderUpdated);
     socket.on('order:updated', handleOrderUpdated);
     socket.on('ORDER_CANCELLED', handleOrderCancelled);
+    socket.on('DEVICES_ALLOCATED', handleDevicesAllocated);
+    socket.on('devices:allocated', handleDevicesAllocated);
 
     // Continuous 3.5s background polling ensures real-time parity even if WebSocket drops
     const pollTimer = setInterval(() => {
@@ -237,6 +250,8 @@ export const StoreDashboard: React.FC = () => {
       socket.off('order:status_changed', handleOrderUpdated);
       socket.off('order:updated', handleOrderUpdated);
       socket.off('ORDER_CANCELLED', handleOrderCancelled);
+      socket.off('DEVICES_ALLOCATED', handleDevicesAllocated);
+      socket.off('devices:allocated', handleDevicesAllocated);
       if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
     };
   }, [user]);
@@ -266,6 +281,12 @@ export const StoreDashboard: React.FC = () => {
       if (res.data.success) {
         if (nextStatus === 'CONFIRMED') {
           toast.success('Đơn hàng đã được tiếp nhận.', { title: 'Đã nhận đơn', duration: 4000 });
+        } else if (nextStatus === 'PREPARING') {
+          toast.success('Đang chuẩn bị sản phẩm.', { title: 'Chuẩn bị hàng', duration: 4000 });
+        } else if (nextStatus === 'READY_FOR_DELIVERY') {
+          toast.success('Đơn hàng đã xuất giao!', { title: 'Xuất giao', duration: 4000 });
+        } else if (nextStatus === 'COMPLETED') {
+          toast.success('Đã giao thành công! Tiền đã cộng vào Ví Cửa Hàng.', { title: 'Giao thành công 🎉', duration: 5000 });
         } else if (nextStatus === 'CANCELLED' || nextStatus === 'REJECTED') {
           toast.info('Đơn hàng đã được hủy.', { title: 'Đã hủy đơn', duration: 4000 });
         }
@@ -273,7 +294,7 @@ export const StoreDashboard: React.FC = () => {
         fetchOrders();
       }
     } catch (e: any) {
-      alert(e.response?.data?.message || 'Không thể cập nhật trạng thái');
+      toast.error(e.response?.data?.message || 'Không thể cập nhật trạng thái');
       fetchOrders();
     }
   };
@@ -998,7 +1019,7 @@ export const StoreDashboard: React.FC = () => {
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
-                              onClick={() => handleUpdateStatus(order.id, 'OUT_FOR_DELIVERY')}
+                              onClick={() => handleUpdateStatus(order.id, 'READY_FOR_DELIVERY')}
                               className="px-2.5 py-1 bg-[#287DA8] hover:bg-[#206588] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
                             >
                               Xuất Giao

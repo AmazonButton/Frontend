@@ -15,30 +15,23 @@
   </head>
   <body class="bg-surface-bg text-navy-900 antialiased selection:bg-brand-blue selection:text-white transition-colors duration-200">
     <div id="root"></div>
+    <div id="modal-root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
+      // Clean up any stale Service Workers and browser caches across all environments
       if ('serviceWorker' in navigator) {
-        if (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-          // Development mode: unregister any stale service worker to avoid intercepting Vite ES modules
-          navigator.serviceWorker.getRegistrations().then((registrations) => {
-            for (const registration of registrations) {
-              registration.unregister();
-            }
-          });
-          if ('caches' in window) {
-            caches.keys().then((names) => {
-              for (const name of names) {
-                caches.delete(name);
-              }
-            });
+        navigator.serviceWorker.getRegistrations().then((registrations) => {
+          for (const registration of registrations) {
+            registration.unregister();
           }
-        } else {
-          window.addEventListener('load', () => {
-            navigator.serviceWorker.register('/sw.js').catch((err) => {
-              console.log('SW registration error:', err);
-            });
-          });
-        }
+        });
+      }
+      if ('caches' in window) {
+        caches.keys().then((names) => {
+          for (const name of names) {
+            caches.delete(name);
+          }
+        });
       }
     </script>
   </body>

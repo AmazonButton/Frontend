@@ -21,13 +21,15 @@ export interface User {
 
 export interface Store {
   id: string;
+  storeId?: string;
   name: string;
   code: string;
-  ownerName: string;
+  ownerName?: string;
+  owner?: any;
   phone: string;
   email: string;
   address: string;
-  status: 'PENDING_APPROVAL' | 'ACTIVE' | 'SUSPENDED' | 'REJECTED';
+  status: 'PENDING_APPROVAL' | 'ACTIVE' | 'SUSPENDED' | 'REJECTED' | string;
   rejectionReason?: string | null;
   approvedAt?: string | null;
 }
@@ -76,6 +78,11 @@ export interface DeviceConfiguration {
   cancelWindowSeconds: number;
   soundEnabled: boolean;
   ledEnabled: boolean;
+  singlePressAction?: string;
+  doublePressAction?: string;
+  hold3sAction?: string;
+  hold5sAction?: string;
+  customActionPayload?: any;
   version: number;
 }
 
@@ -184,6 +191,9 @@ export interface Order {
     | 'COMPLETED'
     | 'CANCELLED'
     | 'REJECTED';
+  paymentMethod?: 'PAYOS' | 'CASH_ON_DELIVERY' | string | null;
+  paymentStatus?: 'UNPAID' | 'PENDING' | 'COD_DUE' | 'PAID' | 'REFUNDED' | string;
+  paidAt?: string | null;
   totalAmount: number;
   deliveryAddress: string;
   customerPhone: string;
@@ -205,4 +215,73 @@ export interface AuditLog {
   oldValues?: string | null;
   newValues?: string | null;
   createdAt: string;
+}
+
+export interface PredictionInsight {
+  productId: string;
+  productName: string;
+  unit: string;
+  sampleCount: number;
+  meanIntervalDays: number;
+  stdDevDays: number;
+  lastOrderDate: string;
+  expectedReplenishmentDate: string;
+  daysRemaining: number;
+  confidenceScore: number; // 0 - 100%
+  status: 'OPTIMAL' | 'DUE_SOON' | 'OVERDUE';
+  explanation: string;
+}
+
+export interface SmartReminder {
+  id: string;
+  householdId: string;
+  productId: string;
+  product: Product;
+  expectedDate: string;
+  confidence: number;
+  reason: string;
+  status: 'PENDING' | 'ACCEPTED' | 'ADDED_TO_LIST' | 'SNOOZED' | 'DISMISSED';
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ConsumptionStats {
+  product: Product;
+  totalOrders: number;
+  totalQuantity: number;
+  averageIntervalDays: number;
+  intervalStdDev: number;
+  lastConsumedAt: string | null;
+}
+
+export interface ConsumptionRecord {
+  id: string;
+  householdId: string;
+  productId: string;
+  deviceId?: string | null;
+  orderId?: string | null;
+  quantity: number;
+  recordedAt: string;
+  product?: Product;
+}
+
+export interface Household {
+  id: string;
+  name: string;
+  address?: string | null;
+  apartment?: string | null;
+  building?: string | null;
+  floor?: string | null;
+  room?: string | null;
+  phone?: string | null;
+  notes?: string | null;
+  membership?: {
+    role: string;
+    nickname?: string;
+    joinedAt: string;
+  };
+  members?: any[];
+  devices?: any[];
+  reminders?: SmartReminder[];
+  shoppingList?: any;
 }

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowDownToLine,
@@ -46,6 +46,7 @@ export const StoreWalletPage: React.FC = () => {
   const [accountNumber, setAccountNumber] = useState('');
   const [accountHolderName, setAccountHolderName] = useState('');
   const [lookingUpAccount, setLookingUpAccount] = useState(false);
+  const accountLookupRequestId = useRef(0);
   const [isEditingBank, setIsEditingBank] = useState(false);
 
   // Withdrawal form state
@@ -73,6 +74,16 @@ export const StoreWalletPage: React.FC = () => {
         b.bin.includes(q)
     );
   }, [bankSearch, banks]);
+
+  const handleSelectBank = (bank: VietnameseBank) => {
+    if (selectedBank?.bin === bank.bin) return;
+    accountLookupRequestId.current += 1;
+    setSelectedBank(bank);
+    setAccountNumber('');
+    setAccountHolderName('');
+    setLookingUpAccount(false);
+    setError(null);
+  };
 
   const refresh = useCallback(async () => {
     setError(null);
@@ -117,19 +128,20 @@ export const StoreWalletPage: React.FC = () => {
   useEffect(() => {
     const cleanAccountNumber = accountNumber.trim();
     if (!selectedBank || cleanAccountNumber.length < 5) return;
+    const requestId = ++accountLookupRequestId.current;
 
     const timer = window.setTimeout(async () => {
       setLookingUpAccount(true);
       setError(null);
       try {
         const response = await walletService.lookupBankAccount(selectedBank.bin, cleanAccountNumber);
-        if (response?.data?.accountName) {
+        if (requestId === accountLookupRequestId.current && response?.data?.accountName) {
           setAccountHolderName(response.data.accountName);
         }
       } catch (err: any) {
         console.warn('Bank lookup notice:', err.response?.data?.message || err.message);
       } finally {
-        setLookingUpAccount(false);
+        if (requestId === accountLookupRequestId.current) setLookingUpAccount(false);
       }
     }, 550);
 
@@ -521,14 +533,14 @@ export const StoreWalletPage: React.FC = () => {
                     {isBankDropdownOpen && (
                       <div className="absolute z-30 mt-1 max-h-64 w-full overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-800">
                         <div className="border-b border-zinc-100 p-2 dark:border-zinc-700">
-                          <div className="flex items-center gap-2 rounded-lg bg-zinc-100 px-2.5 py-1.5 text-xs dark:bg-zinc-700/60">
+                          <div className="flex items-center gap-2 rounded-lg border border-transparent bg-zinc-100 px-2.5 py-1.5 text-xs transition-colors focus-within:border-[#287DA8]/40 focus-within:bg-white focus-within:ring-2 focus-within:ring-[#287DA8]/15 dark:bg-zinc-700/60 dark:focus-within:bg-zinc-800">
                             <Search className="h-3.5 w-3.5 text-zinc-400" />
                             <input
                               type="text"
                               value={bankSearch}
                               onChange={(e) => setBankSearch(e.target.value)}
                               placeholder="Tìm tên ngân hàng hoặc mã..."
-                              className="w-full bg-transparent outline-hidden text-xs"
+                              className="w-full min-w-0 bg-transparent text-xs text-zinc-900 placeholder:text-zinc-400 outline-none focus:outline-none focus:ring-0 dark:text-zinc-100"
                               autoFocus
                             />
                           </div>
@@ -540,7 +552,7 @@ export const StoreWalletPage: React.FC = () => {
                               key={b.bin}
                               type="button"
                               onClick={() => {
-                                setSelectedBank(b);
+                                handleSelectBank(b);
                                 setIsBankDropdownOpen(false);
                                 setBankSearch('');
                               }}
@@ -582,7 +594,7 @@ export const StoreWalletPage: React.FC = () => {
                       <button
                         key={b.bin}
                         type="button"
-                        onClick={() => setSelectedBank(b)}
+                        onClick={() => handleSelectBank(b)}
                         className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-all ${
                           selectedBank?.bin === b.bin
                             ? 'bg-[#287DA8] text-white shadow-2xs'

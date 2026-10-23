@@ -16,39 +16,74 @@ export function getSocket(): Socket {
   if (!socket) {
     socket = io(targetUrl, {
       autoConnect: true,
-      auth: {
-        token: token ? `Bearer ${token}` : undefined,
+      auth: (cb) => {
+        const t = getStoredToken();
+        cb({ token: t ? `Bearer ${t}` : undefined });
       },
       query: {
         token: token ? `Bearer ${token}` : undefined,
       },
       transports: ['websocket', 'polling'],
       reconnection: true,
-      reconnectionAttempts: Infinity,
+      reconnectionAttempts: 10,
       reconnectionDelay: 1000,
+      timeout: 8000,
     });
 
-    socket.on('connect', () => {
-      console.log('⚡ [Socket.io Client] Connected to backend server:', socket?.id);
-      const activeToken = getStoredToken();
-      if (activeToken && socket) {
-        socket.auth = { token: `Bearer ${activeToken}` };
-      }
+    let lastAuthRole: string | null = null;
+
+    const resubscribe = () => {
       const storeId = subscribedStoreId || (typeof window !== 'undefined' ? localStorage.getItem('smart_order_sub_store') : null);
       if (storeId) {
         socket?.emit('subscribe:store', storeId);
-        console.log(`🔌 [Socket.io Client] Subscribed to store_${storeId}`);
       }
       const custId = subscribedCustomerId || (typeof window !== 'undefined' ? localStorage.getItem('smart_order_sub_customer') : null);
       if (custId) {
         socket?.emit('subscribe:customer', custId);
-        console.log(`🔌 [Socket.io Client] Subscribed to customer_${custId}`);
       }
+    };
+
+    socket.on('connect', () => {
+      const activeToken = getStoredToken();
+      if (activeToken) {
+        socket?.emit('authenticate', { token: activeToken });
+      }
+      resubscribe();
+    });
+
+    socket.on('authenticated', (res: any) => {
+      const role = res?.user?.role;
+      if (role && role !== lastAuthRole) {
+        lastAuthRole = role;
+        console.log('⚡ [Socket.io] Authenticated as:', role);
+      }
+      resubscribe();
     });
 
     socket.on('disconnect', (reason) => {
-      console.log('❌ [Socket.io Client] Disconnected from server:', reason);
+      if (reason !== 'io client disconnect') {
+        lastAuthRole = null;
+      }
     });
+
+    socket.on('connect_error', () => {
+      // Quietly handle transient connection errors without noisy unhandled exceptions
+    });
+
+    // Cleanly disconnect when page enters Back-Forward Cache (bfcache)
+    if (typeof window !== 'undefined') {
+      window.addEventListener('pagehide', () => {
+        if (socket?.connected) {
+          socket.disconnect();
+        }
+      });
+
+      window.addEventListener('pageshow', (event) => {
+        if (event.persisted && socket && !socket.connected) {
+          socket.connect();
+        }
+      });
+    }
   } else {
     // If token exists and socket auth is missing, update auth
     if (token && socket.auth && (socket.auth as any).token !== `Bearer ${token}`) {
@@ -58,17 +93,18 @@ export function getSocket(): Socket {
   return socket;
 }
 
-export function updateSocketAuth(newToken?: string | null) {
-  const token = newToken !== undefined ? newToken : getStoredToken();
-  if (socket) {
-    socket.auth = { token: token ? `Bearer ${token}` : undefined };
-    if (socket.connected) {
-      socket.disconnect().connect();
+export function updateSocketAuth(token?: string | null) {
+  const currentToken = token !== undefined ? token : getStoredToken();
+  const s = getSocket();
+  if (s) {
+    (s as any).auth = { token: currentToken ? `Bearer ${currentToken}` : undefined };
+    if (s.connected) {
+      if (currentToken) {
+        s.emit('authenticate', { token: currentToken });
+      }
     } else {
-      socket.connect();
+      s.connect();
     }
-  } else {
-    getSocket();
   }
 }
 
@@ -82,7 +118,7 @@ export function subscribeToStore(storeId: string) {
   if (token && s) {
     s.auth = { token: `Bearer ${token}` };
   }
-  if (storeId) {
+  if (storeId && s.connected) {
     s.emit('subscribe:store', storeId);
   }
   if (s && !s.connected) {
@@ -100,11 +136,10 @@ export function subscribeToCustomer(customerId: string) {
   if (token && s) {
     s.auth = { token: `Bearer ${token}` };
   }
-  if (customerId) {
+  if (customerId && s.connected) {
     s.emit('subscribe:customer', customerId);
   }
   if (s && !s.connected) {
     s.connect();
   }
 }
-

@@ -150,7 +150,7 @@ export const App: React.FC = () => {
           <Route
             path="/admin/dashboard"
             element={
-              <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+              <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN']}>
                 <AdminDashboard />
               </ProtectedRoute>
             }
@@ -158,7 +158,7 @@ export const App: React.FC = () => {
           <Route
             path="/admin/security/devices"
             element={
-              <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+              <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN']}>
                 <AdminSecurityHubPage />
               </ProtectedRoute>
             }
@@ -166,7 +166,7 @@ export const App: React.FC = () => {
           <Route
             path="/admin/profile"
             element={
-              <ProtectedRoute allowedRoles={['SUPER_ADMIN']}>
+              <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN']}>
                 <ProfilePage />
               </ProtectedRoute>
             }
