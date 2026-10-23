@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useSound } from '../context/OrderSoundContext';
-import { LogOut, Shield, ShieldAlert, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, BadgeCheck, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X, ShoppingCart, ReceiptText, ChevronDown, ShoppingBag, Package, Wallet, BarChart3 } from 'lucide-react';
+import { LogOut, Shield, ShieldAlert, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, BadgeCheck, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X, ShoppingCart, ReceiptText, ChevronDown } from 'lucide-react';
 import { WhiteDeviceAirPodsModal } from '../components/devices/WhiteDeviceAirPodsModal';
 import { HeaderNavigation } from '../components/common/HeaderNavigation';
 import { LogoutConfirmModal } from '../components/common/LogoutConfirmModal';
@@ -136,7 +136,7 @@ export const Navbar: React.FC = () => {
   return (
     <header
       data-navbar="true"
-      className={`fixed top-0 left-0 w-full z-30 transition-[background-color,border-color,box-shadow] duration-200 ease-in-out ${
+      className={`fixed top-0 left-0 w-full z-50 transition-[background-color,border-color,box-shadow] duration-200 ease-in-out ${
         isCustomer || isStoreUser || isScrolled
           ? 'bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shadow-md border-b border-slate-200/80 dark:border-zinc-800'
           : 'bg-transparent border-b border-transparent backdrop-blur-sm'
@@ -172,31 +172,6 @@ export const Navbar: React.FC = () => {
               { to: '/shop', label: 'Mua sắm', icon: ShoppingCart },
               { to: '/customer/home', label: 'Nút của tôi', icon: Smartphone },
               { to: '/customer/orders', label: 'Đơn hàng', icon: ReceiptText },
-            ].map(({ to, label, icon: Icon }) => (
-              <Link
-                key={to}
-                to={to}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
-                  isActive(to)
-                    ? 'bg-white text-[#0E6BA8] shadow-xs dark:bg-zinc-800 dark:text-sky-400'
-                    : 'text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {label}
-              </Link>
-            ))}
-          </nav>
-        )}
-
-        {isStoreUser && (
-          <nav aria-label="Điều hướng cửa hàng" className="hidden md:flex items-center gap-1 rounded-xl border border-slate-200/80 bg-slate-50/70 p-1 dark:border-zinc-800 dark:bg-zinc-900/70">
-            {[
-              { to: '/store/dashboard', label: 'Đơn hàng', icon: ShoppingBag },
-              { to: '/store/products', label: 'Sản phẩm', icon: Package },
-              { to: '/store/devices', label: 'Thiết bị nút', icon: Smartphone },
-              { to: '/store/wallet', label: 'Ví & Rút tiền', icon: Wallet },
-              { to: '/store/analytics', label: 'Báo cáo', icon: BarChart3 },
             ].map(({ to, label, icon: Icon }) => (
               <Link
                 key={to}

@@ -40,6 +40,29 @@ import {
 } from 'lucide-react';
 import { StoreCatalogItem, getStoreCatalog, saveStoreCatalog } from '../../data/storeProductsData';
 
+const buildChartDataFromOrders = (orders: Order[]) => {
+  const byDay = new Map<string, { date: string; rawDate: Date; revenue: number }>();
+
+  orders.forEach((order) => {
+    if (order.status === 'CANCELLED' || order.status === 'REJECTED') return;
+    const rawDate = new Date(order.createdAt);
+    if (Number.isNaN(rawDate.getTime())) return;
+    const key = rawDate.toISOString().slice(0, 10);
+    const current = byDay.get(key) || {
+      date: new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: '2-digit' }).format(rawDate),
+      rawDate,
+      revenue: 0,
+    };
+    current.revenue += Number((order as any).totalAmount || 0);
+    byDay.set(key, current);
+  });
+
+  return Array.from(byDay.values())
+    .sort((a, b) => a.rawDate.getTime() - b.rawDate.getTime())
+    .slice(-14)
+    .map(({ date, revenue }) => ({ date, revenue }));
+};
+
 export const StoreDashboard: React.FC = () => {
   const { user, token } = useAuth();
   const { announceStoreOrder, testStoreBankSpeaker } = useSound();
@@ -80,13 +103,11 @@ export const StoreDashboard: React.FC = () => {
 
   const fetchOrders = async () => {
     try {
-      const [orderRes, analyticsRes] = await Promise.all([
-        api.get('/orders'),
-        api.get('/analytics/dashboard').catch(() => ({ data: { success: false } })),
-      ]);
+      const orderRes = await api.get('/orders');
       if (orderRes.data.success) {
         const fetchedOrders: Order[] = orderRes.data.data;
         setOrders(fetchedOrders);
+        setChartData(buildChartDataFromOrders(fetchedOrders));
 
         // Auto-dismiss newOrderAlert if the order has already been accepted (status !== 'PENDING')
         setNewOrderAlert((currentAlert: any) => {
@@ -102,9 +123,6 @@ export const StoreDashboard: React.FC = () => {
           }
           return currentAlert;
         });
-      }
-      if (analyticsRes.data?.success && analyticsRes.data.data?.chartData) {
-        setChartData(analyticsRes.data.data.chartData);
       }
     } catch (e) {
       console.error('Failed to fetch store orders:', e);
@@ -237,10 +255,10 @@ export const StoreDashboard: React.FC = () => {
     socket.on('DEVICES_ALLOCATED', handleDevicesAllocated);
     socket.on('devices:allocated', handleDevicesAllocated);
 
-    // Continuous 3.5s background polling ensures real-time parity even if WebSocket drops
+    // Socket.IO provides immediate updates; this is a low-frequency fallback if it disconnects.
     const pollTimer = setInterval(() => {
       fetchOrders();
-    }, 3500);
+    }, 15000);
 
     return () => {
       clearInterval(pollTimer);

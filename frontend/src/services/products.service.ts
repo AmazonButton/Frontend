@@ -101,10 +101,35 @@ export const productsService = {
   },
 
   /**
-   * Xóa sản phẩm
+   * Cập nhật trạng thái sản phẩm (ACTIVE | INACTIVE)
+   */
+  async setStatus(id: string | number, status: 'ACTIVE' | 'INACTIVE') {
+    const res = await api.put(`/products/${id}`, { status });
+    return res.data;
+  },
+
+  /**
+   * Vô hiệu hóa (ngừng kinh doanh) sản phẩm - Soft disable thay vì xóa cứng
+   */
+  async disable(id: string | number) {
+    const res = await api.put(`/products/${id}`, { status: 'INACTIVE' });
+    return res.data;
+  },
+
+  /**
+   * Kích hoạt lại sản phẩm để tiếp tục kinh doanh
+   */
+  async activate(id: string | number) {
+    const res = await api.put(`/products/${id}`, { status: 'ACTIVE' });
+    return res.data;
+  },
+
+  /**
+   * Xóa / Vô hiệu hóa sản phẩm (tương thích ngược: chuyển trạng thái INACTIVE)
    */
   async delete(id: string | number) {
-    const res = await api.delete(`/products/${id}`);
+    const res = await api.put(`/products/${id}`, { status: 'INACTIVE' });
     return res.data;
   },
 };
+

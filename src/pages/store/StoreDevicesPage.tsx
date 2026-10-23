@@ -249,6 +249,7 @@ export const StoreDevicesPage: React.FC = () => {
     unconfigured: 0,
   });
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Search & Filters
   const [searchQuery, setSearchQuery] = useState('');
@@ -347,6 +348,7 @@ export const StoreDevicesPage: React.FC = () => {
   });
   const [editLoading, setEditLoading] = useState(false);
   const [editError, setEditError] = useState<string | null>(null);
+  const [editMissingFields, setEditMissingFields] = useState<string[]>([]);
 
   // Simulation test state
   const [simulatingDeviceId, setSimulatingDeviceId] = useState<string | null>(null);
@@ -458,13 +460,31 @@ export const StoreDevicesPage: React.FC = () => {
       expiresAt: device.expiresAt ? new Date(device.expiresAt).toISOString().split('T')[0] : '',
     });
     setEditError(null);
+    setEditMissingFields([]);
   };
 
   const handleEditDeviceSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingDevice) return;
-    setEditLoading(true);
     setEditError(null);
+    const missingFields = [
+      !editForm.customName.trim() && 'customName',
+      !editForm.status && 'status',
+      !editForm.productId && 'productId',
+      (!Number.isInteger(Number(editForm.defaultQuantity)) || Number(editForm.defaultQuantity) < 1) && 'defaultQuantity',
+      !editForm.location.trim() && 'location',
+      (String(editForm.batteryLevel).trim() === '' || Number(editForm.batteryLevel) < 0 || Number(editForm.batteryLevel) > 100) && 'batteryLevel',
+      !editForm.expiresAt && 'expiresAt',
+    ].filter(Boolean) as string[];
+
+    if (missingFields.length > 0) {
+      setEditMissingFields(missingFields);
+      setEditError('Vui lòng nhập đầy đủ các trường bắt buộc được đánh dấu * trước khi lưu.');
+      return;
+    }
+
+    setEditMissingFields([]);
+    setEditLoading(true);
     try {
       const payload: any = {
         customName: editForm.customName.trim(),
@@ -479,6 +499,7 @@ export const StoreDevicesPage: React.FC = () => {
       };
       const res = await api.patch(`/devices/${editingDevice.deviceId}`, payload);
       if (res.data.success) {
+        toast.success('Đã lưu thay đổi thiết bị thành công!');
         setEditingDevice(null);
         await fetchData();
       }
@@ -510,21 +531,35 @@ export const StoreDevicesPage: React.FC = () => {
     }
   };
 
-  const fetchData = async () => {
-    try {
-      const [devRes, prodRes, statsRes] = await Promise.all([
+  const fetchData = async (attempt = 0) => {
+    const results = await Promise.allSettled([
         api.get('/devices'),
         api.get('/products'),
         api.get('/devices/fleet/stats'),
-      ]);
-      if (devRes.data.success) setDevices(devRes.data.data);
-      if (prodRes.data.success) setProducts(prodRes.data.data);
-      if (statsRes.data.success) setFleetStats(statsRes.data.data);
-    } catch (e) {
-      console.error('Failed to load store devices:', e);
-    } finally {
-      setLoading(false);
+    ]);
+    const [deviceResult, productResult, statsResult] = results;
+    const failedRequests = results.filter((result) => result.status === 'rejected');
+
+    if (deviceResult.status === 'fulfilled' && deviceResult.value.data?.success) {
+      setDevices(deviceResult.value.data.data);
     }
+    if (productResult.status === 'fulfilled' && productResult.value.data?.success) {
+      setProducts(productResult.value.data.data);
+    }
+    if (statsResult.status === 'fulfilled' && statsResult.value.data?.success) {
+      setFleetStats(statsResult.value.data.data);
+    }
+
+    if (failedRequests.length > 0) {
+      console.error('Failed to load store devices:', failedRequests);
+      setLoadError('Một phần dữ liệu hạm đội chưa tải được. Hệ thống sẽ tự thử lại.');
+      if (attempt < 2) {
+        window.setTimeout(() => void fetchData(attempt + 1), 1000 * (attempt + 1));
+      }
+    } else {
+      setLoadError(null);
+    }
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -1177,6 +1212,15 @@ export const StoreDevicesPage: React.FC = () => {
       </div>
 
       {/* ── High-Density Hardware Terminal Table ── */}
+      {loadError && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <span>{loadError}</span>
+          <button type="button" onClick={() => void fetchData()} className="font-semibold underline underline-offset-2">
+            Thử lại ngay
+          </button>
+        </div>
+      )}
+
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-x-auto lg:overflow-visible">
         {loading ? (
           <div className="py-16 text-center">
@@ -2852,7 +2896,7 @@ export const StoreDevicesPage: React.FC = () => {
                     required
                     value={editForm.customName}
                     onChange={(e) => setEditForm({ ...editForm, customName: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                    className={`w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-black/40 border text-slate-900 dark:text-white focus:outline-none focus:ring-2 transition-all ${editMissingFields.includes('customName') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : 'border-slate-200 dark:border-slate-800 focus:border-[#287DA8] focus:ring-[#287DA8]/20'}`}
                     placeholder="VD: Nút Nước Bếp"
                   />
                 </div>
@@ -2864,7 +2908,7 @@ export const StoreDevicesPage: React.FC = () => {
                   <select
                     value={editForm.status}
                     onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
-                    className="w-full px-3 py-2 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                    className={`w-full px-3 py-2 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-black/40 border text-slate-900 dark:text-white focus:outline-none focus:ring-2 transition-all ${editMissingFields.includes('status') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : 'border-slate-200 dark:border-slate-800 focus:border-[#287DA8] focus:ring-[#287DA8]/20'}`}
                   >
                     <option value="ACTIVE">Đang hoạt động</option>
                     <option value="DISABLED">Tạm Dừng (DISABLED)</option>
@@ -2888,7 +2932,7 @@ export const StoreDevicesPage: React.FC = () => {
                     <select
                       value={editForm.productId}
                       onChange={(e) => setEditForm({ ...editForm, productId: e.target.value })}
-                      className="w-full px-3 py-2 pr-10 truncate text-xs rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                      className={`w-full px-3 py-2 pr-10 truncate text-xs rounded-lg bg-white dark:bg-black/50 border text-slate-900 dark:text-white focus:outline-none focus:ring-2 transition-all ${editMissingFields.includes('productId') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : 'border-slate-200 dark:border-slate-800 focus:border-[#287DA8] focus:ring-[#287DA8]/20'}`}
                     >
                       <option value="">-- Không gán sản phẩm --</option>
                       {products.map((p) => (
@@ -2911,7 +2955,7 @@ export const StoreDevicesPage: React.FC = () => {
                       onChange={(e) =>
                         setEditForm({ ...editForm, defaultQuantity: Number(e.target.value) || 1 })
                       }
-                      className="w-full px-3 py-2 text-xs tabular-nums font-bold rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 text-center transition-all"
+                      className={`w-full px-3 py-2 text-xs tabular-nums font-bold rounded-lg bg-white dark:bg-black/50 border text-slate-900 dark:text-white focus:outline-none focus:ring-2 text-center transition-all ${editMissingFields.includes('defaultQuantity') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : 'border-slate-200 dark:border-slate-800 focus:border-[#287DA8] focus:ring-[#287DA8]/20'}`}
                     />
                   </div>
                 </div>
@@ -2926,7 +2970,7 @@ export const StoreDevicesPage: React.FC = () => {
                     type="text"
                     value={editForm.location}
                     onChange={(e) => setEditForm({ ...editForm, location: e.target.value })}
-                    className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-black/40 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                    className={`w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-black/40 border text-slate-900 dark:text-white focus:outline-none focus:ring-2 transition-all ${editMissingFields.includes('location') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : 'border-slate-200 dark:border-slate-800 focus:border-[#287DA8] focus:ring-[#287DA8]/20'}`}
                     placeholder="VD: Phòng Bếp Tầng 2"
                   />
                 </div>
@@ -2957,7 +3001,7 @@ export const StoreDevicesPage: React.FC = () => {
                     max={100}
                     value={editForm.batteryLevel}
                     onChange={(e) => setEditForm({ ...editForm, batteryLevel: Number(e.target.value) })}
-                    className="w-full px-3 py-2 text-xs tabular-nums font-bold rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 text-center transition-all"
+                    className={`w-full px-3 py-2 text-xs tabular-nums font-bold rounded-lg bg-white dark:bg-black/50 border text-slate-900 dark:text-white focus:outline-none focus:ring-2 text-center transition-all ${editMissingFields.includes('batteryLevel') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : 'border-slate-200 dark:border-slate-800 focus:border-[#287DA8] focus:ring-[#287DA8]/20'}`}
                   />
                 </div>
 
@@ -2969,7 +3013,7 @@ export const StoreDevicesPage: React.FC = () => {
                     type="date"
                     value={editForm.expiresAt}
                     onChange={(e) => setEditForm({ ...editForm, expiresAt: e.target.value })}
-                    className="w-full px-3 py-2 text-xs tabular-nums rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
+                    className={`w-full px-3 py-2 text-xs tabular-nums rounded-lg bg-white dark:bg-black/50 border text-slate-900 dark:text-white focus:outline-none focus:ring-2 transition-all ${editMissingFields.includes('expiresAt') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : 'border-slate-200 dark:border-slate-800 focus:border-[#287DA8] focus:ring-[#287DA8]/20'}`}
                   />
                 </div>
               </div>

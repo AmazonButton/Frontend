@@ -22,6 +22,8 @@ import {
   Upload,
   Image as ImageIcon,
   Trash2,
+  EyeOff,
+  Eye,
 } from 'lucide-react';
 
 const tableContainerVariants: Variants = {
@@ -76,6 +78,12 @@ export const StoreProductsPage: React.FC = () => {
   const [editImageUrl, setEditImageUrl] = useState('');
   const [editLoading, setEditLoading] = useState(false);
   const editFileInputRef = useRef<HTMLInputElement>(null);
+  const [statusConfirmation, setStatusConfirmation] = useState<{
+    productId: string;
+    productName: string;
+    currentStatus?: string;
+  } | null>(null);
+  const [statusUpdating, setStatusUpdating] = useState(false);
 
   // Inline Price Editing
   const [editingPriceProductId, setEditingPriceProductId] = useState<string | null>(null);
@@ -83,7 +91,7 @@ export const StoreProductsPage: React.FC = () => {
   const [savingPrice, setSavingPrice] = useState(false);
 
   // Universal body scroll lock & header submerge
-  useBodyScrollLock(showAddModal || !!editingProduct);
+  useBodyScrollLock(showAddModal || !!editingProduct || !!statusConfirmation);
 
   const fetchProducts = async () => {
     try {
@@ -279,18 +287,27 @@ export const StoreProductsPage: React.FC = () => {
     }
   };
 
-  const handleDeleteProduct = async (productId: string, productName: string) => {
-    if (!window.confirm(`Bạn có chắc chắn muốn xóa sản phẩm "${productName}" khỏi danh mục kho hàng?`)) {
-      return;
-    }
+  const handleToggleProductStatus = async (productId: string, productName: string, currentStatus?: string) => {
+    setStatusConfirmation({ productId, productName, currentStatus });
+  };
 
+  const handleConfirmProductStatus = async () => {
+    if (!statusConfirmation) return;
+    const isCurrentlyInactive = statusConfirmation.currentStatus === 'INACTIVE';
+    const nextStatus = isCurrentlyInactive ? 'ACTIVE' : 'INACTIVE';
+    const actionLabel = isCurrentlyInactive ? 'kích hoạt lại' : 'ngừng kinh doanh (vô hiệu hóa)';
+
+    setStatusUpdating(true);
     try {
-      const res = await api.delete(`/products/${productId}`);
+      const res = await api.put(`/products/${statusConfirmation.productId}`, { status: nextStatus });
       if (res.data.success) {
-        fetchProducts();
+        setStatusConfirmation(null);
+        await fetchProducts();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể xóa sản phẩm');
+      alert(err.response?.data?.message || `Không thể ${actionLabel} sản phẩm`);
+    } finally {
+      setStatusUpdating(false);
     }
   };
 
@@ -558,11 +575,17 @@ export const StoreProductsPage: React.FC = () => {
                   const availableStock = prod.stock - prod.reservedStock;
                   const isLow = prod.stock <= prod.minStockAlert;
 
+                  const isInactive = prod.status === 'INACTIVE';
+
                   return (
                     <motion.tr
                       key={prod.id}
                       variants={tableRowVariants}
-                      className="hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40 transition-colors group"
+                      className={`transition-colors group ${
+                        isInactive
+                          ? 'opacity-65 bg-zinc-50/50 dark:bg-zinc-900/30 hover:bg-zinc-100/50 dark:hover:bg-zinc-900/50'
+                          : 'hover:bg-zinc-50/80 dark:hover:bg-zinc-900/40'
+                      }`}
                     >
                       {/* Sản Phẩm & Hình Ảnh Thumbnail */}
                       <td className="py-3 px-4">
@@ -591,7 +614,14 @@ export const StoreProductsPage: React.FC = () => {
                           </button>
                           <div className="min-w-0">
                             <div className="font-semibold text-zinc-900 dark:text-zinc-100 flex items-center gap-2">
-                              <span className="truncate">{prod.name}</span>
+                              <span className={`truncate ${isInactive ? 'line-through text-zinc-500 dark:text-zinc-400' : ''}`}>
+                                {prod.name}
+                              </span>
+                              {isInactive && (
+                                <span className="text-[10px] px-1.5 py-0.2 rounded bg-zinc-200 text-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 font-mono font-medium shrink-0">
+                                  NGỪNG BÁN
+                                </span>
+                              )}
                               {!prod.imageUrl && (
                                 <span className="text-[10px] px-1.5 py-0.2 rounded bg-amber-100 text-amber-700 dark:bg-amber-950/60 dark:text-amber-400 font-normal shrink-0">
                                   Chưa có ảnh
@@ -761,12 +791,25 @@ export const StoreProductsPage: React.FC = () => {
                           <motion.button
                             type="button"
                             whileTap={{ scale: 0.94 }}
-                            onClick={() => handleDeleteProduct(prod.id, prod.name)}
-                            className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-zinc-500 hover:bg-red-50 hover:text-red-600 dark:text-zinc-400 dark:hover:bg-red-950/50 dark:hover:text-red-400 transition-colors cursor-pointer"
-                            title="Xóa sản phẩm"
+                            onClick={() => handleToggleProductStatus(prod.id, prod.name, prod.status)}
+                            className={`inline-flex items-center gap-1 rounded-md px-2 py-1.5 transition-colors cursor-pointer ${
+                              isInactive
+                                ? 'text-emerald-600 hover:bg-emerald-50 dark:text-emerald-400 dark:hover:bg-emerald-950/50'
+                                : 'text-zinc-500 hover:bg-amber-50 hover:text-amber-600 dark:text-zinc-400 dark:hover:bg-amber-950/50 dark:hover:text-amber-400'
+                            }`}
+                            title={isInactive ? 'Kích hoạt lại sản phẩm để bán' : 'Ngừng kinh doanh (vô hiệu hóa sản phẩm)'}
                           >
-                            <Trash2 className="w-3.5 h-3.5" />
-                            <span className="hidden sm:inline text-[11px] font-medium">Xóa</span>
+                            {isInactive ? (
+                              <>
+                                <Eye className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline text-[11px] font-medium">Bật lại</span>
+                              </>
+                            ) : (
+                              <>
+                                <EyeOff className="w-3.5 h-3.5" />
+                                <span className="hidden sm:inline text-[11px] font-medium">Ngừng bán</span>
+                              </>
+                            )}
                           </motion.button>
                         </div>
                       </td>
@@ -1259,6 +1302,67 @@ export const StoreProductsPage: React.FC = () => {
                     </motion.button>
                   </div>
                 </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {createPortal(
+        <AnimatePresence>
+          {statusConfirmation && (
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => !statusUpdating && setStatusConfirmation(null)}
+                className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.95, y: 12 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.95, y: 12 }}
+                transition={{ type: 'spring', damping: 26, stiffness: 340 }}
+                role="dialog"
+                aria-modal="true"
+                aria-labelledby="product-status-confirmation-title"
+                className="relative z-10 w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900"
+              >
+                <div className="flex items-start gap-3">
+                  <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl ${statusConfirmation.currentStatus === 'INACTIVE' ? 'bg-emerald-100 text-emerald-600 dark:bg-emerald-500/15 dark:text-emerald-400' : 'bg-amber-100 text-amber-600 dark:bg-amber-500/15 dark:text-amber-400'}`}>
+                    {statusConfirmation.currentStatus === 'INACTIVE' ? <Eye className="h-5 w-5" /> : <AlertTriangle className="h-5 w-5" />}
+                  </div>
+                  <div className="min-w-0">
+                    <h3 id="product-status-confirmation-title" className="text-sm font-bold text-slate-900 dark:text-white">
+                      {statusConfirmation.currentStatus === 'INACTIVE' ? 'Kích hoạt lại sản phẩm?' : 'Ngừng kinh doanh sản phẩm?'}
+                    </h3>
+                    <p className="mt-1 text-xs leading-5 text-slate-600 dark:text-zinc-300">
+                      {statusConfirmation.currentStatus === 'INACTIVE'
+                        ? <>Sản phẩm <strong>“{statusConfirmation.productName}”</strong> sẽ được hiển thị lại trên Storefront và có thể gán cho nút bấm.</>
+                        : <>Sản phẩm <strong>“{statusConfirmation.productName}”</strong> sẽ bị ẩn khỏi Storefront và nút bấm IoT. Lịch sử đơn hàng vẫn được bảo lưu.</>}
+                    </p>
+                  </div>
+                </div>
+                <div className="mt-5 flex justify-end gap-2">
+                  <button
+                    type="button"
+                    disabled={statusUpdating}
+                    onClick={() => setStatusConfirmation(null)}
+                    className="rounded-lg border border-slate-200 bg-white px-3.5 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700"
+                  >
+                    Hủy bỏ
+                  </button>
+                  <button
+                    type="button"
+                    disabled={statusUpdating}
+                    onClick={handleConfirmProductStatus}
+                    className={`rounded-lg px-3.5 py-2 text-xs font-semibold text-white shadow-sm transition-colors disabled:opacity-50 ${statusConfirmation.currentStatus === 'INACTIVE' ? 'bg-emerald-600 hover:bg-emerald-700' : 'bg-amber-600 hover:bg-amber-700'}`}
+                  >
+                    {statusUpdating ? 'Đang cập nhật...' : statusConfirmation.currentStatus === 'INACTIVE' ? 'Kích hoạt lại' : 'Xác nhận ngừng bán'}
+                  </button>
+                </div>
               </motion.div>
             </div>
           )}

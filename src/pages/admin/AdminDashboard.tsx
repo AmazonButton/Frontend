@@ -651,9 +651,13 @@ export const AdminDashboard: React.FC = () => {
   // Toggle user status
   const handleToggleUserStatus = async (userId: string) => {
     try {
-      await api.post(`/admin/users/${userId}/toggle-status`).catch(() => {});
+      await api.post(`/admin/users/${encodeURIComponent(userId)}/toggle-status`).catch(() => {});
       setUsersList((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, isActive: !u.isActive } : u))
+        prev.map((u) =>
+          u.id === userId || String(u.id) === String(userId) || String(u.userId) === String(userId)
+            ? { ...u, isActive: !u.isActive, status: !u.isActive ? 'ACTIVE' : 'INACTIVE' }
+            : u
+        )
       );
     } catch (_) {}
   };
@@ -661,9 +665,13 @@ export const AdminDashboard: React.FC = () => {
   // Change user role
   const handleChangeUserRole = async (userId: string, newRole: string) => {
     try {
-      await api.post(`/admin/users/${userId}/role`, { role: newRole }).catch(() => {});
+      await api.post(`/admin/users/${encodeURIComponent(userId)}/role`, { role: newRole }).catch(() => {});
       setUsersList((prev) =>
-        prev.map((u) => (u.id === userId ? { ...u, role: newRole } : u))
+        prev.map((u) =>
+          u.id === userId || String(u.id) === String(userId) || String(u.userId) === String(userId)
+            ? { ...u, role: newRole }
+            : u
+        )
       );
     } catch (_) {}
   };

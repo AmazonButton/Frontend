@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User } from '../types';
 import { api } from '../services/api';
-import { updateSocketAuth } from '../services/socket';
+import { updateSocketAuth, clearSocketSubscriptions } from '../services/socket';
 
 interface AuthContextType {
   user: User | null;
@@ -62,6 +62,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setRefreshToken(null);
     setUser(null);
     setIsLoading(false);
+    clearSocketSubscriptions();
     updateSocketAuth(null);
 
     // 2. Fire-and-forget background revoke to server without blocking UI
@@ -134,6 +135,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         userData.customerProfileId || (userData as any).customerProfile?.id || null,
     };
 
+    clearSocketSubscriptions();
     localStorage.setItem('smart_order_user', JSON.stringify(normalizedUser));
     setUser(normalizedUser);
     setIsLoading(false);

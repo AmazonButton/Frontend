@@ -31,6 +31,7 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   // Create / Edit Modal
   const [showModal, setShowModal] = useState(false);
@@ -62,21 +63,35 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
   // Universal body scroll lock & header submerge whenever any modal is open
   useBodyScrollLock(Boolean(showModal || deployingTemplate));
 
-  const fetchData = async () => {
-    try {
-      const [tempRes, prodRes, devRes] = await Promise.all([
+  const fetchData = async (attempt = 0) => {
+    const results = await Promise.allSettled([
         api.get('/device-templates'),
         api.get('/products'),
         api.get('/devices'),
-      ]);
-      if (tempRes.data.success) setTemplates(tempRes.data.data);
-      if (prodRes.data.success) setProducts(prodRes.data.data);
-      if (devRes.data.success) setDevices(devRes.data.data);
-    } catch (e) {
-      console.error('Failed to load templates data:', e);
-    } finally {
-      setLoading(false);
+    ]);
+    const [templateResult, productResult, deviceResult] = results;
+    const failedRequests = results.filter((result) => result.status === 'rejected');
+
+    if (templateResult.status === 'fulfilled' && templateResult.value.data?.success) {
+      setTemplates(templateResult.value.data.data);
     }
+    if (productResult.status === 'fulfilled' && productResult.value.data?.success) {
+      setProducts(productResult.value.data.data);
+    }
+    if (deviceResult.status === 'fulfilled' && deviceResult.value.data?.success) {
+      setDevices(deviceResult.value.data.data);
+    }
+
+    if (failedRequests.length > 0) {
+      console.error('Failed to load templates data:', failedRequests);
+      setLoadError('Một phần dữ liệu chưa tải được. Hệ thống sẽ tự thử lại.');
+      if (attempt < 2) {
+        window.setTimeout(() => void fetchData(attempt + 1), 1000 * (attempt + 1));
+      }
+    } else {
+      setLoadError(null);
+    }
+    setLoading(false);
   };
 
   useEffect(() => {
@@ -238,6 +253,14 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
       </div>
 
       {/* ── Templates Content ── */}
+      {loadError && (
+        <div className="flex items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
+          <span>{loadError}</span>
+          <button type="button" onClick={() => void fetchData()} className="font-semibold underline underline-offset-2">
+            Thử lại ngay
+          </button>
+        </div>
+      )}
       {loading ? (
         <div className="py-20 text-center">
           <div className="inline-flex items-center gap-2 text-xs text-slate-400 tabular-nums">
