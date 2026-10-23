@@ -21,13 +21,15 @@ export interface User {
 
 export interface Store {
   id: string;
+  storeId?: string;
   name: string;
   code: string;
-  ownerName: string;
+  ownerName?: string;
+  owner?: any;
   phone: string;
   email: string;
   address: string;
-  status: 'PENDING_APPROVAL' | 'ACTIVE' | 'SUSPENDED' | 'REJECTED';
+  status: 'PENDING_APPROVAL' | 'ACTIVE' | 'SUSPENDED' | 'REJECTED' | string;
   rejectionReason?: string | null;
   approvedAt?: string | null;
 }

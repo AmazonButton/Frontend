@@ -28,10 +28,26 @@ class ErrorBoundary extends React.Component<
   }
 
   static getDerivedStateFromError(error: Error) {
+    // Suppress benign third-party DOM extension conflicts (e.g. Chrome Translate, Built-in AI)
+    if (
+      error.message?.includes('removeChild') ||
+      error.message?.includes('insertBefore') ||
+      error.message?.includes('not a child of this node')
+    ) {
+      return { hasError: false, error: null };
+    }
     return { hasError: true, error };
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    if (
+      error.message?.includes('removeChild') ||
+      error.message?.includes('insertBefore') ||
+      error.message?.includes('not a child of this node')
+    ) {
+      console.warn('[ErrorBoundary] Ignored benign DOM mutation from browser extension:', error.message);
+      return;
+    }
     console.error('Unhandled React Error:', error, errorInfo);
   }
 
@@ -76,7 +92,12 @@ class ErrorBoundary extends React.Component<
   }
 }
 
-ReactDOM.createRoot(document.getElementById('root') as HTMLElement).render(
+const rootElement = document.getElementById('root') as HTMLElement;
+// Cache root in development to prevent duplicate createRoot warnings on Vite HMR
+const root = (window as any).__reactRoot || ReactDOM.createRoot(rootElement);
+(window as any).__reactRoot = root;
+
+root.render(
   <React.StrictMode>
     <ErrorBoundary>
       <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>

@@ -470,8 +470,9 @@ export const StoreDevicesPage: React.FC = () => {
         customName: editForm.customName.trim(),
         productId: editForm.productId || null,
         defaultQuantity: Number(editForm.defaultQuantity) || 1,
-        location: editForm.location.trim(),
-        description: editForm.description.trim(),
+        quantity: Number(editForm.defaultQuantity) || 1,
+        location: editForm.location?.trim() || undefined,
+        description: editForm.description?.trim() || undefined,
         status: editForm.status,
         batteryLevel: Number(editForm.batteryLevel) || 100,
         expiresAt: editForm.expiresAt ? new Date(editForm.expiresAt).toISOString() : null,
@@ -482,7 +483,12 @@ export const StoreDevicesPage: React.FC = () => {
         await fetchData();
       }
     } catch (err: any) {
-      setEditError(err.response?.data?.message || 'Không thể cập nhật thiết bị');
+      const apiMsg = err.response?.data?.message;
+      setEditError(
+        Array.isArray(apiMsg)
+          ? apiMsg.join(', ')
+          : (typeof apiMsg === 'string' ? apiMsg : 'Không thể cập nhật thiết bị')
+      );
     } finally {
       setEditLoading(false);
     }
@@ -547,12 +553,25 @@ export const StoreDevicesPage: React.FC = () => {
         fetchData();
       };
 
+      const handleDevicesAllocated = (payload: any) => {
+        if (user?.storeId && payload?.storeId && String(user.storeId) !== String(payload.storeId)) {
+          return;
+        }
+        fetchData();
+        toast.success(
+          payload.message || `Cửa hàng vừa nhận bàn giao ${payload.allocatedCount || ''} nút bấm mới vào kho!`,
+          { title: '📦 Kho nút bấm cập nhật 🎉', duration: 7000 }
+        );
+      };
+
       socket.on('DEVICE_HEARTBEAT', handleHeartbeat);
       socket.on('device:online', handleRefresh);
       socket.on('device:offline', handleRefresh);
       socket.on('device:product_changed', handleRefresh);
       socket.on('device:configured', handleRefresh);
       socket.on('device:deleted', handleRefresh);
+      socket.on('DEVICES_ALLOCATED', handleDevicesAllocated);
+      socket.on('devices:allocated', handleDevicesAllocated);
 
       return () => {
         socket.off('DEVICE_HEARTBEAT', handleHeartbeat);
@@ -561,6 +580,8 @@ export const StoreDevicesPage: React.FC = () => {
         socket.off('device:product_changed', handleRefresh);
         socket.off('device:configured', handleRefresh);
         socket.off('device:deleted', handleRefresh);
+        socket.off('DEVICES_ALLOCATED', handleDevicesAllocated);
+        socket.off('devices:allocated', handleDevicesAllocated);
       };
     }
   }, [user]);

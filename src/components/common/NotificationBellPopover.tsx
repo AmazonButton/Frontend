@@ -5,6 +5,7 @@ import {
   ShoppingBag,
   XCircle,
   Inbox,
+  Cpu,
 } from 'lucide-react';
 import { api } from '../../services/api';
 import { getSocket, subscribeToStore, subscribeToCustomer } from '../../services/socket';
@@ -15,7 +16,7 @@ import { useNavigate } from 'react-router-dom';
 
 export interface AppNotification {
   id: string;
-  type: 'ORDER_CREATED' | 'ORDER_CANCELLED' | 'ORDER_STATUS_CHANGED' | 'SYSTEM';
+  type: 'ORDER_CREATED' | 'ORDER_CANCELLED' | 'ORDER_STATUS_CHANGED' | 'SYSTEM' | 'DEVICES_ALLOCATED' | 'DEVICE_ASSIGNED';
   title: string;
   orderNumber?: string;
   orderId?: string;
@@ -100,53 +101,84 @@ export const NotificationBellPopover: React.FC = () => {
   useEffect(() => {
     if (!user || !token || isLoading) return;
     let isMounted = true;
-    const fetchRecentOrders = async () => {
+    const fetchRecentActivities = async () => {
       try {
-        const res = await api.get('/orders');
-        const ordersData = res.data?.data || res.data || [];
-        if (!Array.isArray(ordersData) || ordersData.length === 0) return;
+        const promises: Promise<any>[] = [api.get('/orders').catch(() => ({ data: { data: [] } }))];
+        if (user.storeId || ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(user.role)) {
+          promises.push(api.get('/devices').catch(() => ({ data: { data: [] } })));
+        }
+
+        const [ordersRes, devicesRes] = await Promise.all(promises);
+        const ordersData = ordersRes.data?.data || ordersRes.data || [];
+        const devicesData = devicesRes?.data?.data || devicesRes?.data || [];
 
         const realNotifs: AppNotification[] = [];
-        ordersData.slice(0, 20).forEach((ord: any) => {
-          const firstItem = ord.items?.[0];
-          const productName = firstItem?.product?.name || firstItem?.productName || 'Nhu yếu phẩm';
-          const qty = firstItem?.quantity || 1;
-          const isCancelled = ord.status === 'CANCELLED';
-          const orderNum = ord.orderNumber || (ord.id ? String(ord.id).slice(-6) : 'SOB');
 
-          if (isCancelled) {
+        // 1. Process orders
+        if (Array.isArray(ordersData)) {
+          ordersData.slice(0, 20).forEach((ord: any) => {
+            const firstItem = ord.items?.[0];
+            const productName = firstItem?.product?.name || firstItem?.productName || 'Nhu yếu phẩm';
+            const qty = firstItem?.quantity || 1;
+            const isCancelled = ord.status === 'CANCELLED';
+            const orderNum = ord.orderNumber || (ord.id ? String(ord.id).slice(-6) : 'SOB');
+
+            if (isCancelled) {
+              realNotifs.push({
+                id: `notif_cancel_${ord.id}`,
+                type: 'ORDER_CANCELLED',
+                title: `Đã hủy #${orderNum}`,
+                orderNumber: orderNum,
+                orderId: ord.id,
+                productName,
+                quantity: qty,
+                totalAmount: ord.totalAmount,
+                reason: ord.cancellationReason || 'Khách hủy trong 60 giây đầu',
+                customerName: ord.customerName || ord.customer?.user?.fullName || 'Khách hàng',
+                status: 'CANCELLED',
+                isRead: true,
+                timestamp: ord.cancelledAt || ord.updatedAt || ord.createdAt,
+              });
+            } else {
+              realNotifs.push({
+                id: `notif_new_${ord.id}`,
+                type: 'ORDER_CREATED',
+                title: `Đơn mới #${orderNum}`,
+                orderNumber: orderNum,
+                orderId: ord.id,
+                productName,
+                quantity: qty,
+                totalAmount: ord.totalAmount,
+                customerName: ord.customerName || ord.customer?.user?.fullName || 'Khách hàng',
+                status: ord.status,
+                isRead: true,
+                timestamp: ord.createdAt,
+              });
+            }
+          });
+        }
+
+        // 2. Process newly allocated devices in store inventory
+        if (Array.isArray(devicesData) && devicesData.length > 0) {
+          const now = Date.now();
+          const recentAllocated = devicesData.filter((d: any) => {
+            const updatedTime = new Date(d.updatedAt || d.createdAt).getTime();
+            return now - updatedTime < 48 * 60 * 60 * 1000 && (!d.customerId || d.customerId === 'null');
+          });
+
+          if (recentAllocated.length > 0) {
+            const codes = recentAllocated.map((d: any) => d.buttonCode || d.deviceId).slice(0, 4).join(', ');
             realNotifs.push({
-              id: `notif_cancel_${ord.id}`,
-              type: 'ORDER_CANCELLED',
-              title: `Đã hủy #${orderNum}`,
-              orderNumber: orderNum,
-              orderId: ord.id,
-              productName,
-              quantity: qty,
-              totalAmount: ord.totalAmount,
-              reason: ord.cancellationReason || 'Khách hủy trong 60 giây đầu',
-              customerName: ord.customerName || ord.customer?.user?.fullName || 'Khách hàng',
-              status: 'CANCELLED',
-              isRead: true,
-              timestamp: ord.cancelledAt || ord.updatedAt || ord.createdAt,
-            });
-          } else {
-            realNotifs.push({
-              id: `notif_new_${ord.id}`,
-              type: 'ORDER_CREATED',
-              title: `Đơn mới #${orderNum}`,
-              orderNumber: orderNum,
-              orderId: ord.id,
-              productName,
-              quantity: qty,
-              totalAmount: ord.totalAmount,
-              customerName: ord.customerName || ord.customer?.user?.fullName || 'Khách hàng',
-              status: ord.status,
-              isRead: true,
-              timestamp: ord.createdAt,
+              id: `notif_alloc_init_${recentAllocated.length}`,
+              type: 'DEVICES_ALLOCATED',
+              title: `Bàn giao ${recentAllocated.length} nút bấm mới!`,
+              productName: `Mã nút: ${codes}${recentAllocated.length > 4 ? '...' : ''}`,
+              status: 'ACTIVE',
+              isRead: false,
+              timestamp: recentAllocated[0].updatedAt || recentAllocated[0].createdAt || new Date().toISOString(),
             });
           }
-        });
+        }
 
         if (isMounted) {
           setNotifications((prev) => {
@@ -160,12 +192,12 @@ export const NotificationBellPopover: React.FC = () => {
         }
       } catch (err: any) {
         if (err?.response?.status !== 401) {
-          console.warn('Could not pre-fetch orders for notification bell:', err);
+          console.warn('Could not pre-fetch orders/devices for notification bell:', err);
         }
       }
     };
 
-    fetchRecentOrders();
+    fetchRecentActivities();
     return () => {
       isMounted = false;
     };
@@ -246,18 +278,62 @@ export const NotificationBellPopover: React.FC = () => {
       }
     };
 
+    const handleDevicesAllocated = (payload: any) => {
+      if (user?.storeId && payload?.storeId && String(user.storeId) !== String(payload.storeId)) {
+        return;
+      }
+
+      const count = payload.allocatedCount || 1;
+      const deviceCodes = Array.isArray(payload.deviceIds) ? payload.deviceIds.join(', ') : '';
+      const newNotif: AppNotification = {
+        id: `notif_alloc_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+        type: 'DEVICES_ALLOCATED',
+        title: `Bàn giao ${count} nút bấm mới!`,
+        productName: deviceCodes ? `Mã thiết bị: ${deviceCodes}` : 'Nút bấm thông minh mới',
+        status: 'ACTIVE',
+        isRead: false,
+        timestamp: payload.timestamp || new Date().toISOString(),
+      };
+
+      setNotifications((prev) => {
+        const isDuplicate = prev.some(
+          (n) =>
+            n.type === 'DEVICES_ALLOCATED' &&
+            Math.abs(new Date(n.timestamp).getTime() - new Date(newNotif.timestamp).getTime()) < 5000
+        );
+        if (isDuplicate) return prev;
+        return [newNotif, ...prev];
+      });
+
+      try {
+        playOrderChime();
+      } catch {}
+
+      toast.success(
+        payload.message || `Quản trị viên vừa cấp phát ${count} nút bấm mới vào kho của bạn!`,
+        {
+          title: '📦 Nút bấm mới về kho!',
+          duration: 7000,
+        }
+      );
+    };
+
     socket.on('ORDER_CREATED', handleOrderCreated);
     socket.on('order:created', handleOrderCreated);
     socket.on('ORDER_CANCELLED', handleOrderCancelled);
     socket.on('order:cancelled', handleOrderCancelled);
+    socket.on('DEVICES_ALLOCATED', handleDevicesAllocated);
+    socket.on('devices:allocated', handleDevicesAllocated);
 
     return () => {
       socket.off('ORDER_CREATED', handleOrderCreated);
       socket.off('order:created', handleOrderCreated);
       socket.off('ORDER_CANCELLED', handleOrderCancelled);
       socket.off('order:cancelled', handleOrderCancelled);
+      socket.off('DEVICES_ALLOCATED', handleDevicesAllocated);
+      socket.off('devices:allocated', handleDevicesAllocated);
     };
-  }, [playOrderChime, playCancelChime]);
+  }, [playOrderChime, playCancelChime, user]);
 
   const unreadCount = useMemo(() => {
     return notifications.filter((n) => !n.isRead).length;
@@ -291,6 +367,11 @@ export const NotificationBellPopover: React.FC = () => {
       prev.map((n) => (n.id === notif.id ? { ...n, isRead: true } : n))
     );
     setIsOpen(false);
+
+    if (notif.type === 'DEVICES_ALLOCATED' || notif.type === 'DEVICE_ASSIGNED') {
+      navigate('/store/devices');
+      return;
+    }
 
     if (user && ['STORE_OWNER', 'STORE_MANAGER', 'STAFF_ORDER'].includes(user.role)) {
       navigate('/store/dashboard');
@@ -415,6 +496,7 @@ export const NotificationBellPopover: React.FC = () => {
                 </div>
               ) : (
                 filteredNotifications.map((notif) => {
+                  const isDevice = notif.type === 'DEVICES_ALLOCATED' || notif.type === 'DEVICE_ASSIGNED';
                   const isNewOrder = notif.type === 'ORDER_CREATED';
                   const isCancel = notif.type === 'ORDER_CANCELLED';
                   const rawNum = notif.orderNumber || (notif.orderId ? notif.orderId.slice(-6) : '');
@@ -432,12 +514,16 @@ export const NotificationBellPopover: React.FC = () => {
                       {/* Left Icon: Small circular icon 28x28 */}
                       <div
                         className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                          isNewOrder
+                          isDevice
+                            ? 'bg-blue-50 text-[#0E6BA8] dark:bg-blue-950/40 dark:text-sky-400'
+                            : isNewOrder
                             ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
                             : 'bg-rose-50 text-rose-500 dark:bg-rose-950/40 dark:text-rose-400'
                         }`}
                       >
-                        {isNewOrder ? (
+                        {isDevice ? (
+                          <Cpu className="w-3.5 h-3.5" />
+                        ) : isNewOrder ? (
                           <ShoppingBag className="w-3.5 h-3.5" />
                         ) : (
                           <XCircle className="w-3.5 h-3.5" />
@@ -452,7 +538,7 @@ export const NotificationBellPopover: React.FC = () => {
                             className="text-xs font-semibold text-slate-900 dark:text-white tabular-nums truncate cursor-help"
                             title={cleanCode !== shortCode ? `Mã đầy đủ: #${cleanCode}` : undefined}
                           >
-                            {isNewOrder ? `Đơn mới #${shortCode}` : `Đã hủy #${shortCode}`}
+                            {isDevice ? notif.title : isNewOrder ? `Đơn mới #${shortCode}` : `Đã hủy #${shortCode}`}
                           </span>
                           <span className="text-[11px] text-slate-400 dark:text-zinc-500 whitespace-nowrap shrink-0">
                             {formatRelativeTime(notif.timestamp)}
@@ -461,7 +547,7 @@ export const NotificationBellPopover: React.FC = () => {
 
                         {/* Row 2: Product Name & Price */}
                         <div className="text-xs text-slate-700 dark:text-zinc-300 font-medium truncate mt-0.5">
-                          <span>{notif.productName || 'Nhu yếu phẩm'}</span>
+                          <span>{notif.productName || (isDevice ? 'Nút bấm thông minh' : 'Nhu yếu phẩm')}</span>
                           {notif.quantity && notif.quantity > 1 ? ` (${notif.quantity}x)` : ''}
                           {notif.totalAmount !== undefined && (
                             <span className="text-slate-900 dark:text-white font-semibold ml-1.5 tabular-nums">
@@ -472,9 +558,13 @@ export const NotificationBellPopover: React.FC = () => {
 
                         {/* Row 3: Secondary Information */}
                         <div className="text-[11px] text-slate-400 dark:text-zinc-500 mt-0.5 truncate">
-                          {isCancel
-                            ? (notif.reason || 'Khách hủy trong 60 giây đầu')
-                            : `Khách hàng: ${notif.customerName || 'Đang cập nhật'}`}
+                          {isDevice ? (
+                            <span className="text-[#0E6BA8] dark:text-sky-400 font-medium">Bấm để quản lý kho thiết bị →</span>
+                          ) : isCancel ? (
+                            notif.reason || 'Khách hủy trong 60 giây đầu'
+                          ) : (
+                            `Khách hàng: ${notif.customerName || 'Đang cập nhật'}`
+                          )}
                         </div>
                       </div>
 

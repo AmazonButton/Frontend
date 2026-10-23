@@ -23,7 +23,11 @@ export function getSocket(): Socket {
       query: {
         token: token ? `Bearer ${token}` : undefined,
       },
-      transports: ['websocket', 'polling'],
+      // Start with HTTP polling so a backend that is still starting does not
+      // produce a noisy browser-level WebSocket refusal. Socket.IO upgrades to
+      // WebSocket automatically as soon as the server accepts it.
+      transports: ['polling', 'websocket'],
+      upgrade: true,
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,

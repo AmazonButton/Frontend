@@ -26,6 +26,7 @@ import { Link } from 'react-router-dom';
 
 export const StoreDeviceTemplatesPage: React.FC = () => {
   const { user } = useAuth();
+  const portalTarget = typeof document !== 'undefined' ? (document.getElementById('modal-root') || document.body) : null;
   const [templates, setTemplates] = useState<DeviceTemplate[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
   const [devices, setDevices] = useState<Device[]>([]);
@@ -122,15 +123,32 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
     setModalError(null);
 
     try {
+      const payload: any = {
+        name: templateForm.name.trim(),
+        description: templateForm.description?.trim() || undefined,
+        category: templateForm.category,
+        defaultProductId: templateForm.defaultProductId ? String(templateForm.defaultProductId) : undefined,
+        singlePressAction: templateForm.singlePressAction || 'CREATE_ORDER',
+        doublePressAction: templateForm.doublePressAction || 'CANCEL_ORDER',
+        longPressAction: templateForm.longPressAction || 'WIFI_CONFIGURATION',
+        defaultQuantity: Number(templateForm.defaultQuantity) || 1,
+        cancelWindowSeconds: Number(templateForm.cancelWindowSeconds) || 60,
+      };
+
       if (editingTemplate) {
-        await api.patch(`/device-templates/${editingTemplate.id}`, templateForm);
+        await api.patch(`/device-templates/${editingTemplate.id}`, payload);
       } else {
-        await api.post('/device-templates', templateForm);
+        await api.post('/device-templates', payload);
       }
       setShowModal(false);
       fetchData();
     } catch (err: any) {
-      setModalError(err.response?.data?.message || 'Không thể lưu template');
+      const apiMsg = err.response?.data?.message;
+      setModalError(
+        Array.isArray(apiMsg)
+          ? apiMsg.join(', ')
+          : (typeof apiMsg === 'string' ? apiMsg : 'Không thể lưu template cấu hình thiết bị')
+      );
     } finally {
       setModalLoading(false);
     }
@@ -252,7 +270,9 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
         /* ── Templates Grid (Flat Linear / Stripe 3-column Layout) ── */
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {templates.map((t) => {
-            const product = t.defaultProduct || products.find((p) => p.id === t.defaultProductId);
+            const product =
+              t.defaultProduct ||
+              products.find((p) => String(p.id) === String(t.defaultProductId));
 
             return (
               <div
@@ -544,7 +564,7 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
           </div>
         )}
       </AnimatePresence>,
-      document.body
+      (portalTarget || document.body) as HTMLElement
     )}
 
       {/* ========================================================================= */}
@@ -723,7 +743,7 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
           </div>
         )}
       </AnimatePresence>,
-      document.body
+      (portalTarget || document.body) as HTMLElement
     )}
     </div>
   );
