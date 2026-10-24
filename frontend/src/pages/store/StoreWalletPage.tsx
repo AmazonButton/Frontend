@@ -139,7 +139,7 @@ export const StoreWalletPage: React.FC = () => {
           setAccountHolderName(response.data.accountName);
         }
       } catch (err: any) {
-        console.warn('Bank lookup notice:', err.response?.data?.message || err.message);
+        void err // Bank lookup may fail for unknown accounts;
       } finally {
         if (requestId === accountLookupRequestId.current) setLookingUpAccount(false);
       }

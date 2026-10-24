@@ -186,6 +186,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [registeredEmail, setRegisteredEmail] = useState('');
+  const [isEnteringDashboard, setIsEnteringDashboard] = useState(false);
 
   const usernameTimerRef = useRef<NodeJS.Timeout | null>(null);
   const emailTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -233,21 +234,15 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
         payload.address = address.trim() || undefined;
       }
 
+      // Send the verified Google access token together with the registration
+      // details. The token remains the source of identity; these fields let the
+      // backend create the correct customer/store-owner profile on first login.
       const requestBody = {
         token: (tokenResponse as any).access_token,
         ...payload,
       };
 
-      let res;
-      try {
-        res = await api.post('/auth/google-login', requestBody);
-      } catch (e: any) {
-        if (e.response?.status === 404 || e.response?.status === 400) {
-          res = await api.post('/auth/google', requestBody);
-        } else {
-          throw e;
-        }
-      }
+      const res = await api.post('/auth/google-login', requestBody);
 
       if (res.data?.success) {
         const token = res.data.accessToken || res.data.token || res.data.data?.accessToken;
@@ -276,11 +271,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
 
       throw new Error(res.data?.message || 'Đăng nhập với Google không thành công.');
     } catch (err: any) {
-      console.error('Google OAuth error:', err);
-      const errMsg =
+      let errMsg =
         err.response?.data?.message ||
         err.message ||
         'Không thể xác thực với Google. Vui lòng thử lại.';
+      if (typeof errMsg === 'string' && (errMsg.includes('Supabase') || err.response?.status === 401)) {
+        errMsg = 'Backend hiện tại yêu cầu đăng nhập trực tiếp bằng Tên đăng nhập / Email và Mật khẩu.';
+      }
       setGoogleError(errMsg);
       toast.error(errMsg);
     } finally {
@@ -291,7 +288,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
   const loginWithGoogle = useGoogleLogin({
     onSuccess: handleGoogleSuccess,
     onError: (errResponse) => {
-      console.error('Google Login Popup Error:', errResponse);
+      // Google login error handled via toast below
       const msg = 'Đăng nhập Google thất bại hoặc bạn đã đóng cửa sổ xác thực.';
       setGoogleError(msg);
       toast.error(msg);
@@ -445,16 +442,61 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
         address: address.trim(),
       });
 
-      if (res.data.success) {
+      if (res.data?.success || res.status === 201) {
         setRegisteredEmail(registerEmail.trim().toLowerCase());
         setRegisteredData(res.data);
+
+        // Pre-fill login credentials
+        setIdentifier(username.trim() || registerEmail.trim());
+        setLoginPassword(registerPassword);
+
+        // Automatically authenticate so user has an active session immediately
+        try {
+          const loginIdentifier = username.trim().toLowerCase() || registerEmail.trim().toLowerCase();
+          const loginRes = await api.post('/auth/login', {
+            email: loginIdentifier,
+            password: registerPassword,
+            rememberMe: true,
+          });
+
+          if (loginRes.data?.success) {
+            const token = loginRes.data.accessToken || loginRes.data.data?.accessToken || loginRes.data.data?.token;
+            const refreshToken = loginRes.data.refreshToken || loginRes.data.data?.refreshToken;
+            const userData = loginRes.data.user || loginRes.data.data?.user || res.data?.data?.user;
+            if (token && userData) {
+              login(token, userData, refreshToken);
+              setRegisteredData({
+                ...res.data,
+                accessToken: token,
+                refreshToken,
+                user: userData,
+              });
+            }
+          }
+        } catch (_autoLoginErr) {
+          // If auto login fails, user can click the CTA button or use standard login
+        }
+
         setRegistrationSuccess(true);
+      } else {
+        throw new Error(res.data?.message || 'Đăng ký không thành công.');
       }
     } catch (err: any) {
-      const msg =
+      let msg =
         err.response?.data?.message ||
+        err.message ||
         'Đăng ký thất bại. Vui lòng kiểm tra lại thông tin đã nhập.';
+      if (typeof msg === 'string') {
+        if (msg.includes('(`phone`)') || msg.includes('phone')) {
+          msg = 'Số điện thoại này đã được đăng ký trong hệ thống. Vui lòng nhập số điện thoại khác.';
+        } else if (msg.includes('(`email`)') || msg.includes('email')) {
+          msg = 'Email này đã được đăng ký. Vui lòng sử dụng email khác.';
+        } else if (msg.includes('(`username`)') || msg.includes('username')) {
+          msg = 'Tên đăng nhập này đã được sử dụng. Vui lòng chọn tên đăng nhập khác.';
+        }
+      }
       setRegisterError(msg);
+      toast.error(msg);
     } finally {
       setRegisterLoading(false);
     }
@@ -912,25 +954,61 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
               <div className="space-y-2.5 pt-2">
                 <button
                   type="button"
-                  onClick={() => {
-                    const token = registeredData?.accessToken || registeredData?.token;
-                    const user = registeredData?.user || registeredData?.data?.user;
-                    const refreshToken = registeredData?.refreshToken;
+                  disabled={isEnteringDashboard}
+                  onClick={async () => {
+                    setIsEnteringDashboard(true);
+                    let token = registeredData?.accessToken || registeredData?.token;
+                    let user = registeredData?.user || registeredData?.data?.user;
+                    let refreshToken = registeredData?.refreshToken;
+
+                    if (!token && (username || registerEmail) && registerPassword) {
+                      try {
+                        const loginIdentifier = username.trim().toLowerCase() || registerEmail.trim().toLowerCase();
+                        const loginRes = await api.post('/auth/login', {
+                          email: loginIdentifier,
+                          password: registerPassword,
+                          rememberMe: true,
+                        });
+                        if (loginRes.data?.success) {
+                          token = loginRes.data.accessToken || loginRes.data.data?.accessToken || loginRes.data.data?.token;
+                          refreshToken = loginRes.data.refreshToken || loginRes.data.data?.refreshToken;
+                          user = loginRes.data.user || loginRes.data.data?.user;
+                          if (token && user) {
+                            login(token, user, refreshToken);
+                          }
+                        }
+                      } catch {
+                        // ignore and fall back
+                      }
+                    }
+
+                    setIsEnteringDashboard(false);
                     if (token && user) {
                       login(token, user, refreshToken);
                       if (['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role)) {
-                        navigate('/store/dashboard');
+                        navigate('/store/dashboard', { replace: true });
                       } else {
-                        navigate('/customer/home');
+                        navigate('/customer/home', { replace: true });
                       }
                     } else {
+                      setIdentifier(username.trim() || registerEmail.trim());
+                      setLoginPassword(registerPassword);
                       switchToLogin();
                     }
                   }}
-                  className="w-full py-2.5 px-4 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white font-medium text-sm transition-all shadow-xs active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer group"
+                  className="w-full py-2.5 px-4 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white font-medium text-sm transition-all shadow-xs active:scale-[0.99] flex items-center justify-center gap-2 cursor-pointer group disabled:opacity-60"
                 >
-                  <span>{role === 'STORE_OWNER' ? 'Vào Bảng Quản Trị Cửa Hàng' : 'Bắt Đầu Mua Sắm & Đặt Hàng'}</span>
-                  <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                  {isEnteringDashboard ? (
+                    <>
+                      <Loader2 className="w-4 h-4 animate-spin text-white" />
+                      <span>Đang chuyển hướng...</span>
+                    </>
+                  ) : (
+                    <>
+                      <span>{role === 'STORE_OWNER' ? 'Vào Bảng Quản Trị Cửa Hàng' : 'Bắt Đầu Mua Sắm & Đặt Hàng'}</span>
+                      <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-1" />
+                    </>
+                  )}
                 </button>
 
                 <div className="text-center pt-1">

@@ -90,7 +90,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
           }
         }
       } catch (err: any) {
-        console.error('Failed to create payment link:', err);
+        // Payment link error is shown via setPayosError below
         if (isMounted) {
           setPayosError(err.response?.data?.message || 'Không thể tạo liên kết thanh toán PayOS');
         }

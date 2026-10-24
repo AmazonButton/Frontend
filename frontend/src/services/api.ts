@@ -6,36 +6,27 @@ export const resolveApiUrl = (): string => {
       const urlParams = new URLSearchParams(window.location.search);
       const queryApi = urlParams.get('api') || urlParams.get('apiUrl') || urlParams.get('backend');
       if (queryApi) {
-        const clean = queryApi.trim().replace(/\/+$/, '');
+        const clean = queryApi.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '').replace(/\/api$/, '');
         localStorage.setItem('smart_order_api_url', clean);
         return clean;
       }
       const stored = localStorage.getItem('smart_order_api_url');
-      if (stored && stored.includes('produces-accurately-received-recovered')) {
+      if (stored && (stored.includes('produces-accurately') || stored.includes('trycloudflare.com'))) {
         localStorage.removeItem('smart_order_api_url');
       } else if (stored) {
-        return stored.trim().replace(/\/+$/, '');
-      }
-
-      // Automatically default to live backend HTTPS tunnel when on Vercel
-      if (window.location.hostname.includes('vercel.app')) {
-        return 'https://dense-pgp-row-polls.trycloudflare.com';
+        return stored.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '').replace(/\/api$/, '');
       }
     } catch {
       // Ignore localStorage read errors in restricted contexts
     }
   }
 
-  const envUrl = (import.meta as any).env?.VITE_API_URL;
-  if (envUrl && typeof envUrl === 'string' && envUrl.startsWith('http')) {
-    return envUrl.trim().replace(/\/+$/, '');
+  const rawEnv = (import.meta as any).env?.VITE_API_BASE_URL || (import.meta as any).env?.VITE_API_URL;
+  if (rawEnv && typeof rawEnv === 'string' && rawEnv.startsWith('http')) {
+    return rawEnv.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '').replace(/\/api$/, '');
   }
 
-  if (typeof window !== 'undefined' && !window.location.hostname.includes('localhost') && !window.location.hostname.includes('127.0.0.1')) {
-    return 'https://dense-pgp-row-polls.trycloudflare.com';
-  }
-
-  return 'http://localhost:5000';
+  return 'https://backend-fae8.onrender.com';
 };
 
 export const API_URL = resolveApiUrl();

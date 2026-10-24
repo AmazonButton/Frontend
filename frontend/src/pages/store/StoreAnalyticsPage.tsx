@@ -13,6 +13,7 @@ import {
   Cell,
 } from 'recharts';
 import { api } from '../../services/api';
+import { toast } from '../../context/ToastContext';
 import { Order, Device, Product } from '../../types';
 import {
   TrendingUp,
@@ -80,7 +81,7 @@ export const StoreAnalyticsPage: React.FC = () => {
         setBackendChartData(analyticsRes.data.data.chartData);
       }
     } catch (err) {
-      console.error('Error fetching analytics data:', err);
+      toast.error('Không tải được dữ liệu thống kê. Vui lòng thử lại.');
     } finally {
       setLoading(false);
       setRefreshing(false);

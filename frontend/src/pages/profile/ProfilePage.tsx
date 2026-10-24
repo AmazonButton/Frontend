@@ -224,7 +224,6 @@ export const ProfilePage: React.FC = () => {
         setTimeout(() => setSuccessToast(null), 3500);
       }
     } catch (err: any) {
-      console.error('Save profile error:', err);
       setErrorToast(err?.response?.data?.message || 'Có lỗi xảy ra khi lưu thông tin.');
       setTimeout(() => setErrorToast(null), 4000);
     } finally {

@@ -5,6 +5,7 @@ import { ArrowRight, CheckCircle2, Minus, PackageCheck, Plus, Search, ShoppingBa
 import { api } from '../../services/api';
 import { getSocket } from '../../services/socket';
 import { toast } from '../../context/ToastContext';
+import { PayOSCancelRecoveryModal, PayOSRecoveryOrder } from '../../components/orders/PayOSCancelRecoveryModal';
 
 const deliveryHeroBackground = '/assets/products/delivery-hero-pastel.png';
 
@@ -34,6 +35,7 @@ export const ShopPage: React.FC = () => {
   const [form, setForm] = useState({ customerName: '', customerPhone: '', deliveryAddress: '', paymentMethod: 'PAYOS' });
   const [cartBump, setCartBump] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [recoveryOrder, setRecoveryOrder] = useState<PayOSRecoveryOrder | null>(null);
 
   useEffect(() => { localStorage.setItem(CART_KEY, JSON.stringify(cart)); }, [cart]);
 
@@ -62,9 +64,66 @@ export const ShopPage: React.FC = () => {
       window.scrollTo({ top: 0, behavior: 'smooth' });
     }
     const status = params.get('payos_status');
+    const isCancelledPayOS = status === 'cancelled' || params.get('cancel') === 'true' || params.get('status') === 'CANCELLED';
+    const orderIdParam = params.get('orderId') || params.get('orderCode');
+
     if (params.get('cart') === 'open') setCartOpen(true);
-    if (status === 'success') setNotice('PayOS đã chuyển bạn trở lại. Trạng thái thanh toán đang được xác nhận từ PayOS.');
-    if (status === 'cancelled') setNotice('Bạn đã hủy thanh toán PayOS. Bạn có thể thử lại hoặc chọn thanh toán khi nhận hàng.');
+    if (status === 'success') {
+      // PayOS returning to this URL is not proof that the payment webhook has
+      // been verified. Keep the recovery data and wait for the server's paid
+      // status before presenting the order as successful.
+      setNotice('PayOS đã gửi kết quả giao dịch. Hệ thống đang xác minh thanh toán; đơn hàng chỉ hoàn tất khi trạng thái hiển thị “Đã thanh toán”.');
+      try {
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch {}
+    }
+    if (isCancelledPayOS) {
+      let pendingData: PayOSRecoveryOrder | null = null;
+      try {
+        const cached = sessionStorage.getItem('pending_payos_order');
+        if (cached) {
+          const parsed = JSON.parse(cached);
+          if (!orderIdParam || String(parsed.orderId) === String(orderIdParam)) {
+            pendingData = parsed;
+          }
+        }
+      } catch {}
+
+      const effectiveOrderId = orderIdParam || pendingData?.orderId;
+      if (effectiveOrderId) {
+        api.get(`/orders/${effectiveOrderId}`)
+          .then((res) => {
+            const serverOrder = res.data?.data || res.data;
+            if (serverOrder && serverOrder.orderStatus !== 'CANCELLED' && serverOrder.paymentStatus !== 'PAID') {
+              setRecoveryOrder({
+                orderId: serverOrder.id || serverOrder.orderId || effectiveOrderId,
+                orderNumber: serverOrder.orderNumber || serverOrder.orderCode || pendingData?.orderNumber,
+                totalAmount: serverOrder.totalAmount || pendingData?.totalAmount,
+                customerName: serverOrder.customerName || pendingData?.customerName,
+                customerPhone: serverOrder.customerPhone || pendingData?.customerPhone,
+                items: serverOrder.items?.map((it: any) => ({
+                  productName: it.productName || it.name,
+                  quantity: it.quantity,
+                  price: it.price || it.unitPrice,
+                })) || pendingData?.items,
+                createdAt: serverOrder.createdAt || pendingData?.createdAt,
+              });
+            }
+          })
+          .catch(() => {
+            if (pendingData) {
+              setRecoveryOrder(pendingData);
+            }
+          });
+      } else if (pendingData) {
+        setRecoveryOrder(pendingData);
+      }
+
+      setNotice('Bạn vừa rời cổng thanh toán PayOS. Đơn hàng của bạn đang được giữ ở trạng thái Chờ thanh toán.');
+      try {
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch {}
+    }
   }, [location.search]);
   const fetchCatalog = useCallback(() => {
     api.get('/products/storefront/catalog', { params: { search: search.trim() || undefined } })
@@ -141,9 +200,39 @@ export const ShopPage: React.FC = () => {
       });
       const order = response.data.data;
       if (form.paymentMethod === 'PAYOS') {
-        const payment = await api.post('/payments/payos/create-link', { orderId: order.id, amount: order.totalAmount, buyerName: form.customerName, buyerPhone: form.customerPhone, returnUrl: `${window.location.origin}/shop?payos_status=success&orderId=${encodeURIComponent(order.id)}`, cancelUrl: `${window.location.origin}/shop?payos_status=cancelled&orderId=${encodeURIComponent(order.id)}` });
+        // The deployed API validates this DTO strictly. Customer information is
+        // already stored on the order, so only send fields required to create
+        // the PayOS payment link; otherwise it rejects buyerName/buyerPhone
+        // before returning the checkout URL.
+        const payment = await api.post('/payments/payos/create-link', {
+          orderId: order.id,
+          amount: order.totalAmount,
+          description: `Thanh toan don ${order.orderNumber || order.id}`.slice(0, 25),
+          returnUrl: `${window.location.origin}/shop?payos_status=success&orderId=${encodeURIComponent(order.id)}`,
+          cancelUrl: `${window.location.origin}/shop?payos_status=cancelled&orderId=${encodeURIComponent(order.id)}`,
+        });
         const checkoutUrl = payment.data?.data?.checkoutUrl;
-        if (checkoutUrl) { localStorage.removeItem(CART_KEY); window.location.assign(checkoutUrl); return; }
+        if (checkoutUrl) {
+          try {
+            sessionStorage.setItem('pending_payos_order', JSON.stringify({
+              orderId: order.id,
+              orderNumber: order.orderNumber || order.orderCode,
+              totalAmount: order.totalAmount,
+              customerName: form.customerName,
+              customerPhone: form.customerPhone,
+              deliveryAddress: form.deliveryAddress,
+              items: cart.map((line) => ({
+                productName: line.product.name,
+                quantity: line.quantity,
+                price: line.product.price,
+              })),
+              createdAt: new Date().toISOString(),
+            }));
+          } catch {}
+          localStorage.removeItem(CART_KEY);
+          window.location.assign(checkoutUrl);
+          return;
+        }
         throw new Error('PayOS chưa trả về liên kết thanh toán.');
       }
       setCart([]); setCheckoutOpen(false); setCartOpen(false);
@@ -659,7 +748,11 @@ export const ShopPage: React.FC = () => {
               disabled={busy}
               className="mt-4 w-full rounded-xl bg-[#287DA8] py-3 font-bold text-white shadow-sm transition hover:bg-[#206588] disabled:opacity-60"
             >
-              {busy ? 'Đang xử lý...' : 'Xác nhận đặt hàng'}
+              {busy
+                ? 'Đang chuyển đến PayOS...'
+                : form.paymentMethod === 'PAYOS'
+                  ? 'Thanh toán PayOS'
+                  : 'Xác nhận đặt hàng'}
             </motion.button>
             <p className="mt-3 flex items-center justify-center gap-1 text-center text-[11px] text-slate-400">
               <CheckCircle2 size={13} className="text-teal-600" />
@@ -669,6 +762,22 @@ export const ShopPage: React.FC = () => {
         </div>
       )}
     </AnimatePresence>
+
+    <PayOSCancelRecoveryModal
+      isOpen={!!recoveryOrder}
+      order={recoveryOrder}
+      onClose={() => setRecoveryOrder(null)}
+      onSwitchedToCod={(orderId) => {
+        try { sessionStorage.removeItem('pending_payos_order'); } catch {}
+        setRecoveryOrder(null);
+        setNotice(`Đơn hàng #${recoveryOrder?.orderNumber || orderId} đã được chuyển sang thanh toán Tiền mặt khi nhận hàng (COD)!`);
+      }}
+      onCancelled={(orderId) => {
+        try { sessionStorage.removeItem('pending_payos_order'); } catch {}
+        setRecoveryOrder(null);
+        setNotice(`Đơn hàng #${recoveryOrder?.orderNumber || orderId} đã được hủy theo yêu cầu của bạn.`);
+      }}
+    />
   </motion.main>
   );
 };

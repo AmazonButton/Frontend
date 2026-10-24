@@ -284,8 +284,12 @@ export const NotificationBellPopover: React.FC = () => {
               const productName = firstItem?.product?.name || firstItem?.productName || 'Sản phẩm';
               const qty = firstItem?.quantity || 1;
               const orderNum = ord.orderNumber || (ord.id ? String(ord.id).slice(-6) : 'SOB');
+              const awaitingPayOS = String(ord.paymentMethod || '').toUpperCase() === 'PAYOS'
+                && String(ord.paymentStatus || '').toUpperCase() !== 'PAID';
 
-              let title = `Đặt hàng thành công #${orderNum}`;
+              let title = awaitingPayOS
+                ? `Đơn hàng #${orderNum} đang chờ thanh toán PayOS`
+                : `Đặt hàng thành công #${orderNum}`;
               let type: AppNotification['type'] = 'ORDER_CREATED';
 
               if (ord.status === 'CANCELLED') {
@@ -333,7 +337,7 @@ export const NotificationBellPopover: React.FC = () => {
         }
       } catch (err: any) {
         if (err?.response?.status !== 401) {
-          console.warn('Could not pre-fetch role-scoped notifications:', err);
+          void err // Non-critical pre-fetch;
         }
       }
     };
@@ -480,12 +484,17 @@ export const NotificationBellPopover: React.FC = () => {
         const orderNum = order.orderNumber || (order.id ? String(order.id).slice(-6) : 'SOB');
         const firstItem = order.items?.[0];
         const productName = firstItem?.product?.name || firstItem?.productName || 'Sản phẩm';
+        const awaitingPayOS = String(order.paymentMethod || '').toUpperCase() === 'PAYOS'
+          && String(order.paymentStatus || '').toUpperCase() !== 'PAID';
+        const title = awaitingPayOS
+          ? `Đơn hàng #${orderNum} đang chờ thanh toán PayOS`
+          : `Đặt hàng thành công #${orderNum}`;
 
         const newNotif: AppNotification = {
           id: `notif_rt_cust_${Date.now()}`,
           type: 'ORDER_CREATED',
           roleScope: 'CUSTOMER',
-          title: `Đặt hàng thành công #${orderNum}`,
+          title,
           orderNumber: orderNum,
           orderId: order.id,
           productName,
@@ -497,9 +506,15 @@ export const NotificationBellPopover: React.FC = () => {
         };
 
         setNotifications((prev) => [newNotif, ...prev]);
-        toast.success(`Bạn đã đặt hàng thành công đơn #${orderNum}! Cửa hàng đang chuẩn bị hàng.`, {
-          title: '🎉 Đặt hàng thành công',
-        });
+        if (awaitingPayOS) {
+          toast.info(`Đơn #${orderNum} đã được tạo và đang chờ bạn hoàn tất thanh toán PayOS.`, {
+            title: 'Chờ thanh toán PayOS',
+          });
+        } else {
+          toast.success(`Bạn đã đặt hàng thành công đơn #${orderNum}! Cửa hàng đang chuẩn bị hàng.`, {
+            title: '🎉 Đặt hàng thành công',
+          });
+        }
       };
 
       const handleCustomerOrderStatus = (payload: any) => {

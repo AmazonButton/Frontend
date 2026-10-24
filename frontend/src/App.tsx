@@ -57,8 +57,9 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
   return <>{children}</>;
 };
 
-// Store Shell Layout (with persistent Sidebar)
-const StoreLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
+// Shared desktop shell. The sidebar keeps navigation available while its compact
+// state gives every role the same full-width workspace as the store owner.
+const AppShellLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   return (
     <div className="flex min-h-[calc(100vh-4rem)] w-full bg-[#FBFBFC] dark:bg-zinc-950 relative">
       <Sidebar />
@@ -99,7 +100,10 @@ export const App: React.FC = () => {
       <div className={`flex-1 relative ${location.pathname === "/" || isAuth ? "" : "pt-16"} ${user?.role === "CUSTOMER" && !isAuth ? "pb-16 md:pb-0" : ""}`}>
         <Routes>
           <Route path="/" element={<LandingPage />} />
-          <Route path="/shop" element={<ShopPage />} />
+          <Route
+            path="/shop"
+            element={user?.role === 'CUSTOMER' ? <AppShellLayout><ShopPage /></AppShellLayout> : <ShopPage />}
+          />
           <Route path="/quick-setup" element={<QuickSetupPage />} />
           <Route path="/login" element={<LoginPage initialMode="login" />} />
           <Route path="/register" element={<RegisterPage initialMode="register" />} />
@@ -112,7 +116,7 @@ export const App: React.FC = () => {
           <Route
             element={
               <ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF']}>
-                <StoreLayout />
+                <AppShellLayout />
               </ProtectedRoute>
             }
           >
@@ -136,31 +140,19 @@ export const App: React.FC = () => {
             }
           />
 
-          {/* Customer Routes */}
+          {/* Customer routes share the collapsible desktop sidebar. */}
           <Route
-            path="/customer/home"
             element={
               <ProtectedRoute allowedRoles={['CUSTOMER']}>
-                <CustomerHomePage />
+                <AppShellLayout />
               </ProtectedRoute>
             }
-          />
-          <Route
-            path="/customer/orders"
-            element={
-              <ProtectedRoute allowedRoles={['CUSTOMER']}>
-                <CustomerOrdersPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/customer/verification"
-            element={
-              <ProtectedRoute allowedRoles={['CUSTOMER']}>
-                <CustomerVerificationPage />
-              </ProtectedRoute>
-            }
-          />
+          >
+            <Route path="/customer/home" element={<CustomerHomePage />} />
+            <Route path="/customer/orders" element={<CustomerOrdersPage />} />
+            <Route path="/customer/verification" element={<CustomerVerificationPage />} />
+            <Route path="/customer/profile" element={<ProfilePage />} />
+          </Route>
 
           <Route
             path="/driver/shifts"
@@ -170,48 +162,19 @@ export const App: React.FC = () => {
               </ProtectedRoute>
             }
           />
+          {/* Admin routes share the same collapsible desktop sidebar. */}
           <Route
-            path="/customer/profile"
-            element={
-              <ProtectedRoute allowedRoles={['CUSTOMER']}>
-                <ProfilePage />
-              </ProtectedRoute>
-            }
-          />
-
-          {/* Super Admin Routes */}
-          <Route
-            path="/admin/dashboard"
             element={
               <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN']}>
-                <AdminDashboard />
+                <AppShellLayout />
               </ProtectedRoute>
             }
-          />
-          <Route
-            path="/admin/security/devices"
-            element={
-              <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN']}>
-                <AdminSecurityHubPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/payouts"
-            element={
-              <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN']}>
-                <AdminPayoutsPage />
-              </ProtectedRoute>
-            }
-          />
-          <Route
-            path="/admin/profile"
-            element={
-              <ProtectedRoute allowedRoles={['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN']}>
-                <ProfilePage />
-              </ProtectedRoute>
-            }
-          />
+          >
+            <Route path="/admin/dashboard" element={<AdminDashboard />} />
+            <Route path="/admin/security/devices" element={<AdminSecurityHubPage />} />
+            <Route path="/admin/payouts" element={<AdminPayoutsPage />} />
+            <Route path="/admin/profile" element={<ProfilePage />} />
+          </Route>
 
           {/* Universal Authenticated Profile Route */}
           <Route
