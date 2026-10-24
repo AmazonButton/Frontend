@@ -310,7 +310,11 @@ export const StoreDashboard: React.FC = () => {
         } else if (nextStatus === 'PREPARING') {
           toast.success('Đang chuẩn bị sản phẩm.', { title: 'Chuẩn bị hàng', duration: 4000 });
         } else if (nextStatus === 'READY_FOR_DELIVERY') {
-          toast.success('Đơn hàng đã xuất giao!', { title: 'Xuất giao', duration: 4000 });
+          toast.success('Đơn hàng sẵn sàng để bắt đầu giao.', { title: 'Sẵn sàng giao', duration: 4000 });
+        } else if (nextStatus === 'SHIPPING') {
+          toast.success('Đơn hàng đang được giao đến khách hàng.', { title: 'Bắt đầu giao', duration: 4000 });
+        } else if (nextStatus === 'DELIVERED') {
+          toast.success('Đã xác nhận giao hàng. Hãy hoàn tất đơn để cộng tiền vào ví.', { title: 'Đã giao', duration: 5000 });
         } else if (nextStatus === 'COMPLETED') {
           toast.success('Đã giao thành công! Tiền đã cộng vào Ví Cửa Hàng.', { title: 'Giao thành công 🎉', duration: 5000 });
         } else if (nextStatus === 'CANCELLED' || nextStatus === 'REJECTED') {
@@ -437,7 +441,7 @@ export const StoreDashboard: React.FC = () => {
 
   const pendingCount = orders.filter((o) => o.status === 'PENDING').length;
   const inProgressCount = orders.filter((o) => ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY', 'SHIPPING', 'READY_FOR_DELIVERY'].includes(o.status)).length;
-  const completedCount = orders.filter((o) => o.status === 'COMPLETED' || (o.status as string) === 'DELIVERED').length;
+  const completedCount = orders.filter((o) => ['COMPLETED', 'DELIVERED'].includes(o.status as string)).length;
 
   const priorityMap: Record<string, number> = {
     PENDING: 1,
@@ -551,8 +555,14 @@ export const StoreDashboard: React.FC = () => {
             Đang chuẩn bị
           </span>
         );
-      case 'OUT_FOR_DELIVERY':
       case 'READY_FOR_DELIVERY':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0"></span>
+            Sẵn sàng giao
+          </span>
+        );
+      case 'OUT_FOR_DELIVERY':
       case 'SHIPPING':
         return (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
@@ -561,6 +571,12 @@ export const StoreDashboard: React.FC = () => {
           </span>
         );
       case 'DELIVERED':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+            Đã giao · Chờ hoàn tất
+          </span>
+        );
       case 'COMPLETED':
         return (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
@@ -925,6 +941,8 @@ export const StoreDashboard: React.FC = () => {
                     const items = Array.isArray(order.items) ? order.items : [];
                     const firstItem = items[0];
                     const otherCount = Math.max(0, items.length - 1);
+                    const orderStatus = String((order as any).orderStatus || order.status || '').toUpperCase();
+                    const isCancelled = ['CANCELLED', 'REJECTED'].includes(orderStatus);
                     return (
                       <motion.tr
                         key={order.id}
@@ -998,7 +1016,9 @@ export const StoreDashboard: React.FC = () => {
                             <span className="text-zinc-500 dark:text-zinc-400">
                               {Number(order.totalAmount || (order as any).total_amount || 0).toLocaleString()} ₫ ·
                             </span>
-                            {order.paymentStatus === 'REFUND_PENDING' ? (
+                            {isCancelled ? (
+                              <span className="text-zinc-400 dark:text-zinc-500">Đơn đã hủy · Không cần thanh toán</span>
+                            ) : order.paymentStatus === 'REFUND_PENDING' ? (
                               <span className="text-rose-600 dark:text-rose-400">Đã nhận tiền · Chờ hoàn PayOS</span>
                             ) : order.paymentStatus === 'PAID' ? (
                               <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold">
@@ -1017,12 +1037,12 @@ export const StoreDashboard: React.FC = () => {
 
                         {/* Trạng Thái */}
                         <td className="py-2.5 px-3.5 whitespace-nowrap">
-                          {renderStatus(order.status)}
+                          {renderStatus(orderStatus)}
                         </td>
 
                         {/* Thao Tác */}
                         <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
-                          {order.status === 'PENDING' && (
+                          {orderStatus === 'PENDING' && (
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
@@ -1032,7 +1052,7 @@ export const StoreDashboard: React.FC = () => {
                               Tiếp Nhận
                             </motion.button>
                           )}
-                          {order.status === 'CONFIRMED' && (
+                          {orderStatus === 'CONFIRMED' && (
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
@@ -1042,7 +1062,7 @@ export const StoreDashboard: React.FC = () => {
                               Chuẩn Bị
                             </motion.button>
                           )}
-                          {order.status === 'PREPARING' && (
+                          {orderStatus === 'PREPARING' && (
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
@@ -1052,23 +1072,43 @@ export const StoreDashboard: React.FC = () => {
                               Xuất Giao
                             </motion.button>
                           )}
-                          {(order.status === 'OUT_FOR_DELIVERY' || (order.status as string) === 'SHIPPING' || (order.status as string) === 'READY_FOR_DELIVERY') && (
+                          {orderStatus === 'READY_FOR_DELIVERY' && (
+                            <motion.button
+                              type="button"
+                              whileTap={{ scale: 0.96 }}
+                              onClick={() => handleUpdateStatus(order.id, 'SHIPPING')}
+                              className="px-2.5 py-1 bg-[#287DA8] hover:bg-[#206588] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
+                            >
+                              Bắt Đầu Giao
+                            </motion.button>
+                          )}
+                          {(orderStatus === 'OUT_FOR_DELIVERY' || orderStatus === 'SHIPPING') && (
+                            <motion.button
+                              type="button"
+                              whileTap={{ scale: 0.96 }}
+                              onClick={() => handleUpdateStatus(order.id, 'DELIVERED')}
+                              className="px-2.5 py-1 bg-[#4AA785] hover:bg-[#3d9173] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(74,167,133,0.25)] transition-all cursor-pointer"
+                            >
+                              Đã Giao ✓
+                            </motion.button>
+                          )}
+                          {orderStatus === 'DELIVERED' && (
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
                               onClick={() => handleUpdateStatus(order.id, 'COMPLETED')}
                               className="px-2.5 py-1 bg-[#4AA785] hover:bg-[#3d9173] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(74,167,133,0.25)] transition-all cursor-pointer"
                             >
-                              Đã Giao ✓
+                              Hoàn Tất & Cộng Ví
                             </motion.button>
                           )}
-                          {(order.status === 'COMPLETED' || (order.status as string) === 'DELIVERED') && (
+                          {orderStatus === 'COMPLETED' && (
                             <span className="text-[10.5px] font-mono text-[#4AA785] dark:text-[#5ec29e] flex items-center justify-end gap-1 font-semibold">
                               <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                               Đã giao
                             </span>
                           )}
-                          {(order.status === 'CANCELLED' || order.status === 'REJECTED') && (
+                          {isCancelled && (
                             <span className="text-[10.5px] font-mono text-zinc-400">Đã hủy</span>
                           )}
                         </td>

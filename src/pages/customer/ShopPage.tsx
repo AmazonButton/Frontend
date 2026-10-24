@@ -69,8 +69,13 @@ export const ShopPage: React.FC = () => {
 
     if (params.get('cart') === 'open') setCartOpen(true);
     if (status === 'success') {
-      try { sessionStorage.removeItem('pending_payos_order'); } catch {}
-      setNotice('PayOS đã chuyển bạn trở lại. Cửa hàng đang tiếp nhận đơn hàng của bạn!');
+      // PayOS returning to this URL is not proof that the payment webhook has
+      // been verified. Keep the recovery data and wait for the server's paid
+      // status before presenting the order as successful.
+      setNotice('PayOS đã gửi kết quả giao dịch. Hệ thống đang xác minh thanh toán; đơn hàng chỉ hoàn tất khi trạng thái hiển thị “Đã thanh toán”.');
+      try {
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch {}
     }
     if (isCancelledPayOS) {
       let pendingData: PayOSRecoveryOrder | null = null;
@@ -195,7 +200,17 @@ export const ShopPage: React.FC = () => {
       });
       const order = response.data.data;
       if (form.paymentMethod === 'PAYOS') {
-        const payment = await api.post('/payments/payos/create-link', { orderId: order.id, amount: order.totalAmount, buyerName: form.customerName, buyerPhone: form.customerPhone, returnUrl: `${window.location.origin}/shop?payos_status=success&orderId=${encodeURIComponent(order.id)}`, cancelUrl: `${window.location.origin}/shop?payos_status=cancelled&orderId=${encodeURIComponent(order.id)}` });
+        // The deployed API validates this DTO strictly. Customer information is
+        // already stored on the order, so only send fields required to create
+        // the PayOS payment link; otherwise it rejects buyerName/buyerPhone
+        // before returning the checkout URL.
+        const payment = await api.post('/payments/payos/create-link', {
+          orderId: order.id,
+          amount: order.totalAmount,
+          description: `Thanh toan don ${order.orderNumber || order.id}`.slice(0, 25),
+          returnUrl: `${window.location.origin}/shop?payos_status=success&orderId=${encodeURIComponent(order.id)}`,
+          cancelUrl: `${window.location.origin}/shop?payos_status=cancelled&orderId=${encodeURIComponent(order.id)}`,
+        });
         const checkoutUrl = payment.data?.data?.checkoutUrl;
         if (checkoutUrl) {
           try {
@@ -733,7 +748,11 @@ export const ShopPage: React.FC = () => {
               disabled={busy}
               className="mt-4 w-full rounded-xl bg-[#287DA8] py-3 font-bold text-white shadow-sm transition hover:bg-[#206588] disabled:opacity-60"
             >
-              {busy ? 'Đang xử lý...' : 'Xác nhận đặt hàng'}
+              {busy
+                ? 'Đang chuyển đến PayOS...'
+                : form.paymentMethod === 'PAYOS'
+                  ? 'Thanh toán PayOS'
+                  : 'Xác nhận đặt hàng'}
             </motion.button>
             <p className="mt-3 flex items-center justify-center gap-1 text-center text-[11px] text-slate-400">
               <CheckCircle2 size={13} className="text-teal-600" />
