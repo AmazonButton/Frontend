@@ -1,16 +1,22 @@
 import { io, Socket } from 'socket.io-client';
-import { API_URL, resolveApiUrl } from './api';
+import { API_URL, isTokenExpired, resolveApiUrl } from './api';
 
 let socket: Socket | null = null;
 let subscribedStoreId: string | null = typeof window !== 'undefined' ? localStorage.getItem('smart_order_sub_store') : null;
 let subscribedCustomerId: string | null = typeof window !== 'undefined' ? localStorage.getItem('smart_order_sub_customer') : null;
 
 const getStoredToken = () => {
-  return typeof window !== 'undefined' ? localStorage.getItem('smart_order_token') : null;
+  const token = typeof window !== 'undefined' ? localStorage.getItem('smart_order_token') : null;
+  // Never put an expired JWT into the Socket.IO handshake. Render then rejects
+  // the polling request with a 400, which is unrelated to the current page.
+  return token && !isTokenExpired(token) ? token : null;
 };
 
 export function getSocket(): Socket {
-  const targetUrl = typeof resolveApiUrl === 'function' ? resolveApiUrl() : API_URL;
+  const envSocketUrl = (import.meta as any).env?.VITE_SOCKET_URL;
+  const targetUrl = (envSocketUrl && typeof envSocketUrl === 'string' && envSocketUrl.startsWith('http'))
+    ? envSocketUrl.trim().replace(/\/+$/, '')
+    : (typeof resolveApiUrl === 'function' ? resolveApiUrl() : API_URL);
   const token = getStoredToken();
 
   if (!socket) {
@@ -19,9 +25,6 @@ export function getSocket(): Socket {
       auth: (cb) => {
         const t = getStoredToken();
         cb({ token: t ? `Bearer ${t}` : undefined });
-      },
-      query: {
-        token: token ? `Bearer ${token}` : undefined,
       },
       // Start with HTTP polling so a backend that is still starting does not
       // produce a noisy browser-level WebSocket refusal. Socket.IO upgrades to
@@ -57,9 +60,8 @@ export function getSocket(): Socket {
 
     socket.on('authenticated', (res: any) => {
       const role = res?.user?.role;
-      if (role && role !== lastAuthRole) {
+      if (role) {
         lastAuthRole = role;
-        console.log('⚡ [Socket.io] Authenticated as:', role);
       }
       resubscribe();
     });
@@ -89,22 +91,24 @@ export function getSocket(): Socket {
       });
     }
   } else {
-    // If token exists and socket auth is missing, update auth
-    if (token && socket.auth && (socket.auth as any).token !== `Bearer ${token}`) {
-      socket.auth = { token: `Bearer ${token}` };
-    }
+    socket.auth = { token: token ? `Bearer ${token}` : undefined };
   }
   return socket;
 }
 
 export function updateSocketAuth(token?: string | null) {
   const currentToken = token !== undefined ? token : getStoredToken();
+  const validToken = currentToken && !isTokenExpired(currentToken) ? currentToken : null;
   const s = getSocket();
   if (s) {
-    (s as any).auth = { token: currentToken ? `Bearer ${currentToken}` : undefined };
+    (s as any).auth = { token: validToken ? `Bearer ${validToken}` : undefined };
     if (s.connected) {
-      if (currentToken) {
-        s.emit('authenticate', { token: currentToken });
+      if (validToken) {
+        s.emit('authenticate', { token: validToken });
+      } else {
+        // A connected socket keeps its previous server-side identity. Reconnect
+        // without credentials when logging out or after a token expires.
+        s.disconnect().connect();
       }
     } else {
       s.connect();
@@ -158,4 +162,3 @@ export function clearSocketSubscriptions() {
     } catch (_) {}
   }
 }
-

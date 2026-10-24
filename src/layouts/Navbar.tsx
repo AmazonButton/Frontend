@@ -165,29 +165,7 @@ export const Navbar: React.FC = () => {
         {/* ================================================================= */}
         {/* CENTER: Clean Minimalist Navigation Pill                          */}
         {/* ================================================================= */}
-        {isCustomer && (
-          <nav aria-label="Điều hướng khách hàng" className="hidden md:flex items-center gap-1 rounded-xl border border-slate-200/80 bg-slate-50/70 p-1 dark:border-zinc-800 dark:bg-zinc-900/70">
-            {[
-              { to: '/customer/verification', label: 'Xác minh', icon: BadgeCheck },
-              { to: '/shop', label: 'Mua sắm', icon: ShoppingCart },
-              { to: '/customer/home', label: 'Nút của tôi', icon: Smartphone },
-              { to: '/customer/orders', label: 'Đơn hàng', icon: ReceiptText },
-            ].map(({ to, label, icon: Icon }) => (
-              <Link
-                key={to}
-                to={to}
-                className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold transition-colors ${
-                  isActive(to)
-                    ? 'bg-white text-[#0E6BA8] shadow-xs dark:bg-zinc-800 dark:text-sky-400'
-                    : 'text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white'
-                }`}
-              >
-                <Icon className="w-3.5 h-3.5" />
-                {label}
-              </Link>
-            ))}
-          </nav>
-        )}
+        
 
         {user && user.role === 'SUPER_ADMIN' && (
           <nav aria-label="Điều hướng admin" className="hidden md:flex items-center gap-1 rounded-xl border border-slate-200/80 bg-slate-50/70 p-1 dark:border-zinc-800 dark:bg-zinc-900/70">
@@ -398,23 +376,7 @@ export const Navbar: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {isCustomer && (
-        <nav aria-label="Điều hướng nhanh" className="fixed inset-x-0 bottom-0 z-30 border-t border-slate-200 bg-white/95 px-2 pb-[max(0.35rem,env(safe-area-inset-bottom))] pt-1.5 backdrop-blur dark:border-zinc-800 dark:bg-zinc-950/95 md:hidden">
-          <div className="grid grid-cols-4 max-w-lg mx-auto">
-            {[
-              { to: '/shop', label: 'Mua sắm', icon: ShoppingCart },
-              { to: '/customer/home', label: 'Nút của tôi', icon: Smartphone },
-              { to: '/customer/orders', label: 'Đơn hàng', icon: ReceiptText },
-              { to: '/customer/profile', label: 'Tài khoản', icon: UserIcon },
-            ].map(({ to, label, icon: Icon }) => (
-              <Link key={to} to={to} aria-current={isActive(to) ? 'page' : undefined} className={`flex min-h-11 flex-col items-center justify-center gap-0.5 rounded-lg text-[10px] font-semibold transition ${isActive(to) ? 'text-[#0E6BA8]' : 'text-slate-400 dark:text-zinc-500'}`}>
-                <Icon className="w-[18px] h-[18px]" />
-                {label}
-              </Link>
-            ))}
-          </div>
-        </nav>
-      )}
+      
 
       {/* Apple AirPods-Style Bluetooth Modal */}
       <WhiteDeviceAirPodsModal

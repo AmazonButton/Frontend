@@ -51,7 +51,7 @@ export const QrCameraScanner: React.FC<QrCameraScannerProps> = ({ onScanSuccess 
 
         setIsScanning(true);
       } catch (err: any) {
-        console.warn('Camera scan error:', err);
+        void err // Camera scan transient;
         setCameraError(
           err?.message || 'Không thể truy cập camera. Vui lòng cấp quyền camera trên trình duyệt.'
         );

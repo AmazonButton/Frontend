@@ -6,6 +6,7 @@ import {
   ChevronRight,
   CircleAlert,
   Clock3,
+  Banknote,
   CreditCard,
   MapPin,
   PackageCheck,
@@ -17,6 +18,7 @@ import {
   Truck,
 } from 'lucide-react';
 import { api } from '../../services/api';
+import { paymentsService } from '../../services/payments.service';
 import { toast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { getSocket, subscribeToCustomer } from '../../services/socket';
@@ -54,6 +56,7 @@ export const CustomerOrdersPage: React.FC = () => {
   const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
   const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
+  const [isSwitchingCod, setIsSwitchingCod] = useState<string | null>(null);
 
   const loadOrders = async () => {
     setIsLoading(true);
@@ -63,7 +66,6 @@ export const CustomerOrdersPage: React.FC = () => {
       const data = response.data?.data ?? response.data;
       setOrders(Array.isArray(data) ? data : []);
     } catch (requestError) {
-      console.error('Could not load customer orders:', requestError);
       setError('Không thể tải danh sách đơn hàng. Vui lòng thử lại.');
     } finally {
       setIsLoading(false);
@@ -305,11 +307,12 @@ export const CustomerOrdersPage: React.FC = () => {
                 const StatusIcon = meta.icon;
                 const isExpanded = expandedOrder === order.id;
 
-                const isUnpaid = order.paymentStatus === 'UNPAID' || (order.paymentStatus !== 'PAID' && order.paymentMethod !== 'COD' && order.paymentMethod !== 'CASH_ON_DELIVERY');
-                const canCancel = currentStatus !== 'CANCELLED' && currentStatus !== 'REJECTED' && (
+                const isCancelled = ['CANCELLED', 'REJECTED'].includes(currentStatus);
+                const isUnpaid = !isCancelled && (order.paymentStatus === 'UNPAID' || (order.paymentStatus !== 'PAID' && order.paymentMethod !== 'COD' && order.paymentMethod !== 'CASH_ON_DELIVERY'));
+                const canCancel = !isCancelled && (
                   isUnpaid || ['PENDING', 'CONFIRMED'].includes(currentStatus)
                 );
-                const canPayNow = isUnpaid && order.paymentMethod === 'PAYOS' && currentStatus !== 'CANCELLED' && currentStatus !== 'REJECTED';
+                const canPayNow = isUnpaid && order.paymentMethod === 'PAYOS';
                 const itemSummary = order.items.slice(0, 2).map((item) => `${item.quantity}× ${item.productName}`).join(', ');
                 return (
                   <motion.article key={order.id || order.orderNumber || index} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(index * 0.035, 0.22) }}>
@@ -333,7 +336,7 @@ export const CustomerOrdersPage: React.FC = () => {
                           <div className="text-right">
                             <p className="text-sm font-bold text-slate-900 tabular-nums dark:text-white">{formatPrice(order.totalAmount)}</p>
                             <p className={`mt-1 text-[10px] ${isUnpaid ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
-                              {order.paymentStatus === 'PAID' ? 'Đã thanh toán' : (order.paymentMethod === 'COD' || order.paymentMethod === 'CASH_ON_DELIVERY') ? 'Thanh toán khi nhận' : 'Chờ thanh toán'}
+                              {isCancelled ? 'Đơn đã hủy · Không cần thanh toán' : order.paymentStatus === 'PAID' ? 'Đã thanh toán' : (order.paymentMethod === 'COD' || order.paymentMethod === 'CASH_ON_DELIVERY') ? 'Chờ thanh toán (Tiền mặt khi nhận)' : 'Chờ thanh toán (PayOS)'}
                             </p>
                           </div>
                           <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
@@ -361,7 +364,7 @@ export const CustomerOrdersPage: React.FC = () => {
                               </div>
                               <div className="md:w-64 space-y-3 text-xs">
                                 <div className="flex gap-2 text-slate-500 dark:text-zinc-400"><MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-slate-400" /><span>{order.deliveryAddress || 'Chưa cập nhật địa chỉ giao hàng'}</span></div>
-                                <div className="flex gap-2 text-slate-500 dark:text-zinc-400"><CreditCard className="w-3.5 h-3.5 shrink-0 text-slate-400" /><span>{order.paymentMethod === 'COD' || order.paymentMethod === 'CASH_ON_DELIVERY' ? 'Thanh toán khi nhận hàng (COD)' : 'Thanh toán PayOS'}</span></div>
+                                <div className="flex gap-2 text-slate-500 dark:text-zinc-400"><CreditCard className="w-3.5 h-3.5 shrink-0 text-slate-400" /><span>{isCancelled ? 'Đơn đã hủy, không phát sinh thanh toán' : ['COD', 'CASH_ON_DELIVERY'].includes(order.paymentMethod as string) ? (order.paymentStatus === 'PAID' ? 'Đã thu tiền mặt khi nhận hàng' : 'Tiền mặt khi nhận hàng (Chờ thanh toán)') : order.paymentStatus === 'PAID' ? 'Đã thanh toán trực tuyến qua PayOS' : 'Thanh toán trực tuyến PayOS (Chờ thanh toán)'}</span></div>
                               </div>
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-200/70 flex justify-between text-sm font-bold text-slate-900 dark:border-zinc-700 dark:text-white"><span>Tổng thanh toán</span><span className="tabular-nums">{formatPrice(order.totalAmount)}</span></div>
@@ -374,30 +377,59 @@ export const CustomerOrdersPage: React.FC = () => {
                                 </p>
                                 <div className="flex items-center gap-2 self-end sm:self-auto">
                                   {canPayNow && (
-                                    <button
-                                      type="button"
-                                      onClick={async (event) => {
-                                        event.stopPropagation();
-                                        try {
-                                          toast.info('Đang mở liên kết thanh toán PayOS...');
-                                          const res = await api.post('/payments/payos/create-link', {
-                                            orderId: order.id || (order as any).orderId,
-                                          });
-                                          const checkoutUrl = res.data?.data?.checkoutUrl || res.data?.checkoutUrl;
-                                          if (checkoutUrl) {
-                                            window.location.href = checkoutUrl;
-                                          } else {
-                                            toast.error('Không tìm thấy liên kết thanh toán.');
+                                    <>
+                                      <button
+                                        type="button"
+                                        onClick={async (event) => {
+                                          event.stopPropagation();
+                                          try {
+                                            toast.info('Đang mở liên kết thanh toán PayOS...');
+                                            const res = await api.post('/payments/payos/create-link', {
+                                              orderId: order.id || (order as any).orderId,
+                                            });
+                                            const checkoutUrl = res.data?.data?.checkoutUrl || res.data?.checkoutUrl;
+                                            if (checkoutUrl) {
+                                              window.location.href = checkoutUrl;
+                                            } else {
+                                              toast.error('Không tìm thấy liên kết thanh toán.');
+                                            }
+                                          } catch (err: any) {
+                                            toast.error(err.response?.data?.message || 'Không thể tạo liên kết thanh toán PayOS.');
                                           }
-                                        } catch (err: any) {
-                                          toast.error(err.response?.data?.message || 'Không thể tạo liên kết thanh toán PayOS.');
-                                        }
-                                      }}
-                                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-[#0B5586]"
-                                    >
-                                      <CreditCard className="w-3.5 h-3.5" />
-                                      Thanh toán ngay
-                                    </button>
+                                        }}
+                                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-[#0B5586]"
+                                      >
+                                        <CreditCard className="w-3.5 h-3.5" />
+                                        Thanh toán lại
+                                      </button>
+                                      <button
+                                        type="button"
+                                        disabled={isSwitchingCod === (order.id || (order as any).orderId)}
+                                        onClick={async (event) => {
+                                          event.stopPropagation();
+                                          const oId = String(order.id || (order as any).orderId);
+                                          const oCode = order.orderNumber || oId;
+                                          setIsSwitchingCod(oId);
+                                          try {
+                                            await paymentsService.selectOrderPaymentMethod(oId, 'COD');
+                                            toast.success(`Đã chuyển đơn hàng #${oCode} sang thanh toán Tiền mặt (COD)! Cửa hàng sẽ chuẩn bị đơn hàng.`);
+                                            await loadOrders();
+                                          } catch (err: any) {
+                                            toast.error(err.response?.data?.message || 'Không thể đổi sang tiền mặt lúc này.');
+                                          } finally {
+                                            setIsSwitchingCod(null);
+                                          }
+                                        }}
+                                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-emerald-300 bg-emerald-50 px-3 py-2 text-xs font-semibold text-emerald-800 transition hover:bg-emerald-100 hover:border-emerald-400 disabled:opacity-60 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
+                                      >
+                                        {isSwitchingCod === (order.id || (order as any).orderId) ? (
+                                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                        ) : (
+                                          <Banknote className="w-3.5 h-3.5" />
+                                        )}
+                                        Đổi sang Tiền mặt (COD)
+                                      </button>
+                                    </>
                                   )}
                                   {canCancel && (
                                     <button

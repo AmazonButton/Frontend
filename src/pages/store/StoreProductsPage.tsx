@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { api, productsService, mediaService } from '../../services';
+import { toast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { getSocket, subscribeToStore } from '../../services/socket';
 import { Product } from '../../types';
@@ -117,7 +118,7 @@ export const StoreProductsPage: React.FC = () => {
         setProducts([]);
       }
     } catch (e) {
-      console.error('Failed to fetch store products:', e);
+      toast.error('Không tải được danh sách sản phẩm. Vui lòng thử lại.');
       setProducts([]);
     } finally {
       setLoading(false);
@@ -277,11 +278,12 @@ export const StoreProductsPage: React.FC = () => {
       });
 
       if (res.data.success) {
+        toast.success('Cập nhật sản phẩm thành công!');
         setEditingProduct(null);
         fetchProducts();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể cập nhật sản phẩm');
+      toast.error(err.response?.data?.message || 'Không thể cập nhật sản phẩm');
     } finally {
       setEditLoading(false);
     }

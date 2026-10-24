@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
+import { useSearchParams } from 'react-router-dom';
 
 const modalBackdropVariants: Variants = {
   hidden: { opacity: 0 },
@@ -292,30 +293,30 @@ const renderAuditLogDetails = (log: AuditLog) => {
 };
 
 export const AdminDashboard: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   // Navigation tabs organized sequentially by physical IoT operational lifecycle
   const [activeTab, setActiveTab] = useState<
     'OVERVIEW' | 'STORES' | 'CATALOG' | 'DEVICES' | 'RBAC' | 'TELEMETRY' | 'ANALYTICS' | 'NOTIFICATIONS' | 'SECURITY'
-  >('OVERVIEW');
-
-  // Ref for mouse wheel horizontal scrolling on the navigation tabs
-  const navTabsRef = useRef<HTMLElement | null>(null);
+  >(() => {
+    const section = searchParams.get('section');
+    return ['OVERVIEW', 'STORES', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS', 'SECURITY'].includes(section || '')
+      ? section as any
+      : 'OVERVIEW';
+  });
 
   useEffect(() => {
-    const el = navTabsRef.current;
-    if (!el) return;
+    const section = searchParams.get('section');
+    if (section && ['OVERVIEW', 'STORES', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS', 'SECURITY'].includes(section)) {
+      setActiveTab(section as any);
+    } else if (!section) {
+      setActiveTab('OVERVIEW');
+    }
+  }, [searchParams]);
 
-    const onWheel = (e: WheelEvent) => {
-      if (e.deltaY !== 0) {
-        e.preventDefault();
-        el.scrollLeft += e.deltaY;
-      }
-    };
-
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => {
-      el.removeEventListener('wheel', onWheel);
-    };
-  }, []);
+  const selectTab = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    setSearchParams(tab === 'OVERVIEW' ? {} : { section: tab });
+  };
 
   const [pendingStores, setPendingStores] = useState<Store[]>([]);
   const [stats, setStats] = useState<any>(null);
@@ -582,7 +583,7 @@ export const AdminDashboard: React.FC = () => {
         setSecurityIncidents(secRes.data.data);
       }
     } catch (e) {
-      console.error('Failed to load admin portal data:', e);
+      toast.error('Không tải được dữ liệu admin. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
@@ -651,6 +652,21 @@ export const AdminDashboard: React.FC = () => {
     }
     if (selectedDeviceIds.length === 0) {
       toast.warning('Vui lòng tick chọn ít nhất 1 nút bấm từ kho');
+      return;
+    }
+
+    const selectedStore = allStores.find((store) => String(store.id || store.storeId) === selectedStoreId);
+    if (!selectedStore || selectedStore.status !== 'ACTIVE') {
+      toast.warning('Chỉ có thể bàn giao thiết bị cho cửa hàng đang hoạt động.');
+      return;
+    }
+
+    const unavailableDeviceIds = unassignedDevices
+      .filter((device) => selectedDeviceIds.includes(device.deviceId) && device.storeId)
+      .map((device) => device.deviceId);
+    if (unavailableDeviceIds.length > 0) {
+      toast.warning(`Nút ${unavailableDeviceIds.join(', ')} đã được bàn giao cho cửa hàng khác. Vui lòng tải lại danh sách kho.`);
+      fetchAdminData();
       return;
     }
 
@@ -861,70 +877,6 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Navigation Tabs (Immediate, with layoutId physics-based bottom border underline) */}
-        <div>
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <nav
-              ref={navTabsRef}
-              className="flex items-center gap-1 sm:gap-2 -mb-px overflow-x-auto scrollbar-none"
-              aria-label="Tabs"
-            >
-              {[
-                { key: 'OVERVIEW', label: 'Tổng Quan', icon: Boxes },
-                { key: 'STORES', label: '1. Trạm Cửa Hàng', icon: StoreIcon, badge: pendingStores.length > 0 ? pendingStores.length : null },
-                { key: 'CATALOG', label: '2. Danh Mục Gốc', icon: Layers },
-                { key: 'DEVICES', label: '3. Kho Nút Bấm', icon: Cpu, badge: unassignedDevices.length > 0 ? unassignedDevices.length : null },
-                { key: 'RBAC', label: '4. Tài Khoản & Phân Quyền', icon: Users },
-                { key: 'TELEMETRY', label: '5. Giám Sát IoT & Pin', icon: Battery, alert: telemetryDevices.filter(d => d.battery < 20).length > 0 },
-                { key: 'ANALYTICS', label: '6. Báo Cáo & Doanh Thu', icon: TrendingUp },
-                { key: 'NOTIFICATIONS', label: '7. Cấu Hình FCM', icon: Bell },
-                {
-                  key: 'SECURITY',
-                  label: '8. An Ninh & Giả Mạo',
-                  icon: ShieldAlert,
-                  badge: securityIncidents.length > 0 ? securityIncidents.length : null,
-                  alert: securityIncidents.length > 0,
-                },
-              ].map((tab) => {
-                const Icon = tab.icon;
-                const isActive = activeTab === tab.key;
-                return (
-                  <button
-                    key={tab.key}
-                    onClick={() => setActiveTab(tab.key as any)}
-                    className={`relative flex items-center gap-1.5 py-2.5 px-3 text-xs whitespace-nowrap transition-colors cursor-pointer ${
-                      isActive
-                        ? 'text-[#0E6BA8] dark:text-[#38a5da] font-medium'
-                        : 'text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200'
-                    }`}
-                  >
-                    <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-[#0E6BA8] dark:text-[#38a5da]' : 'text-slate-400 dark:text-zinc-500'}`} />
-                    <span>{tab.label}</span>
-                    {tab.badge !== null && tab.badge !== undefined && (
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-medium tabular-nums ${
-                        isActive
-                          ? 'bg-[#0E6BA8] text-white dark:bg-[#0E6BA8]'
-                          : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'
-                      }`}>
-                        {tab.badge}
-                      </span>
-                    )}
-                    {tab.alert && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                    )}
-                    {isActive && (
-                      <motion.div
-                        layoutId="activeAdminTabUnderline"
-                        className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#0E6BA8] dark:bg-[#38a5da]"
-                        transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                      />
-                    )}
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
-        </div>
       </div>
 
       {/* Main Content Area */}
@@ -977,7 +929,7 @@ export const AdminDashboard: React.FC = () => {
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => {
-                  setActiveTab('DEVICES');
+                  selectTab('DEVICES');
                   setShowBatchModal(true);
                 }}
                 className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
@@ -987,7 +939,7 @@ export const AdminDashboard: React.FC = () => {
               </button>
               <button
                 onClick={() => {
-                  setActiveTab('CATALOG');
+                  selectTab('CATALOG');
                   setShowAddProductModal(true);
                 }}
                 className="px-3.5 py-2 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 font-medium text-xs flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
@@ -997,7 +949,7 @@ export const AdminDashboard: React.FC = () => {
               </button>
               {pendingStores.length > 0 && (
                 <button
-                  onClick={() => setActiveTab('STORES')}
+                  onClick={() => selectTab('STORES')}
                   className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm active:scale-[0.97] transition-all cursor-pointer"
                 >
                   <Clock className="w-4 h-4" />
@@ -2318,7 +2270,7 @@ export const AdminDashboard: React.FC = () => {
                       className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-900"
                     >
                       <option value="">-- Chọn Cửa Hàng --</option>
-                      {allStores.map((store) => {
+                      {allStores.filter((store) => store.status === 'ACTIVE').map((store) => {
                         const sId = store.id || store.storeId;
                         return (
                           <option key={sId} value={sId}>

@@ -67,7 +67,7 @@ const playAppleConnectChime = () => {
     osc2.start(now + 0.12);
     osc2.stop(now + 0.7);
   } catch (err) {
-    console.warn('Audio chime note:', err);
+    void err // Audio chime is non-critical;
   }
 };
 
@@ -188,13 +188,13 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
               setBleGattServer(server);
             }
           } catch (gattErr) {
-            console.warn('GATT connect notice:', gattErr);
+            void gattErr // BLE GATT is best-effort;
           }
         } else {
           throw new Error('Không chọn được thiết bị Bluetooth');
         }
       } catch (e: any) {
-        console.warn('Bluetooth pairing error:', e);
+        void e // BLE pairing errors are expected;
         setPairingError(
           e.name === 'NotFoundError'
             ? 'Bạn đã hủy thao tác tìm kiếm Bluetooth. Hãy bấm nút trên thiết bị và thử lại.'

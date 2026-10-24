@@ -42,7 +42,7 @@ export const AdminSecurityHubPage: React.FC = () => {
         setIncidents(res.data.data);
       }
     } catch (e) {
-      console.error('Failed to load security incidents:', e);
+      toast.error('Không tải được dữ liệu bảo mật. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }

@@ -54,8 +54,9 @@ export const paymentsService = {
     return res.data;
   },
 
-  async selectOrderPaymentMethod(orderId: string, paymentMethod: 'PAYOS' | 'CASH_ON_DELIVERY') {
-    const res = await api.post(`/payments/orders/${orderId}/payment-method`, { paymentMethod });
+  async selectOrderPaymentMethod(orderId: string, paymentMethod: 'PAYOS' | 'CASH_ON_DELIVERY' | 'COD') {
+    const normalized = paymentMethod === 'CASH_ON_DELIVERY' ? 'COD' : paymentMethod;
+    const res = await api.post(`/payments/orders/${orderId}/payment-method`, { paymentMethod: normalized });
     return res.data;
   },
 
