@@ -45,7 +45,7 @@ const getAudioContext = (): AudioContext | null => {
     }
     return sharedAudioCtx;
   } catch (e) {
-    console.warn('Cannot init AudioContext:', e);
+    void e // AudioContext may be blocked by browser policy;
     return null;
   }
 };
@@ -136,11 +136,11 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           osc.start(now);
           osc.stop(now + duration);
         } catch (err) {
-          console.warn('Audio tone play error:', err);
+          void err // Audio tone is non-critical;
         }
       }, delay);
     } catch (e) {
-      console.warn('Audio playback not permitted yet:', e);
+      void e // Autoplay policy;
     }
   };
 
@@ -157,7 +157,7 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         if (viVoice) utterance.voice = viVoice;
         window.speechSynthesis.speak(utterance);
       } catch (e) {
-        console.warn('SpeechSynthesis error:', e);
+        void e // TTS is non-critical;
       }
     }
   };

@@ -333,7 +333,7 @@ export const NotificationBellPopover: React.FC = () => {
         }
       } catch (err: any) {
         if (err?.response?.status !== 401) {
-          console.warn('Could not pre-fetch role-scoped notifications:', err);
+          void err // Non-critical pre-fetch;
         }
       }
     };

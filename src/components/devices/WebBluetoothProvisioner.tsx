@@ -82,7 +82,7 @@ export const WebBluetoothProvisioner: React.FC<WebBluetoothProvisionerProps> = (
         try {
           server = await device.gatt.connect();
         } catch (connErr: any) {
-          console.warn('Initial GATT connect note:', connErr);
+          void connErr // BLE GATT best-effort;
           // Check if device actually connected despite the rejected promise
           if (device.gatt && device.gatt.connected) {
             server = device.gatt;
@@ -132,7 +132,7 @@ export const WebBluetoothProvisioner: React.FC<WebBluetoothProvisionerProps> = (
               }
             }
           } catch (scanErr) {
-            console.warn('BLE Wi-Fi scan read notice:', scanErr);
+            void scanErr // BLE scan non-critical;
           }
         }
       } catch (_) {
@@ -236,7 +236,7 @@ export const WebBluetoothProvisioner: React.FC<WebBluetoothProvisionerProps> = (
         // ESP32 often restarts immediately upon receiving Wi-Fi credentials,
         // causing Chrome to report "GATT operation failed for unknown reason".
         // The packet was already successfully received.
-        console.warn('GATT write note (credentials transferred):', writeErr);
+        void writeErr // GATT write non-critical after transfer;
       }
 
       setSuccessMsg(`🎉 Đã truyền cấu hình Wi-Fi "${ssid}" thành công qua Bluetooth!\nNút bấm đang tự khởi động lại và kết nối vào mạng nhà bạn.`);
@@ -264,7 +264,7 @@ export const WebBluetoothProvisioner: React.FC<WebBluetoothProvisionerProps> = (
       const raw = err?.message || '';
       // If error is spurious GATT error after write or device already accepted credentials
       if (/gatt/i.test(raw) || /unknown reason/i.test(raw)) {
-        console.warn('Suppressed spurious GATT message on Wi-Fi send:', raw);
+        void raw // Suppress spurious GATT;
         setSuccessMsg(`🎉 Đã truyền cấu hình Wi-Fi "${ssid}" thành công qua Bluetooth!\nNút bấm đang tự khởi động lại và kết nối vào mạng nhà bạn.`);
         setErrorMsg(null);
       } else {

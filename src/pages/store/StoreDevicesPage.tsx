@@ -551,7 +551,6 @@ export const StoreDevicesPage: React.FC = () => {
     }
 
     if (failedRequests.length > 0) {
-      console.error('Failed to load store devices:', failedRequests);
       setLoadError('Một phần dữ liệu hạm đội chưa tải được. Hệ thống sẽ tự thử lại.');
       if (attempt < 2) {
         window.setTimeout(() => void fetchData(attempt + 1), 1000 * (attempt + 1));
@@ -877,8 +876,8 @@ export const StoreDevicesPage: React.FC = () => {
       ]);
       if (telRes.data.success) setTelemetries(telRes.data.data);
       if (logRes.data.success) setAuditLogs(logRes.data.data);
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || 'Không tải được dữ liệu thiết bị.');
     } finally {
       setInspectLoading(false);
     }

@@ -297,7 +297,7 @@ export const CustomerHomePage: React.FC = () => {
   );
   useBodyScrollLock(isAnyInlineModalOpen);
 
-  const fetchData = async () => {
+  const fetchData = async (isPolling = false) => {
     try {
       const [devRes, ordRes, prodRes] = await Promise.all([
         api.get('/devices'),
@@ -336,7 +336,7 @@ export const CustomerHomePage: React.FC = () => {
       }
       if (prodRes.data?.success) setAvailableProducts(prodRes.data.data);
     } catch (e) {
-      console.error('Failed to load customer data:', e);
+      toast.error('Không tải được dữ liệu. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
@@ -357,7 +357,6 @@ export const CustomerHomePage: React.FC = () => {
     const socket = getSocket();
 
     const handleOrderCreated = (data: any) => {
-      console.log('⚡ [Customer Push Alert] Order Created:', data);
       // Keep visual feedback active on the button card for 2.5s
       setIsPressing(true);
       if (data.order?.deviceId || data.deviceId) {
@@ -550,7 +549,6 @@ export const CustomerHomePage: React.FC = () => {
         fetchData();
       }
     } catch (err: any) {
-      console.error('Cancel order error:', err);
       toast.error(err.response?.data?.message || 'Không thể hủy đơn hàng');
       fetchData();
     }
@@ -581,12 +579,9 @@ export const CustomerHomePage: React.FC = () => {
 
   const handleSimulateHold = async (deviceId: string) => {
     try {
-      await api.post('/test-button-event', { event: 'hold', deviceId });
-      setTimeout(async () => {
-        await api.post('/test-button-event', { event: 'fail', deviceId });
-      }, 3000);
-    } catch (e: any) {
-      console.error('Simulate hold error:', e);
+      await api.post(`/devices/${deviceId}/simulate-press`, { eventType: 'LONG_PRESS' });
+    } catch (_e) {
+      // simulate-hold is a dev test utility, errors are non-critical
     }
   };
 
@@ -776,8 +771,8 @@ export const CustomerHomePage: React.FC = () => {
               }
             }
           }
-        } catch (bleErr) {
-          console.warn('BLE write note:', bleErr);
+        } catch (_bleErr) {
+          // BLE write is best-effort; errors are non-critical
         }
       } else if (wifiPanelTab === 'USB' && typeof navigator !== 'undefined' && 'serial' in navigator) {
         // 2. Nếu đang ở tab USB
@@ -790,9 +785,8 @@ export const CustomerHomePage: React.FC = () => {
           writer.releaseLock();
           await port.close();
         } catch (usbErr: any) {
-          if (usbErr.name !== 'NotFoundError') {
-            console.warn('USB write note:', usbErr);
-          }
+          // NotFoundError = user dismissed port picker, other errors are non-critical
+          void usbErr;
         }
       }
 

@@ -124,8 +124,8 @@ export const StoreDashboard: React.FC = () => {
           return currentAlert;
         });
       }
-    } catch (e) {
-      console.error('Failed to fetch store orders:', e);
+    } catch (_) {
+      toast.error('Không tải được dữ liệu đơn hàng. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
@@ -142,7 +142,6 @@ export const StoreDashboard: React.FC = () => {
     const socket = getSocket();
 
     const handleOrderCreated = (payload: any) => {
-      console.log('⚡ [Store Live Feed] Order Created:', payload);
       const rawNum =
         payload.order?.orderNumber ||
         payload.orderNumber ||
@@ -180,7 +179,6 @@ export const StoreDashboard: React.FC = () => {
     };
 
     const handleOrderCancelled = (payload: any) => {
-      console.log('❌ [Store Live Feed] Order Cancelled:', payload);
       const rawNum =
         payload.order?.orderNumber ||
         payload.orderNumber ||
@@ -249,6 +247,15 @@ export const StoreDashboard: React.FC = () => {
     socket.on('ORDER_CREATED', handleOrderCreated);
     socket.on('ORDER_STATUS_CHANGED', handleOrderUpdated);
     socket.on('ORDER_PAYMENT_CHANGED', handleOrderUpdated);
+    socket.on('ORDER_PAYMENT_CONFIRMED', (payload: any) => {
+      handleOrderUpdated(payload);
+      const rawNum = payload?.order?.orderNumber || payload?.orderCode || payload?.orderId || '';
+      const amount = payload?.amount ? Number(payload.amount).toLocaleString('vi-VN') + ' ₫' : '';
+      toast.success(
+        `Đơn hàng #${rawNum} đã thanh toán PayOS thành công ${amount ? `(${amount})` : ''}!`,
+        { title: '💰 Khách đã thanh toán PayOS 🎉', duration: 6000 }
+      );
+    });
     socket.on('order:status_changed', handleOrderUpdated);
     socket.on('order:updated', handleOrderUpdated);
     socket.on('ORDER_CANCELLED', handleOrderCancelled);
@@ -265,6 +272,7 @@ export const StoreDashboard: React.FC = () => {
       socket.off('ORDER_CREATED', handleOrderCreated);
       socket.off('ORDER_STATUS_CHANGED', handleOrderUpdated);
       socket.off('ORDER_PAYMENT_CHANGED', handleOrderUpdated);
+      socket.off('ORDER_PAYMENT_CONFIRMED', handleOrderUpdated);
       socket.off('order:status_changed', handleOrderUpdated);
       socket.off('order:updated', handleOrderUpdated);
       socket.off('ORDER_CANCELLED', handleOrderCancelled);
@@ -993,15 +1001,16 @@ export const StoreDashboard: React.FC = () => {
                             {order.paymentStatus === 'REFUND_PENDING' ? (
                               <span className="text-rose-600 dark:text-rose-400">Đã nhận tiền · Chờ hoàn PayOS</span>
                             ) : order.paymentStatus === 'PAID' ? (
-                              <span className="text-emerald-600 dark:text-emerald-400">
-                                {order.paymentMethod === 'CASH_ON_DELIVERY' ? 'Đã thu tiền mặt' : 'Đã thanh toán PayOS'}
+                              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold">
+                                <Check className="w-3 h-3" />
+                                {['CASH_ON_DELIVERY', 'COD'].includes(order.paymentMethod as string) ? 'Đã thu tiền mặt' : 'Đã thanh toán (PayOS)'}
                               </span>
-                            ) : order.paymentMethod === 'CASH_ON_DELIVERY' ? (
-                              <span className="text-amber-600 dark:text-amber-400">COD · Thu khi giao</span>
+                            ) : ['CASH_ON_DELIVERY', 'COD'].includes(order.paymentMethod as string) ? (
+                              <span className="text-amber-600 dark:text-amber-400 font-medium">COD · Chờ thu tiền khi giao</span>
                             ) : order.paymentMethod === 'PAYOS' ? (
-                              <span className="text-amber-600 dark:text-amber-400">Chờ thanh toán PayOS</span>
+                              <span className="text-amber-600 dark:text-amber-400 font-medium">Chờ thanh toán PayOS</span>
                             ) : (
-                              <span className="text-zinc-400">Chưa chọn thanh toán</span>
+                              <span className="text-zinc-400">Chờ thanh toán</span>
                             )}
                           </div>
                         </td>
