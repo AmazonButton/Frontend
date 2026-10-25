@@ -124,14 +124,23 @@ export const PayOSCancelRecoveryModal: React.FC<PayOSCancelRecoveryModalProps> =
     setBusyAction('retry');
     try {
       toast.info('Đang mở lại cổng thanh toán PayOS...');
-      const response = await api.post('/payments/payos/create-link', {
+      const isAllowedDomain =
+        window.location.hostname === 'smartorder.vn' ||
+        window.location.hostname.endsWith('.smartorder.vn');
+
+      const payload: any = {
         orderId,
         amount: totalAmount,
         buyerName: order?.customerName,
         buyerPhone: order?.customerPhone,
-        returnUrl: `${window.location.origin}/shop?payos_status=success&orderId=${encodeURIComponent(orderId)}`,
-        cancelUrl: `${window.location.origin}/shop?payos_status=cancelled&orderId=${encodeURIComponent(orderId)}`,
-      });
+      };
+
+      if (isAllowedDomain) {
+        payload.returnUrl = `${window.location.origin}/shop?payos_status=success&orderId=${encodeURIComponent(orderId)}`;
+        payload.cancelUrl = `${window.location.origin}/shop?payos_status=cancelled&orderId=${encodeURIComponent(orderId)}`;
+      }
+
+      const response = await api.post('/payments/payos/create-link', payload);
 
       const checkoutUrl = response.data?.data?.checkoutUrl || response.data?.checkoutUrl;
       if (checkoutUrl) {

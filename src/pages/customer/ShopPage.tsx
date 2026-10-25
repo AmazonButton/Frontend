@@ -204,13 +204,22 @@ export const ShopPage: React.FC = () => {
         // already stored on the order, so only send fields required to create
         // the PayOS payment link; otherwise it rejects buyerName/buyerPhone
         // before returning the checkout URL.
-        const payment = await api.post('/payments/payos/create-link', {
+        const isAllowedDomain =
+          window.location.hostname === 'smartorder.vn' ||
+          window.location.hostname.endsWith('.smartorder.vn');
+
+        const paymentPayload: any = {
           orderId: order.id,
           amount: order.totalAmount,
           description: `Thanh toan don ${order.orderNumber || order.id}`.slice(0, 25),
-          returnUrl: `${window.location.origin}/shop?payos_status=success&orderId=${encodeURIComponent(order.id)}`,
-          cancelUrl: `${window.location.origin}/shop?payos_status=cancelled&orderId=${encodeURIComponent(order.id)}`,
-        });
+        };
+
+        if (isAllowedDomain) {
+          paymentPayload.returnUrl = `${window.location.origin}/shop?payos_status=success&orderId=${encodeURIComponent(order.id)}`;
+          paymentPayload.cancelUrl = `${window.location.origin}/shop?payos_status=cancelled&orderId=${encodeURIComponent(order.id)}`;
+        }
+
+        const payment = await api.post('/payments/payos/create-link', paymentPayload);
         const checkoutUrl = payment.data?.data?.checkoutUrl;
         if (checkoutUrl) {
           try {
