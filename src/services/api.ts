@@ -16,6 +16,11 @@ export const resolveApiUrl = (): string => {
       } else if (stored) {
         return stored.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '').replace(/\/api$/, '');
       }
+      // When hosted on Vercel, route requests through Vercel's same-origin edge proxy (/api/v1/*)
+      // to completely bypass browser cross-origin CORS restrictions.
+      if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
+        return '';
+      }
     } catch {
       // Ignore localStorage read errors in restricted contexts
     }
