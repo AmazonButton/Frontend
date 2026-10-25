@@ -52,6 +52,10 @@
   ],
   "rewrites": [
     {
+      "source": "/api/v1/:path*",
+      "destination": "https://backend-fae8.onrender.com/api/v1/:path*"
+    },
+    {
       "source": "/((?!assets/|.*\\.[\\w]+$).*)",
       "destination": "/index.html"
     }

@@ -26,10 +26,18 @@ export function getSocket(): Socket {
         const t = getStoredToken();
         cb({ token: t ? `Bearer ${t}` : undefined });
       },
+<<<<<<< HEAD
       // Use direct WebSocket transport to bypass Render proxy sticky-session limitations
       // and completely eliminate polling 400 Bad Request errors.
       transports: ['websocket'],
       upgrade: false,
+=======
+      // Start with HTTP polling so a backend that is still starting does not
+      // produce a noisy browser-level WebSocket refusal. Socket.IO upgrades to
+      // WebSocket automatically as soon as the server accepts it.
+      transports: ['polling', 'websocket'],
+      upgrade: true,
+>>>>>>> frontend-origin/dev
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
