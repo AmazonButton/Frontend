@@ -26,15 +26,14 @@ export function getSocket(): Socket {
         const t = getStoredToken();
         cb({ token: t ? `Bearer ${t}` : undefined });
       },
-      // Start with HTTP polling so a backend that is still starting does not
-      // produce a noisy browser-level WebSocket refusal. Socket.IO upgrades to
-      // WebSocket automatically as soon as the server accepts it.
-      transports: ['polling', 'websocket'],
-      upgrade: true,
+      // Use direct WebSocket transport to bypass Render proxy sticky-session limitations
+      // and completely eliminate polling 400 Bad Request errors.
+      transports: ['websocket'],
+      upgrade: false,
       reconnection: true,
       reconnectionAttempts: 10,
       reconnectionDelay: 1000,
-      timeout: 8000,
+      timeout: 10000,
     });
 
     let lastAuthRole: string | null = null;
@@ -106,11 +105,9 @@ export function updateSocketAuth(token?: string | null) {
       if (validToken) {
         s.emit('authenticate', { token: validToken });
       } else {
-        // A connected socket keeps its previous server-side identity. Reconnect
-        // without credentials when logging out or after a token expires.
-        s.disconnect().connect();
+        s.disconnect();
       }
-    } else {
+    } else if (validToken) {
       s.connect();
     }
   }

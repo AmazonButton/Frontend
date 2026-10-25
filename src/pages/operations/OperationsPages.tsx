@@ -21,6 +21,7 @@ export const CustomerVerificationPage: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [starting, setStarting] = useState(false);
   const [message, setMessage] = useState('');
+  const [trackingSessionId, setTrackingSessionId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -33,13 +34,57 @@ export const CustomerVerificationPage: React.FC = () => {
   }, []);
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (!trackingSessionId) return;
+
+    const checkVerificationStatus = async () => {
+      try {
+        const res = await api.get('/identity-verifications/sessions');
+        const updatedSessions = res.data?.data || [];
+        setSessions(updatedSessions);
+
+        const session = updatedSessions.find((item: any) =>
+          item.diditSessionId === trackingSessionId || item.sessionId === trackingSessionId,
+        );
+        const status = String(session?.status || '').toUpperCase();
+
+        if (status.includes('APPROV') || status.includes('SUCCESS') || status.includes('COMPLET')) {
+          setMessage('Xác minh danh tính đã hoàn tất thành công.');
+          setTrackingSessionId(null);
+        } else if (status.includes('REJECT') || status.includes('DECLIN') || status.includes('FAIL') || status.includes('CANCEL')) {
+          setMessage('Phiên xác minh không hoàn tất. Vui lòng kiểm tra lại thông tin hoặc thử lại.');
+          setTrackingSessionId(null);
+        }
+      } catch {
+        // Keep the verification page usable; a transient status-polling error is not a KYC failure.
+      }
+    };
+
+    void checkVerificationStatus();
+    const timer = window.setInterval(checkVerificationStatus, 5000);
+    return () => window.clearInterval(timer);
+  }, [trackingSessionId]);
+
   const start = async () => {
     setStarting(true); setMessage('');
     try {
       const res = await api.post('/identity-verifications/sessions');
       const data = res.data?.data || {};
       const verifyUrl = data.verificationUrl || data.url || data.redirectUrl;
-      if (verifyUrl) window.location.assign(verifyUrl);
+      if (verifyUrl) {
+        const verificationWindow = window.open(verifyUrl, 'didit-verification');
+        if (!verificationWindow) {
+          setMessage('Trình duyệt đang chặn cửa sổ xác minh. Hãy cho phép pop-up rồi thử lại.');
+          return;
+        }
+
+        // Do not leave the app for Didit's separate origin. This keeps third-party console
+        // messages out of the app page while we receive the result through our backend.
+        verificationWindow.opener = null;
+        setTrackingSessionId(data.diditSessionId || data.sessionId || null);
+        setMessage('Trang xác minh đã được mở ở tab mới. Chúng tôi sẽ tự cập nhật kết quả tại đây.');
+        await load();
+      }
       else { setMessage('Phiên xác minh đã tạo. Hãy mở lại trang này để theo dõi trạng thái.'); await load(); }
     } catch (error: any) { setMessage(error.response?.data?.message || 'Không thể khởi tạo phiên xác minh.'); }
     finally { setStarting(false); }

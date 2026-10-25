@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User } from '../types';
-import { api } from '../services/api';
+import { api, isTokenExpired, getOrRefreshValidToken } from '../services/api';
 import { updateSocketAuth, clearSocketSubscriptions } from '../services/socket';
 
 interface AuthContextType {
@@ -18,7 +18,14 @@ const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const [user, setUser] = useState<User | null>(() => {
+    const savedToken = localStorage.getItem('smart_order_token');
     const saved = localStorage.getItem('smart_order_user');
+    const refreshToken = localStorage.getItem('smart_order_refresh_token');
+    if (savedToken && isTokenExpired(savedToken) && !refreshToken) {
+      localStorage.removeItem('smart_order_token');
+      localStorage.removeItem('smart_order_user');
+      return null;
+    }
     if (saved) {
       try {
         return JSON.parse(saved);
@@ -31,21 +38,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const [token, setToken] = useState<string | null>(() => {
     const savedToken = localStorage.getItem('smart_order_token');
+    const refreshToken = localStorage.getItem('smart_order_refresh_token');
     if (savedToken) {
+      if (isTokenExpired(savedToken)) {
+        if (!refreshToken) {
+          localStorage.removeItem('smart_order_token');
+          return null;
+        }
+        return null;
+      }
       api.defaults.headers.common['Authorization'] = `Bearer ${savedToken}`;
+      return savedToken;
     }
-    return savedToken;
+    return null;
   });
 
   const [refreshToken, setRefreshToken] = useState<string | null>(() =>
     localStorage.getItem('smart_order_refresh_token')
   );
 
-  // If user and token already exist in localStorage, do NOT block the UI with a full-screen spinner
   const [isLoading, setIsLoading] = useState<boolean>(() => {
     const savedToken = localStorage.getItem('smart_order_token');
     const savedUser = localStorage.getItem('smart_order_user');
-    return !(savedToken && savedUser);
+    if (savedToken && savedUser && !isTokenExpired(savedToken)) {
+      return false;
+    }
+    const savedRefreshToken = localStorage.getItem('smart_order_refresh_token');
+    if (savedRefreshToken) {
+      return true;
+    }
+    return false;
   });
 
   // Instant optimistic logout: clears storage and state immediately, notifies backend in background
@@ -89,6 +111,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return;
     }
 
+    // Proactively verify or refresh the token BEFORE calling /auth/me
+    const validToken = await getOrRefreshValidToken();
+    if (!validToken) {
+      localStorage.removeItem('smart_order_token');
+      localStorage.removeItem('smart_order_refresh_token');
+      localStorage.removeItem('smart_order_user');
+      delete api.defaults.headers.common['Authorization'];
+      setUser(null);
+      setToken(null);
+      setIsLoading(false);
+      clearSocketSubscriptions();
+      updateSocketAuth(null);
+      return;
+    }
+
     try {
       const res = await api.get('/auth/me');
       if (res.data?.success && res.data?.data) {
@@ -100,11 +137,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUser(normalizedUser);
         localStorage.setItem('smart_order_user', JSON.stringify(normalizedUser));
 
-        const latestToken = localStorage.getItem('smart_order_token');
-        if (latestToken) {
-          setToken(latestToken);
-          api.defaults.headers.common['Authorization'] = `Bearer ${latestToken}`;
-        }
+        setToken(validToken);
+        api.defaults.headers.common['Authorization'] = `Bearer ${validToken}`;
+        updateSocketAuth(validToken);
       }
     } catch (e: any) {
       if (e.response?.status === 401) {

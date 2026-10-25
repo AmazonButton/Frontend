@@ -35,7 +35,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
   const { user, token, isLoading } = useAuth();
   const location = useLocation();
 
-  if (isLoading && !user) {
+  if (isLoading) {
     return (
       <div className="min-h-[calc(100vh-4rem)] flex items-center justify-center">
         <div className="flex flex-col items-center gap-3">

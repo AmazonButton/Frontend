@@ -79,7 +79,8 @@ export async function getOrRefreshValidToken(): Promise<string | null> {
     if (!activeRefreshPromise) {
       activeRefreshPromise = (async () => {
         try {
-          const res = await axios.post(`${API_URL}${API_PREFIX}/auth/refresh`, {
+          const base = resolveApiUrl();
+          const res = await axios.post(`${base}${API_PREFIX}/auth/refresh`, {
             refreshToken,
           });
 
@@ -139,6 +140,16 @@ api.interceptors.request.use(async (config) => {
       } else {
         config.headers = config.headers || {};
         config.headers['Authorization'] = `Bearer ${validToken}`;
+      }
+    } else {
+      if (config.headers) {
+        if (typeof (config.headers as any).delete === 'function') {
+          (config.headers as any).delete('Authorization');
+          (config.headers as any).delete('authorization');
+        } else {
+          delete (config.headers as any)['Authorization'];
+          delete (config.headers as any)['authorization'];
+        }
       }
     }
   }
