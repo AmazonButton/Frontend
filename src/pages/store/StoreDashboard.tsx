@@ -675,51 +675,6 @@ export const StoreDashboard: React.FC = () => {
               Luồng sự kiện tức thì từ Smart Order Button trong mạng lưới khách hàng
             </p>
           </div>
-
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <button
-              type="button"
-              onClick={() => setShowChart(!showChart)}
-              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-xs font-medium transition-all cursor-pointer ${
-                showChart
-                  ? 'bg-[#287DA8] text-white border-[#287DA8] shadow-[0_2px_8px_rgba(40,125,168,0.25)]'
-                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-[#287DA8] hover:text-[#287DA8]'
-              }`}
-            >
-              <TrendingUp className="w-3.5 h-3.5" />
-              Biểu đồ 7 ngày
-              {showChart ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            </button>
-
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setShowInventoryModal(true)}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 hover:bg-[#287DA8]/5 text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] border border-zinc-200 dark:border-zinc-700 hover:border-[#287DA8]/40 text-xs font-medium transition-all cursor-pointer shadow-2xs"
-            >
-              <Boxes className="w-3.5 h-3.5" />
-              Kho Hàng
-              <span className="font-mono text-zinc-400 dark:text-zinc-600">({inventoryList.length})</span>
-            </motion.button>
-
-            <Link
-              to="/store/wallet"
-              className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 hover:bg-emerald-50 dark:hover:bg-emerald-950/40 text-zinc-700 dark:text-zinc-300 hover:text-emerald-700 dark:hover:text-emerald-300 border border-zinc-200 dark:border-zinc-700 hover:border-emerald-300 text-xs font-semibold transition-all cursor-pointer shadow-2xs"
-            >
-              <Wallet className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
-              Ví & Rút Tiền
-            </Link>
-
-            <button
-              type="button"
-              onClick={() => testStoreBankSpeaker()}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 hover:bg-[#287DA8]/5 text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] border border-zinc-200 dark:border-zinc-700 hover:border-[#287DA8]/40 text-xs font-medium transition-all cursor-pointer"
-              title="Nghe thử âm lượng loa thông báo"
-            >
-              <Volume2 className="w-3.5 h-3.5" />
-              Thử Loa
-            </button>
-          </div>
         </div>
       </div>
 

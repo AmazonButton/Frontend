@@ -392,7 +392,7 @@ export const NotificationBellPopover: React.FC = () => {
           playOrderChime();
         } catch {}
 
-        toast.success(`Khách ${customerName} vừa đặt đơn #${orderNum} (${qty}x ${productName})`, {
+        toast.success(`Khách ${customerName} vừa đặt ${qty}x ${productName}`, {
           title: '🔔 Đơn hàng mới!',
           duration: 5000,
         });
