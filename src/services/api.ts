@@ -66,6 +66,24 @@ export function isTokenExpired(token: string | null): boolean {
   }
 }
 
+export const isPublicAuthEndpoint = (url?: string): boolean => {
+  if (!url) return false;
+  return (
+    url.includes('/auth/login') ||
+    url.includes('/auth/register') ||
+    url.includes('/auth/refresh') ||
+    url.includes('/auth/logout') ||
+    url.includes('/auth/forgot-password') ||
+    url.includes('/auth/reset-password') ||
+    url.includes('/auth/verify-email') ||
+    url.includes('/auth/resend-verification') ||
+    url.includes('/auth/google') ||
+    url.includes('/auth/phone') ||
+    url.includes('/auth/check-email') ||
+    url.includes('/auth/check-username')
+  );
+};
+
 let activeRefreshPromise: Promise<string | null> | null = null;
 
 /**
@@ -98,8 +116,17 @@ export async function getOrRefreshValidToken(): Promise<string | null> {
             api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
             return newToken;
           }
-        } catch (_) {
-          // Refresh failed
+        } catch (err: any) {
+          // If refresh token is rejected (401/400) or fails, wipe client auth storage immediately
+          // so we don't repeat failed refresh calls on every subsequent request.
+          if (typeof window !== 'undefined') {
+            try {
+              localStorage.removeItem('smart_order_token');
+              localStorage.removeItem('smart_order_refresh_token');
+              localStorage.removeItem('smart_order_user');
+              delete api.defaults.headers.common['Authorization'];
+            } catch (_) {}
+          }
         } finally {
           activeRefreshPromise = null;
         }
@@ -132,10 +159,7 @@ api.interceptors.request.use(async (config) => {
     }
   }
 
-  const isAuthEndpoint =
-    config.url?.includes('/auth/login') ||
-    config.url?.includes('/auth/register') ||
-    config.url?.includes('/auth/refresh');
+  const isAuthEndpoint = isPublicAuthEndpoint(config.url);
 
   if (!isAuthEndpoint) {
     const validToken = await getOrRefreshValidToken();
@@ -184,11 +208,8 @@ api.interceptors.response.use(
   async (error) => {
     const originalRequest = error.config;
 
-    // Do not attempt refresh on auth endpoints (login, register, refresh itself)
-    const isAuthEndpoint =
-      originalRequest?.url?.includes('/auth/login') ||
-      originalRequest?.url?.includes('/auth/register') ||
-      originalRequest?.url?.includes('/auth/refresh');
+    // Do not attempt refresh on auth endpoints (login, register, logout, refresh itself)
+    const isAuthEndpoint = isPublicAuthEndpoint(originalRequest?.url);
 
     // Seamless Prefix Fallback: If 404 occurs on /api/v1, fallback to /api (or vice-versa)
     if (error.response?.status === 404 && !originalRequest._prefixRetried && originalRequest.url) {
@@ -237,7 +258,8 @@ api.interceptors.response.use(
       isRefreshing = true;
 
       try {
-        const res = await axios.post(`${API_URL}${API_PREFIX}/auth/refresh`, {
+        const base = resolveApiUrl();
+        const res = await axios.post(`${base}${API_PREFIX}/auth/refresh`, {
           refreshToken,
         });
 

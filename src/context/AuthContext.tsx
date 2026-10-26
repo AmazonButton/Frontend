@@ -58,9 +58,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   );
 
   const [isLoading, setIsLoading] = useState<boolean>(() => {
+    const isAuthRoute =
+      typeof window !== 'undefined' &&
+      ['/login', '/register', '/forgot-password', '/reset-password', '/verify-email'].includes(
+        window.location.pathname
+      );
     const savedToken = localStorage.getItem('smart_order_token');
     const savedUser = localStorage.getItem('smart_order_user');
     if (savedToken && savedUser && !isTokenExpired(savedToken)) {
+      return false;
+    }
+    // If the user is on an auth page without a valid token, do not block with full-screen loading
+    if (isAuthRoute) {
       return false;
     }
     const savedRefreshToken = localStorage.getItem('smart_order_refresh_token');
@@ -72,8 +81,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Instant optimistic logout: clears storage and state immediately, notifies backend in background
   const logout = useCallback(() => {
-    const activeToken = localStorage.getItem('smart_order_token');
-    const activeRefreshToken = localStorage.getItem('smart_order_refresh_token');
+    const activeToken = token || (typeof window !== 'undefined' ? localStorage.getItem('smart_order_token') : null);
+    const activeRefreshToken = refreshToken || (typeof window !== 'undefined' ? localStorage.getItem('smart_order_refresh_token') : null);
 
     // 1. Instantly wipe client credentials & state (0ms UI transition)
     localStorage.removeItem('smart_order_token');
@@ -88,13 +97,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     updateSocketAuth(null);
 
     // 2. Fire-and-forget background revoke to server without blocking UI
-    if (activeRefreshToken || activeToken) {
+    // Only call /auth/logout if we have an active, unexpired access token, because the backend
+    // requires a valid JWT for authentication. If already expired or missing, session is already terminated.
+    if (activeToken && !isTokenExpired(activeToken)) {
       api
         .post(
           '/auth/logout',
-          { refreshToken: activeRefreshToken },
+          { refreshToken: activeRefreshToken || undefined },
           {
-            headers: activeToken ? { Authorization: `Bearer ${activeToken}` } : {},
+            headers: { Authorization: `Bearer ${activeToken}` },
           }
         )
         .catch(() => {});
@@ -102,8 +113,28 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, []);
 
   const refreshUser = useCallback(async () => {
+    const isAuthRoute =
+      typeof window !== 'undefined' &&
+      ['/login', '/register', '/forgot-password', '/reset-password', '/verify-email'].includes(
+        window.location.pathname
+      );
+
     const activeToken = localStorage.getItem('smart_order_token');
     const activeRefreshToken = localStorage.getItem('smart_order_refresh_token');
+
+    // If user is on an auth page (/login, /register) and has no valid active access token,
+    // clear any stale credentials immediately without triggering background refresh calls.
+    if (isAuthRoute && (!activeToken || isTokenExpired(activeToken))) {
+      localStorage.removeItem('smart_order_token');
+      localStorage.removeItem('smart_order_refresh_token');
+      localStorage.removeItem('smart_order_user');
+      delete api.defaults.headers.common['Authorization'];
+      setUser(null);
+      setToken(null);
+      setIsLoading(false);
+      return;
+    }
+
     if (!activeToken && !activeRefreshToken) {
       setUser(null);
       setToken(null);
@@ -143,12 +174,21 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     } catch (e: any) {
       if (e.response?.status === 401) {
-        logout();
+        // If /auth/me was rejected with 401, token is invalidated on server.
+        // Clean local state directly; do not call /auth/logout with a rejected token.
+        localStorage.removeItem('smart_order_token');
+        localStorage.removeItem('smart_order_refresh_token');
+        localStorage.removeItem('smart_order_user');
+        delete api.defaults.headers.common['Authorization'];
+        setUser(null);
+        setToken(null);
+        clearSocketSubscriptions();
+        updateSocketAuth(null);
       }
     } finally {
       setIsLoading(false);
     }
-  }, [logout]);
+  }, []);
 
   useEffect(() => {
     refreshUser();
