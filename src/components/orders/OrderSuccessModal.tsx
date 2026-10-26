@@ -63,24 +63,35 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
   useEffect(() => {
     if (!isOpen || !order) return;
 
+    const isCodMethod = order.paymentMethod === 'CASH_ON_DELIVERY' || order.paymentMethod === 'COD';
     setIsCancelled(false);
     setIsPaid(order.paymentStatus === 'PAID');
-    setSelectedPaymentMethod(order.paymentMethod === 'CASH_ON_DELIVERY' ? 'CASH_ON_DELIVERY' : 'PAYOS');
-    setActiveTab(order.paymentMethod === 'CASH_ON_DELIVERY' ? 'COD' : 'PAYOS');
+    setSelectedPaymentMethod(isCodMethod ? 'CASH_ON_DELIVERY' : 'PAYOS');
+    setActiveTab(isCodMethod ? 'COD' : 'PAYOS');
     setPaymentData(null);
     setPaymentFeedback(null);
 
     let isMounted = true;
     const initPaymentLink = async () => {
+      const validOrderId = /^\d+$/.test(String(order.id || ''))
+        ? String(order.id)
+        : /^\d+$/.test(String((order as any).orderId || ''))
+        ? String((order as any).orderId)
+        : null;
+
+      if (!validOrderId) {
+        return;
+      }
+
       setLoadingPayment(true);
       setPayosError(null);
       try {
         const res = await paymentsService.createPayosLink({
-          orderId: order.id || order.orderNumber,
+          orderId: validOrderId,
           amount: totalAmount,
-          description: `SOB ${orderNumber}`,
-          buyerName: order.customerName,
-          buyerPhone: order.customerPhone,
+          description: `SOB ${orderNumber}`.slice(0, 25),
+          buyerName: order.customerName || undefined,
+          buyerPhone: order.customerPhone || undefined,
         });
 
         if (isMounted && res.success && res.data) {
@@ -99,7 +110,9 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
       }
     };
 
-    if (order.paymentMethod !== 'CASH_ON_DELIVERY' && order.paymentStatus !== 'PAID' && order.paymentStatus !== 'REFUND_PENDING') initPaymentLink();
+    if (!isCodMethod && order.paymentStatus !== 'PAID' && order.paymentStatus !== 'REFUND_PENDING') {
+      initPaymentLink();
+    }
 
     return () => {
       isMounted = false;
@@ -108,7 +121,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
         autoCloseTimerRef.current = null;
       }
     };
-  }, [isOpen, order?.id, order?.orderNumber]);
+  }, [isOpen, order?.id, order?.orderNumber, order?.paymentMethod]);
 
   useEffect(() => {
     if (!order || !isOpen || isPaid || !paymentData?.orderCode || selectedPaymentMethod !== 'PAYOS') return;
@@ -213,12 +226,24 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
       await paymentsService.selectOrderPaymentMethod(order.id, 'PAYOS');
       setSelectedPaymentMethod('PAYOS');
       if (paymentData) return;
+
+      const validOrderId = /^\d+$/.test(String(order.id || ''))
+        ? String(order.id)
+        : /^\d+$/.test(String((order as any).orderId || ''))
+        ? String((order as any).orderId)
+        : null;
+
+      if (!validOrderId) {
+        setPayosError('Không thể tạo liên kết thanh toán: Mã đơn hàng không hợp lệ.');
+        return;
+      }
+
       const res = await paymentsService.createPayosLink({
-        orderId: order.id || order.orderNumber,
+        orderId: validOrderId,
         amount: totalAmount,
-        description: `SOB ${orderNumber}`,
-        buyerName: order.customerName,
-        buyerPhone: order.customerPhone,
+        description: `SOB ${orderNumber}`.slice(0, 25),
+        buyerName: order.customerName || undefined,
+        buyerPhone: order.customerPhone || undefined,
       });
       if (res.success && res.data) setPaymentData(res.data);
     } catch (err: any) {

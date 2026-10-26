@@ -10,14 +10,23 @@ import { PayOSCancelRecoveryModal, PayOSRecoveryOrder } from '../../components/o
 const deliveryHeroBackground = '/assets/products/delivery-hero-pastel.png';
 
 type Product = { id: string; storeId: string; name: string; brand: string; category: string; unit: string; price: number; stock: number; reservedStock: number; imageUrl?: string; store: { id: string; name: string } };
-type CartLine = { product: Product; quantity: number };
+type CartLine = { product: Product; quantity: number; selected: boolean };
 const CART_KEY = 'sob_storefront_cart_v1';
 const money = (value: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(value);
+
+const loadCart = (): CartLine[] => {
+  try {
+    const saved = JSON.parse(localStorage.getItem(CART_KEY) || '[]');
+    return Array.isArray(saved) ? saved.map((line) => ({ ...line, selected: line.selected !== false })) : [];
+  } catch {
+    return [];
+  }
+};
 
 export const ShopPage: React.FC = () => {
   const location = useLocation();
   const [products, setProducts] = useState<Product[]>([]);
-  const [cart, setCart] = useState<CartLine[]>(() => { try { return JSON.parse(localStorage.getItem(CART_KEY) || '[]'); } catch { return []; } });
+  const [cart, setCart] = useState<CartLine[]>(loadCart);
   const [search, setSearch] = useState(() => {
     if (typeof window !== 'undefined') {
       return new URLSearchParams(window.location.search).get('search') || '';
@@ -171,16 +180,37 @@ export const ShopPage: React.FC = () => {
   const categories = useMemo(() => ['Tất cả', ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))], [products]);
   const shownProducts = products.filter((p) => category === 'Tất cả' || p.category === category);
   const cartCount = cart.reduce((sum, line) => sum + line.quantity, 0);
-  const total = cart.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
-  const cartStore = cart[0]?.product.storeId;
+  const selectedCart = useMemo(() => cart.filter((line) => line.selected !== false), [cart]);
+  const selectedCount = selectedCart.reduce((sum, line) => sum + line.quantity, 0);
+  const total = selectedCart.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
+  const selectedStore = selectedCart[0]?.product.storeId;
+  // Products can be saved from any store; store validation applies only to selected checkout items.
+  const cartStore: string | undefined = undefined;
   const changeQuantity = (product: Product, delta: number) => setCart((old) => {
     const line = old.find((item) => item.product.id === product.id);
-    if (!line && delta > 0) return [...old, { product, quantity: 1 }];
+    if (!line && delta > 0) {
+      const activeStore = old.find((item) => item.selected)?.product.storeId;
+      return [...old, { product, quantity: 1, selected: !activeStore || activeStore === product.storeId }];
+    }
     return old.map((item) => item.product.id === product.id ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item).filter((item) => item.quantity > 0);
   });
   const removeCartItem = (productId: string) => setCart((old) => old.filter((item) => item.product.id !== productId));
+  const toggleCartSelection = (product: Product) => setCart((old) => {
+    const target = old.find((line) => line.product.id === product.id);
+    if (!target || target.selected) return old.map((line) => line.product.id === product.id ? { ...line, selected: false } : line);
+    const activeStore = old.find((line) => line.selected)?.product.storeId;
+    if (activeStore && activeStore !== product.storeId) {
+      setNotice('Mỗi lần thanh toán chỉ chọn sản phẩm của một cửa hàng. Hãy bỏ chọn cửa hàng hiện tại trước.');
+      return old;
+    }
+    return old.map((line) => line.product.id === product.id ? { ...line, selected: true } : line);
+  });
   const buyNow = (product: Product) => {
-    changeQuantity(product, 1);
+    setCart((old) => {
+      const current = old.find((line) => line.product.id === product.id);
+      if (current) return old.map((line) => line.product.id === product.id ? { ...line, selected: true, quantity: Math.min(product.stock - product.reservedStock, line.quantity + 1) } : { ...line, selected: false });
+      return [...old.map((line) => ({ ...line, selected: false })), { product, quantity: 1, selected: true }];
+    });
     setCartOpen(true);
   };
   const addWithAnimation = (product: Product, event: React.MouseEvent<HTMLButtonElement>) => {
@@ -192,9 +222,11 @@ export const ShopPage: React.FC = () => {
 
   const checkout = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!cart.length) return;
-    if (cart.some((line) => !/^\d+$/.test(String(line.product.id)) || !/^\d+$/.test(String(line.product.storeId)))) {
-      setCart([]);
+    const cart = selectedCart;
+    const cartStore = selectedStore;
+    if (!selectedCart.length) { setNotice('Hãy chọn ít nhất một sản phẩm để thanh toán.'); return; }
+    if (selectedCart.some((line) => !/^\d+$/.test(String(line.product.id)) || !/^\d+$/.test(String(line.product.storeId)))) {
+      setCart((old) => old.filter((line) => !line.selected));
       setCheckoutOpen(false);
       setCartOpen(false);
       setNotice('Giỏ hàng có sản phẩm cũ không còn tồn tại trên hệ thống. Giỏ hàng đã được làm mới; vui lòng chọn lại sản phẩm thực tế.');
@@ -204,7 +236,7 @@ export const ShopPage: React.FC = () => {
     setBusy(true); setNotice('');
     try {
       const response = await api.post('/storefront/orders', {
-        storeId: cartStore, items: cart.map(({ product, quantity }) => ({ productId: product.id, quantity })), ...form,
+        storeId: selectedStore, items: selectedCart.map(({ product, quantity }) => ({ productId: product.id, quantity })), ...form,
       });
       const order = response.data.data;
       if (form.paymentMethod === 'PAYOS') {
@@ -246,13 +278,13 @@ export const ShopPage: React.FC = () => {
               createdAt: new Date().toISOString(),
             }));
           } catch {}
-          localStorage.removeItem(CART_KEY);
+          setCart((old) => old.filter((line) => !line.selected));
           window.location.assign(checkoutUrl);
           return;
         }
         throw new Error('PayOS chưa trả về liên kết thanh toán.');
       }
-      setCart([]); setCheckoutOpen(false); setCartOpen(false);
+      setCart((old) => old.filter((line) => !line.selected)); setCheckoutOpen(false); setCartOpen(false);
       setNotice(`Đặt hàng thành công! Mã đơn ${order.orderNumber}. Thanh toán tiền mặt khi nhận hàng.`);
     } catch (e: any) {
       setNotice(e?.response?.data?.message || e?.message || 'Đặt hàng chưa thành công. Vui lòng thử lại.');
@@ -552,6 +584,11 @@ export const ShopPage: React.FC = () => {
             </div>
 
             <div className="flex-1 overflow-auto p-5">
+              {cart.length > 0 && (
+                <div className="mb-3 rounded-xl border border-sky-100 bg-sky-50 p-3 text-xs leading-5 text-slate-600">
+                  Bạn có thể lưu sản phẩm từ nhiều cửa hàng. Tích chọn những sản phẩm muốn mua; mỗi lần thanh toán chỉ chọn sản phẩm của một cửa hàng.
+                </div>
+              )}
               {cart.length === 0 ? (
                 <div className="py-16 text-center">
                   <span className="text-5xl">🛍️</span>
@@ -559,7 +596,7 @@ export const ShopPage: React.FC = () => {
                 </div>
               ) : (
                 <AnimatePresence initial={false}>
-                  {cart.map(({ product, quantity }) => (
+                  {cart.map(({ product, quantity, selected }) => (
                     <motion.div
                       layout
                       key={product.id}
@@ -569,6 +606,14 @@ export const ShopPage: React.FC = () => {
                       transition={{ duration: 0.25 }}
                       className="flex gap-3 border-b py-4"
                     >
+                      <label className="flex shrink-0 cursor-pointer items-center" title="Chọn sản phẩm để thanh toán">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          onChange={() => toggleCartSelection(product)}
+                          className="h-4 w-4 accent-[#287DA8]"
+                        />
+                      </label>
                       <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-slate-50 border border-slate-100">
                         {product.imageUrl ? (
                           <img src={product.imageUrl} alt="" className="h-full w-full object-cover" />
@@ -623,11 +668,11 @@ export const ShopPage: React.FC = () => {
               <motion.button
                 whileHover={{ scale: 1.02 }}
                 whileTap={{ scale: 0.98 }}
-                disabled={!cart.length}
+                disabled={!selectedCart.length}
                 onClick={() => setCheckoutOpen(true)}
                 className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#287DA8] py-3 font-semibold text-white shadow-sm transition hover:bg-[#206588] disabled:bg-slate-300 disabled:cursor-not-allowed"
               >
-                Tiến hành đặt hàng <ArrowRight size={17} />
+                Thanh toán {selectedCount} sản phẩm đã chọn <ArrowRight size={17} />
               </motion.button>
               {cart.length > 0 && (
                 <button
@@ -668,7 +713,7 @@ export const ShopPage: React.FC = () => {
             <div className="mb-5 flex items-start justify-between">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">Thông tin giao hàng</h2>
-                <p className="mt-1 text-sm text-slate-500">Đơn hàng từ {cart[0]?.product.store.name}</p>
+                <p className="mt-1 text-sm text-slate-500">Đơn hàng từ {selectedCart[0]?.product.store.name}</p>
               </div>
               <motion.button
                 whileHover={{ scale: 1.1, rotate: 90 }}

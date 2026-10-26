@@ -6,6 +6,7 @@ import {
   BadgeCheck,
   BarChart3,
   Cpu,
+  Key,
   Landmark,
   Layers,
   LayoutDashboard,
@@ -37,6 +38,7 @@ const storeLinks: NavigationItem[] = [
   { to: '/store/products', label: 'Sản phẩm & tồn kho', icon: Package },
   { to: '/store/analytics', label: 'Báo cáo doanh thu', icon: BarChart3 },
   { to: '/store/wallet', label: 'Ví & rút tiền', icon: Wallet },
+  { to: '/store/profile?tab=SECURITY', label: 'Đổi mật khẩu', icon: Key },
 ];
 
 const customerLinks: NavigationItem[] = [
@@ -45,6 +47,7 @@ const customerLinks: NavigationItem[] = [
   { to: '/customer/orders', label: 'Đơn hàng', icon: ReceiptText },
   { to: '/customer/verification', label: 'Xác minh eKYC', icon: BadgeCheck },
   { to: '/customer/profile', label: 'Tài khoản', icon: UserRound },
+  { to: '/customer/profile?tab=SECURITY', label: 'Đổi mật khẩu', icon: Key },
 ];
 
 const adminLinks: NavigationItem[] = [
@@ -89,6 +92,9 @@ export const Sidebar: React.FC = () => {
     if (path === '/shop') return location.pathname === '/shop';
     const [pathname, search] = path.split('?');
     if (search) return location.pathname === pathname && location.search === `?${search}`;
+    if (path.includes('profile')) {
+      return location.pathname === pathname && (!location.search || location.search === '?tab=INFO');
+    }
     return location.pathname === path || location.pathname.startsWith(`${path}/`);
   };
 
