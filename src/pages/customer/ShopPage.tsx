@@ -127,7 +127,15 @@ export const ShopPage: React.FC = () => {
   }, [location.search]);
   const fetchCatalog = useCallback(() => {
     api.get('/products/storefront/catalog', { params: { search: search.trim() || undefined } })
-      .then(({ data }) => { setProducts(data.data || []); })
+      .then(({ data }) => {
+        const list = (data.data || []).map((p: any) => ({
+          ...p,
+          category: typeof p.category === 'object' && p.category !== null
+            ? (p.category.categoryName || p.category.name || 'Nhu yếu phẩm')
+            : (typeof p.category === 'string' ? p.category : 'Nhu yếu phẩm'),
+        }));
+        setProducts(list);
+      })
       .catch(() => { setError('Không tải được sản phẩm. Vui lòng thử lại sau.'); })
       .finally(() => { setLoading(false); });
   }, [search]);

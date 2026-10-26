@@ -173,7 +173,15 @@ export const LandingPage: React.FC = () => {
 
   const fetchStorefrontProducts = () => {
     api.get('/products/storefront/catalog')
-      .then(({ data }) => { setStorefrontProducts(data.data || []); })
+      .then(({ data }) => {
+        const list = (data.data || []).map((p: any) => ({
+          ...p,
+          category: typeof p.category === 'object' && p.category !== null
+            ? (p.category.categoryName || p.category.name || 'Nhu yếu phẩm')
+            : (typeof p.category === 'string' ? p.category : 'Nhu yếu phẩm'),
+        }));
+        setStorefrontProducts(list);
+      })
       .catch(() => { setStorefrontProducts([]); })
       .finally(() => { setProductsLoading(false); });
   };

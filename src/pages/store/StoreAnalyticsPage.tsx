@@ -75,7 +75,14 @@ export const StoreAnalyticsPage: React.FC = () => {
         setDevices(devRes.data.data);
       }
       if (prodRes.data?.success && Array.isArray(prodRes.data.data)) {
-        setProducts(prodRes.data.data);
+        setProducts(
+          prodRes.data.data.map((p: any) => ({
+            ...p,
+            category: typeof p.category === 'object' && p.category !== null
+              ? (p.category.categoryName || p.category.name || 'Nhu yếu phẩm')
+              : (typeof p.category === 'string' ? p.category : 'Nhu yếu phẩm'),
+          }))
+        );
       }
       if (analyticsRes.data?.success && analyticsRes.data.data?.chartData) {
         setBackendChartData(analyticsRes.data.data.chartData);
@@ -205,13 +212,19 @@ export const StoreAnalyticsPage: React.FC = () => {
       o.items?.forEach((item) => {
         // Try to match product category
         const prod = products.find((p) => p.name === item.productName || p.id === item.productId);
-        const cat = prod?.category || 'Nước uống';
-        if (!catMap[cat]) {
-          catMap[cat] = { name: cat, revenue: 0, quantity: 0 };
+        const rawCat = prod?.category;
+        const catName: string = typeof rawCat === 'string'
+          ? rawCat
+          : (rawCat && typeof rawCat === 'object' && ('categoryName' in (rawCat as any) ? (rawCat as any).categoryName : (rawCat as any).name))
+            ? String((rawCat as any).categoryName || (rawCat as any).name)
+            : 'Nước uống';
+
+        if (!catMap[catName]) {
+          catMap[catName] = { name: catName, revenue: 0, quantity: 0 };
         }
         const itemTotal = item.totalPrice || item.quantity * item.unitPrice || 0;
-        catMap[cat].revenue += itemTotal;
-        catMap[cat].quantity += item.quantity || 1;
+        catMap[catName].revenue += itemTotal;
+        catMap[catName].quantity += item.quantity || 1;
         totalCatRevenue += itemTotal;
       });
     });
