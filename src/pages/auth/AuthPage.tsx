@@ -215,32 +215,25 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
         throw new Error('Không thể lấy thông tin email từ tài khoản Google.');
       }
 
-      // 2. Prepare payload for Backend /api/auth/google
+      // 2. Prepare payload for Backend /api/auth/google-login
+      // Send verified token and allowed profile fields (fullName, avatarUrl, role, storeName, phone, address).
+      // Backend validates token via Google UserInfo API directly to verify email and googleId safely.
       const targetRole = mode === 'register' ? role : (role || 'CUSTOMER');
-      const payload: any = {
-        email,
+      const requestBody: any = {
+        token: (tokenResponse as any).access_token,
         fullName: name || email.split('@')[0],
         avatarUrl: picture,
-        googleId: sub,
         role: targetRole,
       };
 
       if (targetRole === 'STORE_OWNER') {
-        payload.storeName = storeName.trim() || `Cửa Hàng ${name || email.split('@')[0]}`;
-        payload.phone = phone.trim() || undefined;
-        payload.address = address.trim() || undefined;
+        requestBody.storeName = storeName.trim() || `Cửa Hàng ${name || email.split('@')[0]}`;
+        if (phone?.trim()) requestBody.phone = phone.trim();
+        if (address?.trim()) requestBody.address = address.trim();
       } else {
-        payload.phone = phone.trim() || undefined;
-        payload.address = address.trim() || undefined;
+        if (phone?.trim()) requestBody.phone = phone.trim();
+        if (address?.trim()) requestBody.address = address.trim();
       }
-
-      // Send the verified Google access token together with the registration
-      // details. The token remains the source of identity; these fields let the
-      // backend create the correct customer/store-owner profile on first login.
-      const requestBody = {
-        token: (tokenResponse as any).access_token,
-        ...payload,
-      };
 
       const res = await api.post('/auth/google-login', requestBody);
 
