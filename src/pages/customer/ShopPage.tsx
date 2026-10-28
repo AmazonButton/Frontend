@@ -306,7 +306,7 @@ export const ShopPage: React.FC = () => {
       onAnimationComplete={() => setFlyingProduct(null)}
       className="pointer-events-none fixed z-[100] h-12 w-12 overflow-hidden rounded-xl border-2 border-[#287DA8] bg-white shadow-xl"
     >
-      {flyingProduct.product.imageUrl ? <img src={flyingProduct.product.imageUrl} alt="" className="h-full w-full object-cover" /> : <span className="grid h-full place-items-center text-xl">🛍️</span>}
+      {flyingProduct.product.imageUrl ? <img src={flyingProduct.product.imageUrl} alt="" crossOrigin="anonymous" referrerPolicy="no-referrer" loading="lazy" className="h-full w-full object-cover" /> : <span className="grid h-full place-items-center text-xl">🛍️</span>}
     </motion.div>}
     {/* Full-Bleed / Edge-to-Edge Hero Banner */}
     <section
@@ -502,7 +502,7 @@ export const ShopPage: React.FC = () => {
         const line = cart.find((item) => item.product.id === product.id);
         const stock = Math.max(0, product.stock - product.reservedStock);
         return <article key={product.id} className="group overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-          <button type="button" onClick={() => setSelectedProduct(product)} className="relative block aspect-square w-full overflow-hidden bg-slate-50 text-left">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover transition group-hover:scale-[1.03]"/> : <div className="grid h-full place-items-center text-5xl">🛍️</div>}<span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-slate-600"><Store className="mr-1 inline" size={12}/>{product.store.name}</span></button>
+          <button type="button" onClick={() => setSelectedProduct(product)} className="relative block aspect-square w-full overflow-hidden bg-slate-50 text-left">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} crossOrigin="anonymous" referrerPolicy="no-referrer" loading="lazy" className="h-full w-full object-cover transition group-hover:scale-[1.03]"/> : <div className="grid h-full place-items-center text-5xl">🛍️</div>}<span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-slate-600"><Store className="mr-1 inline" size={12}/>{product.store.name}</span></button>
           <div className="p-3 sm:p-4"><p className="truncate text-[11px] font-semibold uppercase tracking-wide text-teal-700">{product.category}</p><h3 className="mt-1 min-h-10 text-sm font-semibold"><button type="button" onClick={() => setSelectedProduct(product)} className="line-clamp-2 text-left hover:text-[#287DA8] hover:underline">{product.name}</button></h3><p className="mt-1 truncate text-xs text-slate-500">{product.brand || product.unit}</p><div className="mt-3 flex items-end justify-between gap-2"><div><p className="text-base font-bold text-[#287DA8]">{money(product.price)}</p><p className="text-[11px] text-slate-400">Còn {stock} {product.unit || 'sản phẩm'}</p></div><button type="button" onClick={() => buyNow(product)} disabled={!stock} className="mt-2 w-auto shrink-0 rounded-lg border bg-[#287DA8] px-2 py-1.5 text-xs font-semibold text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:opacity-40">Mua ngay</button>{line ? <div className="flex items-center gap-2 rounded-lg bg-[#EAF4F9] p-1"><button onClick={() => changeQuantity(product,-1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white"><Minus size={15}/></button><span className="min-w-4 text-center text-sm font-semibold">{line.quantity}</span><button disabled={line.quantity >= stock} onClick={() => changeQuantity(product,1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white disabled:opacity-40"><Plus size={15}/></button></div> : <button disabled={!stock || (!!cartStore && cartStore !== product.storeId)} title={cartStore && cartStore !== product.storeId ? 'Hoàn tất giỏ hiện tại trước khi chọn cửa hàng khác' : ''} onClick={(event) => addWithAnimation(product, event)} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#287DA8] text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:bg-slate-300"><Plus size={18}/></button>}</div></div>
         </article>;
       })}</div>}
@@ -521,7 +521,7 @@ export const ShopPage: React.FC = () => {
               <div className="relative my-auto grid w-full overflow-hidden rounded-3xl bg-white shadow-2xl md:grid-cols-2">
                 <button type="button" onClick={() => setSelectedProduct(null)} className="absolute right-4 top-4 z-10 grid h-9 w-9 place-items-center rounded-full bg-white/95 text-slate-500 shadow-sm transition hover:bg-slate-100 hover:text-slate-900" aria-label="Đóng chi tiết sản phẩm"><X size={19}/></button>
                 <div className="flex min-h-[300px] items-center justify-center bg-slate-50 p-8 sm:min-h-[500px] sm:p-12">
-                  {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} alt={selectedProduct.name} className="max-h-[430px] w-full object-contain" /> : <span className="text-7xl">🛍️</span>}
+                  {selectedProduct.imageUrl ? <img src={selectedProduct.imageUrl} alt={selectedProduct.name} crossOrigin="anonymous" referrerPolicy="no-referrer" className="max-h-[430px] w-full object-contain" /> : <span className="text-7xl">🛍️</span>}
                 </div>
                 <div className="flex flex-col p-6 sm:p-9">
                   <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#287DA8]"><Store size={15}/>{selectedProduct.store.name}</div>
@@ -616,7 +616,7 @@ export const ShopPage: React.FC = () => {
                       </label>
                       <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-slate-50 border border-slate-100">
                         {product.imageUrl ? (
-                          <img src={product.imageUrl} alt="" className="h-full w-full object-cover" />
+                          <img src={product.imageUrl} alt="" crossOrigin="anonymous" referrerPolicy="no-referrer" loading="lazy" className="h-full w-full object-cover" />
                         ) : (
                           '🛍️'
                         )}

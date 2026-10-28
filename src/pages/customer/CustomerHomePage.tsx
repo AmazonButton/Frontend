@@ -64,6 +64,9 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
         <img
           src={productImg}
           alt={name}
+          crossOrigin="anonymous"
+          referrerPolicy="no-referrer"
+          loading="lazy"
           className="h-full w-full object-contain p-4 mix-blend-multiply transition-transform duration-300 hover:scale-105"
           onError={(e) => { (e.target as HTMLImageElement).src = '/assets/products/vinhhao.png'; }}
         />
