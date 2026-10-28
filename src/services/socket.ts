@@ -12,12 +12,32 @@ const getStoredToken = () => {
   return token && !isTokenExpired(token) ? token : null;
 };
 
-export function getSocket(): Socket {
+const CLUSTER_WEBSOCKET_NODES = [
+  'https://backend-fae8.onrender.com',
+  'https://backend-node2-ukib.onrender.com',
+];
+
+export function resolveSocketUrl(): string {
   const envSocketUrl = (import.meta as any).env?.VITE_SOCKET_URL;
-  const rawTarget = (envSocketUrl && typeof envSocketUrl === 'string' && envSocketUrl.startsWith('http'))
-    ? envSocketUrl.trim().replace(/\/+$/, '')
-    : (typeof resolveApiUrl === 'function' ? resolveApiUrl() : API_URL);
-  const targetUrl = rawTarget || 'https://backend-fae8.onrender.com';
+  if (envSocketUrl && typeof envSocketUrl === 'string' && envSocketUrl.startsWith('http')) {
+    const clean = envSocketUrl.trim().replace(/\/+$/, '');
+    // Cloudflare Workers (*.workers.dev) are HTTP reverse proxies and return 503 on WebSocket upgrades.
+    // Route WebSocket connections directly to the upstream WebSocket cluster nodes.
+    if (!clean.includes('workers.dev')) {
+      return clean;
+    }
+  }
+
+  const resolved = typeof resolveApiUrl === 'function' ? resolveApiUrl() : API_URL;
+  if (resolved && typeof resolved === 'string' && resolved.startsWith('http') && !resolved.includes('workers.dev')) {
+    return resolved.trim().replace(/\/+$/, '');
+  }
+
+  return CLUSTER_WEBSOCKET_NODES[0];
+}
+
+export function getSocket(): Socket {
+  const targetUrl = resolveSocketUrl();
   const token = getStoredToken();
 
   if (!socket) {

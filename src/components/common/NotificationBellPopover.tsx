@@ -132,12 +132,16 @@ export const NotificationBellPopover: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
+  const isFetchingRef = useRef(false);
+
   // Load role-specific historical notifications on initial mount
   useEffect(() => {
     if (!user || !token || isLoading) return;
     let isMounted = true;
 
     const fetchRoleNotifications = async () => {
+      if (isFetchingRef.current) return;
+      isFetchingRef.current = true;
       try {
         const realNotifs: AppNotification[] = [];
 
@@ -337,8 +341,10 @@ export const NotificationBellPopover: React.FC = () => {
         }
       } catch (err: any) {
         if (err?.response?.status !== 401) {
-          void err // Non-critical pre-fetch;
+          void err; // Non-critical pre-fetch
         }
+      } finally {
+        isFetchingRef.current = false;
       }
     };
 
@@ -346,7 +352,7 @@ export const NotificationBellPopover: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [user, token, isLoading, isAdmin, isStore, isCustomer]);
+  }, [user?.id, user?.role, token, isLoading, isAdmin, isStore, isCustomer]);
 
   // Realtime Socket Listeners: Strict Role Scoping
   useEffect(() => {

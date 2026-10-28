@@ -31,7 +31,7 @@ export const resolveApiUrl = (): string => {
     return rawEnv.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '').replace(/\/api$/, '');
   }
 
-  return 'https://backend-fae8.onrender.com';
+  return 'https://fragrant-mode-3a41.ptt24032004.workers.dev';
 };
 
 export const API_URL = resolveApiUrl();
