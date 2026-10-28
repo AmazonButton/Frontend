@@ -256,7 +256,6 @@ export const ShopPage: React.FC = () => {
       }, {
         headers: {
           'x-idempotency-key': orderIdempKey,
-          'idempotency-key': orderIdempKey,
         }
       });
       const order = response.data?.data || response.data;
@@ -284,7 +283,6 @@ export const ShopPage: React.FC = () => {
         const payment = await api.post('/payments/payos/create-link', paymentPayload, {
           headers: {
             'x-idempotency-key': payosIdempKey,
-            'idempotency-key': payosIdempKey,
           }
         });
         const checkoutUrl = payment.data?.data?.checkoutUrl;

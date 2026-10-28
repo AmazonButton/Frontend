@@ -10,16 +10,22 @@ export const resolveApiUrl = (): string => {
         localStorage.setItem('smart_order_api_url', clean);
         return clean;
       }
+      // When hosted on Vercel or running locally with Vite proxy, route requests
+      // through the same-origin proxy (/api/v1/*) to completely eliminate CORS preflight restrictions.
+      const isProxyableHost =
+        window.location.hostname.includes('vercel.app') ||
+        window.location.hostname === 'localhost' ||
+        window.location.hostname === '127.0.0.1';
+
+      if (isProxyableHost) {
+        return '';
+      }
+
       const stored = localStorage.getItem('smart_order_api_url');
-      if (stored && (stored.includes('produces-accurately') || stored.includes('trycloudflare.com'))) {
+      if (stored && (stored.includes('produces-accurately') || stored.includes('trycloudflare.com') || stored.includes('workers.dev'))) {
         localStorage.removeItem('smart_order_api_url');
       } else if (stored) {
         return stored.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '').replace(/\/api$/, '');
-      }
-      // When hosted on Vercel, route requests through Vercel's same-origin edge proxy (/api/v1/*)
-      // to completely bypass browser cross-origin CORS restrictions.
-      if (typeof window !== 'undefined' && window.location.hostname.includes('vercel.app')) {
-        return '';
       }
     } catch {
       // Ignore localStorage read errors in restricted contexts
@@ -159,25 +165,21 @@ api.interceptors.request.use(async (config) => {
     }
   }
 
-  // Auto-generate x-idempotency-key & idempotency-key for state-mutating requests (POST, PUT, PATCH, DELETE)
+  // Auto-generate x-idempotency-key for state-mutating requests (POST, PUT, PATCH, DELETE)
   const method = (config.method || 'get').toUpperCase();
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
     const headers = config.headers as any;
     const existingKey =
       headers?.['x-idempotency-key'] ||
-      headers?.['X-Idempotency-Key'] ||
-      headers?.['idempotency-key'] ||
-      headers?.['Idempotency-Key'];
+      headers?.['X-Idempotency-Key'];
 
     if (!existingKey) {
       const generatedKey = `idem-${Date.now()}-${Math.random().toString(36).substring(2, 10)}${Math.random().toString(36).substring(2, 8)}`;
       if (config.headers && typeof (config.headers as any).set === 'function') {
         (config.headers as any).set('x-idempotency-key', generatedKey);
-        (config.headers as any).set('idempotency-key', generatedKey);
       } else {
         config.headers = config.headers || {};
         config.headers['x-idempotency-key'] = generatedKey;
-        config.headers['idempotency-key'] = generatedKey;
       }
     }
   }
