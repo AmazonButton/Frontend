@@ -159,6 +159,29 @@ api.interceptors.request.use(async (config) => {
     }
   }
 
+  // Auto-generate x-idempotency-key & idempotency-key for state-mutating requests (POST, PUT, PATCH, DELETE)
+  const method = (config.method || 'get').toUpperCase();
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    const headers = config.headers as any;
+    const existingKey =
+      headers?.['x-idempotency-key'] ||
+      headers?.['X-Idempotency-Key'] ||
+      headers?.['idempotency-key'] ||
+      headers?.['Idempotency-Key'];
+
+    if (!existingKey) {
+      const generatedKey = `idem-${Date.now()}-${Math.random().toString(36).substring(2, 10)}${Math.random().toString(36).substring(2, 8)}`;
+      if (config.headers && typeof (config.headers as any).set === 'function') {
+        (config.headers as any).set('x-idempotency-key', generatedKey);
+        (config.headers as any).set('idempotency-key', generatedKey);
+      } else {
+        config.headers = config.headers || {};
+        config.headers['x-idempotency-key'] = generatedKey;
+        config.headers['idempotency-key'] = generatedKey;
+      }
+    }
+  }
+
   const isAuthEndpoint = isPublicAuthEndpoint(config.url);
 
   if (!isAuthEndpoint) {

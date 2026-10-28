@@ -2,7 +2,7 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { ArrowRight, CheckCircle2, Minus, PackageCheck, Plus, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, isTokenExpired } from '../../services/api';
 import { getSocket } from '../../services/socket';
 import { toast } from '../../context/ToastContext';
 import { PayOSCancelRecoveryModal, PayOSRecoveryOrder } from '../../components/orders/PayOSCancelRecoveryModal';
@@ -41,7 +41,13 @@ export const ShopPage: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
   const [flyingProduct, setFlyingProduct] = useState<{ product: Product; x: number; y: number } | null>(null);
-  const [form, setForm] = useState({ customerName: '', customerPhone: '', deliveryAddress: '', paymentMethod: 'PAYOS' });
+  const isCustomerLoggedIn = typeof window !== 'undefined' && Boolean(localStorage.getItem('smart_order_token'));
+  const [form, setForm] = useState({
+    customerName: '',
+    customerPhone: '',
+    deliveryAddress: '',
+    paymentMethod: isCustomerLoggedIn ? 'PAYOS' : 'CASH_ON_DELIVERY',
+  });
   const [cartBump, setCartBump] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [recoveryOrder, setRecoveryOrder] = useState<PayOSRecoveryOrder | null>(null);
@@ -233,12 +239,27 @@ export const ShopPage: React.FC = () => {
       return;
     }
     if (cart.some((line) => line.product.storeId !== cartStore)) { setNotice('Mỗi đơn hàng chỉ gồm sản phẩm của một cửa hàng.'); return; }
+
+    const token = typeof window !== 'undefined' ? localStorage.getItem('smart_order_token') : null;
+    if (form.paymentMethod === 'PAYOS' && (!token || isTokenExpired(token))) {
+      setNotice('Cổng thanh toán trực tuyến PayOS yêu cầu tài khoản khách hàng. Quý khách vui lòng đăng nhập hoặc chọn "Tiền mặt khi nhận hàng (COD)" để hoàn tất đơn ngay.');
+      return;
+    }
+
     setBusy(true); setNotice('');
     try {
+      const orderIdempKey = `ord-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
       const response = await api.post('/storefront/orders', {
-        storeId: selectedStore, items: selectedCart.map(({ product, quantity }) => ({ productId: product.id, quantity })), ...form,
+        storeId: selectedStore,
+        items: selectedCart.map(({ product, quantity }) => ({ productId: product.id, quantity })),
+        ...form,
+      }, {
+        headers: {
+          'x-idempotency-key': orderIdempKey,
+          'idempotency-key': orderIdempKey,
+        }
       });
-      const order = response.data.data;
+      const order = response.data?.data || response.data;
       if (form.paymentMethod === 'PAYOS') {
         // The deployed API validates this DTO strictly. Customer information is
         // already stored on the order, so only send fields required to create
@@ -249,22 +270,28 @@ export const ShopPage: React.FC = () => {
           window.location.hostname.endsWith('.smartorder.vn');
 
         const paymentPayload: any = {
-          orderId: order.id,
+          orderId: order.id || order.orderId,
           amount: order.totalAmount,
-          description: `Thanh toan don ${order.orderNumber || order.id}`.slice(0, 25),
+          description: `Thanh toan don ${order.orderNumber || order.orderCode || order.id}`.slice(0, 25),
         };
 
         if (isAllowedDomain) {
-          paymentPayload.returnUrl = `${window.location.origin}/shop?payos_status=success&orderId=${encodeURIComponent(order.id)}`;
-          paymentPayload.cancelUrl = `${window.location.origin}/shop?payos_status=cancelled&orderId=${encodeURIComponent(order.id)}`;
+          paymentPayload.returnUrl = `${window.location.origin}/shop?payos_status=success&orderId=${encodeURIComponent(order.id || order.orderId)}`;
+          paymentPayload.cancelUrl = `${window.location.origin}/shop?payos_status=cancelled&orderId=${encodeURIComponent(order.id || order.orderId)}`;
         }
 
-        const payment = await api.post('/payments/payos/create-link', paymentPayload);
+        const payosIdempKey = `pay-${order.id || order.orderId}-${Date.now()}`;
+        const payment = await api.post('/payments/payos/create-link', paymentPayload, {
+          headers: {
+            'x-idempotency-key': payosIdempKey,
+            'idempotency-key': payosIdempKey,
+          }
+        });
         const checkoutUrl = payment.data?.data?.checkoutUrl;
         if (checkoutUrl) {
           try {
             sessionStorage.setItem('pending_payos_order', JSON.stringify({
-              orderId: order.id,
+              orderId: order.id || order.orderId,
               orderNumber: order.orderNumber || order.orderCode,
               totalAmount: order.totalAmount,
               customerName: form.customerName,
@@ -285,9 +312,13 @@ export const ShopPage: React.FC = () => {
         throw new Error('PayOS chưa trả về liên kết thanh toán.');
       }
       setCart((old) => old.filter((line) => !line.selected)); setCheckoutOpen(false); setCartOpen(false);
-      setNotice(`Đặt hàng thành công! Mã đơn ${order.orderNumber}. Thanh toán tiền mặt khi nhận hàng.`);
+      setNotice(`Đặt hàng thành công! Mã đơn ${order.orderNumber || order.orderCode}. Thanh toán tiền mặt khi nhận hàng.`);
     } catch (e: any) {
-      setNotice(e?.response?.data?.message || e?.message || 'Đặt hàng chưa thành công. Vui lòng thử lại.');
+      const errorData = e?.response?.data;
+      const message = Array.isArray(errorData?.errors) && errorData.errors.length
+        ? errorData.errors.join('; ')
+        : (errorData?.message || e?.message || 'Đặt hàng chưa thành công. Vui lòng thử lại.');
+      setNotice(message);
     } finally { setBusy(false); }
   };
 
@@ -773,9 +804,16 @@ export const ShopPage: React.FC = () => {
                   onChange={() => setForm({ ...form, paymentMethod: 'PAYOS' })}
                   className="accent-[#287DA8]"
                 />
-                <span>
-                  <b className="block text-sm text-slate-900">Thanh toán trực tuyến PayOS</b>
-                  <small className="text-slate-500">Chuyển đến cổng thanh toán bảo mật</small>
+                <span className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <b className="block text-sm text-slate-900">Thanh toán trực tuyến PayOS</b>
+                    {!isCustomerLoggedIn && (
+                      <span className="rounded-md border border-amber-200 bg-amber-50 px-2 py-0.5 text-[11px] font-medium text-amber-700">
+                        Cần đăng nhập
+                      </span>
+                    )}
+                  </div>
+                  <small className="text-slate-500">Quét mã VietQR / Chuyển khoản ngân hàng</small>
                 </span>
               </motion.label>
               <motion.label
@@ -792,9 +830,14 @@ export const ShopPage: React.FC = () => {
                   onChange={() => setForm({ ...form, paymentMethod: 'CASH_ON_DELIVERY' })}
                   className="accent-[#287DA8]"
                 />
-                <span>
-                  <b className="block text-sm text-slate-900">Tiền mặt khi nhận hàng</b>
-                  <small className="text-slate-500">Thanh toán cho shipper khi giao hàng</small>
+                <span className="flex-1">
+                  <div className="flex items-center justify-between">
+                    <b className="block text-sm text-slate-900">Tiền mặt khi nhận hàng (COD)</b>
+                    <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
+                      Khuyên dùng
+                    </span>
+                  </div>
+                  <small className="text-slate-500">Thanh toán cho shipper khi nhận hàng</small>
                 </span>
               </motion.label>
             </div>
