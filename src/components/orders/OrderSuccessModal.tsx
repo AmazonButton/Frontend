@@ -2,7 +2,6 @@ import React, { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
-  MapPin,
   X,
   Check,
   Copy,
@@ -17,6 +16,8 @@ import {
 } from 'lucide-react';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { paymentsService, PayosPaymentLinkResponse } from '../../services/payments.service';
+import { getOrderRecipient } from '../../services/order-events';
+import { ShippingContact } from './ShippingContact';
 
 export interface OrderSuccessModalProps {
   isOpen: boolean;
@@ -142,7 +143,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
 
   const totalCancelWindow = (order as any).cancelWindowSeconds || 60;
   const progressPercent = Math.max(0, Math.min(100, (secondsRemaining / totalCancelWindow) * 100));
-  const deliveryAddress = order.deliveryAddress || order.address || 'S5.03 VinhomeGrandPark, TP. Thủ Đức, TP. HCM';
+  const recipient = getOrderRecipient(order);
 
   const copyToClipboard = (text: string, field: string) => {
     navigator.clipboard.writeText(text);
@@ -469,8 +470,6 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                           ) : paymentData?.checkoutUrl ? (
                             <a
                               href={paymentData.checkoutUrl}
-                              target="_blank"
-                              rel="noopener noreferrer"
                               className="w-full h-11 bg-[#0E6BA8] hover:bg-[#0B5586] text-white rounded-xl text-xs font-semibold shadow-xs transition-all duration-150 cursor-pointer active:scale-[0.99] flex items-center justify-center gap-2"
                             >
                               <span>Chuyển tới cổng thanh toán PayOS</span>
@@ -629,10 +628,9 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                 )}
               </div>
 
-              {/* Delivery Address */}
-              <div className="pt-2 border-t border-slate-200/50 flex items-start gap-2 text-[11px] text-[#64748B]">
-                <MapPin className="w-3.5 h-3.5 text-slate-400 shrink-0 mt-0.5" strokeWidth={1.75} />
-                <span className="leading-relaxed truncate">{deliveryAddress}</span>
+              {/* Recipient saved on this order */}
+              <div className="pt-2 border-t border-slate-200/50">
+                <ShippingContact order={recipient} />
               </div>
 
               {/* Total Calculation */}

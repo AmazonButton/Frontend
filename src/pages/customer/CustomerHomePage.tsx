@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../services/api';
+import { mergeOrderUpdate, normalizeOrder } from '../../services/order-events';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from '../../context/ToastContext';
 import { useSound } from '../../context/OrderSoundContext';
@@ -309,7 +310,7 @@ export const CustomerHomePage: React.FC = () => {
       ]);
       if (devRes.data.success) setDevices(devRes.data.data);
       if (ordRes.data.success) {
-        const fetchedOrders: Order[] = ordRes.data.data;
+        const fetchedOrders: Order[] = ordRes.data.data.map(normalizeOrder);
         setOrders(fetchedOrders);
 
         // Check activeCancelOrder: if status is no longer PENDING (e.g. accepted by store/shipper), clear immediately!
@@ -332,7 +333,7 @@ export const CustomerHomePage: React.FC = () => {
             (o) => o.id === current.id || o.orderNumber === current.orderNumber
           );
           if (fresh) {
-            return { ...current, status: fresh.status };
+            return mergeOrderUpdate(current, fresh);
           }
           return current;
         });
@@ -373,8 +374,8 @@ export const CustomerHomePage: React.FC = () => {
       fetchData();
 
       if (data.order) {
-        setActiveSuccessOrder(data.order);
-        setActiveCancelOrder(data.order);
+        setActiveSuccessOrder(normalizeOrder(data.order));
+        setActiveCancelOrder(normalizeOrder(data.order));
         setShowSuccessModal(true);
         setSecondsRemaining(data.cancelWindowSeconds || 60);
       }
@@ -396,7 +397,7 @@ export const CustomerHomePage: React.FC = () => {
 
         setActiveSuccessOrder((current) => {
           if (current && (current.id === updatedOrder.id || current.orderNumber === updatedOrder.orderNumber)) {
-            return { ...current, status: updatedOrder.status };
+            return mergeOrderUpdate(current, updatedOrder);
           }
           return current;
         });
@@ -523,8 +524,8 @@ export const CustomerHomePage: React.FC = () => {
       const res = await api.post('/orders/quick-reorder', { deviceId });
       if (res.data.success) {
         const { order, cancelWindowSeconds } = res.data.data;
-        setActiveSuccessOrder(order);
-        setActiveCancelOrder(order);
+        setActiveSuccessOrder(normalizeOrder(order));
+        setActiveCancelOrder(normalizeOrder(order));
         setShowSuccessModal(true);
         setSecondsRemaining(cancelWindowSeconds || 60);
         fetchData();

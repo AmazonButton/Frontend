@@ -1,8 +1,10 @@
+// @refresh reset
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import axios from 'axios';
-import { useGoogleLogin } from '@react-oauth/google';
+import { useGoogleLogin, useGoogleOAuth } from '@react-oauth/google';
+import { getGoogleLoginError, getGooglePopupError } from '../../services/google-auth-errors';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from '../../context/ToastContext';
 import { api } from '../../services/api';
@@ -206,11 +208,13 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
   // ==========================================
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
+  const { scriptLoadedSuccessfully } = useGoogleOAuth();
 
   const handleGoogleSuccess = async (tokenResponse: any) => {
     try {
       setGoogleLoading(true);
       setGoogleError(null);
+      if (!tokenResponse?.access_token) throw new Error('Google chưa trả về mã xác thực. Vui lòng đăng nhập lại.');
 
       const userInfoRes = await axios.get('https://www.googleapis.com/oauth2/v3/userinfo', {
         headers: {
@@ -224,21 +228,23 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
         throw new Error('Không thể lấy thông tin email từ tài khoản Google.');
       }
 
-      const targetRole = mode === 'register' ? role : (role || 'CUSTOMER');
+      const isRegisterMode = mode === 'register';
       const requestBody: any = {
         token: (tokenResponse as any).access_token,
         fullName: name || email.split('@')[0],
         avatarUrl: picture,
-        role: targetRole,
       };
 
-      if (targetRole === 'STORE_OWNER') {
-        requestBody.storeName = storeName.trim() || `Cửa Hàng ${name || email.split('@')[0]}`;
-        if (phone?.trim()) requestBody.phone = phone.trim();
-        if (address?.trim()) requestBody.address = address.trim();
-      } else {
-        if (phone?.trim()) requestBody.phone = phone.trim();
-        if (address?.trim()) requestBody.address = address.trim();
+      if (isRegisterMode) {
+        requestBody.role = role;
+        if (role === 'STORE_OWNER') {
+          requestBody.storeName = storeName.trim() || `Cửa Hàng ${name || email.split('@')[0]}`;
+          if (phone?.trim()) requestBody.phone = phone.trim();
+          if (address?.trim()) requestBody.address = address.trim();
+        } else {
+          if (phone?.trim()) requestBody.phone = phone.trim();
+          if (address?.trim()) requestBody.address = address.trim();
+        }
       }
 
       const res = await api.post('/auth/google-login', requestBody);
@@ -270,13 +276,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
 
       throw new Error(res.data?.message || 'Đăng nhập với Google không thành công.');
     } catch (err: any) {
-      let errMsg =
-        err.response?.data?.message ||
-        err.message ||
-        'Không thể xác thực với Google. Vui lòng thử lại.';
-      if (typeof errMsg === 'string' && (errMsg.includes('Supabase') || err.response?.status === 401)) {
-        errMsg = 'Backend hiện tại yêu cầu đăng nhập trực tiếp bằng Tên đăng nhập / Email và Mật khẩu.';
-      }
+      const errMsg = getGoogleLoginError(err);
       setGoogleError(errMsg);
       toast.error(errMsg);
     } finally {
@@ -286,8 +286,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
 
   const loginWithGoogle = useGoogleLogin({
     onSuccess: handleGoogleSuccess,
-    onError: () => {
-      const msg = 'Đăng nhập Google thất bại hoặc bạn đã đóng cửa sổ xác thực.';
+    onError: (error) => {
+      const msg = getGooglePopupError(error);
+      setGoogleError(msg);
+      toast.error(msg);
+      setGoogleLoading(false);
+    },
+    onNonOAuthError: (error) => {
+      const msg = getGooglePopupError(error);
       setGoogleError(msg);
       toast.error(msg);
       setGoogleLoading(false);
@@ -309,9 +315,22 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
       toast.warning(msg, { duration: 5000 });
       return;
     }
+    if (!scriptLoadedSuccessfully) {
+      const msg = 'Chưa tải được thư viện đăng nhập Google. Vui lòng kiểm tra kết nối mạng rồi tải lại trang.';
+      setGoogleError(msg);
+      toast.error(msg);
+      return;
+    }
     setGoogleLoading(true);
     setGoogleError(null);
-    loginWithGoogle();
+    try {
+      loginWithGoogle();
+    } catch (error) {
+      const msg = getGoogleLoginError(error);
+      setGoogleError(msg);
+      toast.error(msg);
+      setGoogleLoading(false);
+    }
   };
 
   // Username validation & debounce check

@@ -4,6 +4,8 @@ import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useSound } from '../../context/OrderSoundContext';
 import { api } from '../../services/api';
+import { normalizeOrder } from '../../services/order-events';
+import { ShippingContact } from '../../components/orders/ShippingContact';
 import { Device, Order } from '../../types';
 import {
   User as UserIcon,
@@ -162,7 +164,7 @@ export const ProfilePage: React.FC = () => {
           setDevices(devRes.data.data);
         }
         if (ordRes.data?.success && Array.isArray(ordRes.data.data)) {
-          setOrders(ordRes.data.data);
+          setOrders(ordRes.data.data.map(normalizeOrder));
         }
       } catch (_) {
         // Fallback gracefully
@@ -1108,7 +1110,7 @@ export const ProfilePage: React.FC = () => {
                     const statusBadge = getOrderStatusBadge(ord.status);
                     const itemSummary = getOrderItemsSummary(ord);
                     const dateTime = formatOrderDateTime(ord.createdAt);
-                    const customer = ord.customerName || 'Nguyễn Văn An';
+                    const customer = ord.customerName || 'Chưa có tên người nhận';
 
                     return (
                       <div key={ord.id} className="py-3.5 flex items-center justify-between gap-4">
@@ -1124,6 +1126,7 @@ export const ProfilePage: React.FC = () => {
                           <p className="text-[11px] text-slate-500 truncate">
                             <span className="tabular-nums">{dateTime}</span> · <span>{customer}</span> · <span className="text-slate-700 dark:text-zinc-300 font-medium">{itemSummary}</span>
                           </p>
+                          <ShippingContact order={ord} />
                         </div>
 
                         <div className="text-right shrink-0">

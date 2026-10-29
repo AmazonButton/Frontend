@@ -163,7 +163,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const u = res.data.data;
         const normalizedUser: User = {
           ...u,
-          customerProfileId: u.customerProfileId || u.customerProfile?.id || null,
+          customerProfileId: u.customerProfileId || u.customerProfile?.customerId || u.customerProfile?.id || null,
         };
         setUser(normalizedUser);
         localStorage.setItem('smart_order_user', JSON.stringify(normalizedUser));
@@ -207,7 +207,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const normalizedUser: User = {
       ...userData,
       customerProfileId:
-        userData.customerProfileId || (userData as any).customerProfile?.id || null,
+        userData.customerProfileId ||
+        (userData as any).customerProfile?.customerId ||
+        (userData as any).customerProfile?.id ||
+        null,
     };
 
     clearSocketSubscriptions();

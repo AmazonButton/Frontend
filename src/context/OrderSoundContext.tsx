@@ -31,7 +31,6 @@ let sharedAudioCtx: AudioContext | null = null;
 let currentPlayingAudio: HTMLAudioElement | null = null;
 let currentPlayPromise: Promise<void> | null = null;
 let lastAnnounceTimestamp = 0;
-const recentProcessedOrders = new Map<string, number>();
 
 const getAudioContext = (): AudioContext | null => {
   try {
@@ -218,7 +217,7 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       if (isVoiceEnabledRef.current) {
         setTimeout(() => {
-          playVietnameseVoiceAudio('Đơn hàng mới từ nút bấm đã được đặt thành công!');
+          playVietnameseVoiceAudio('Đơn hàng của bạn đã được tạo thành công!');
         }, 500);
       }
     } else {
@@ -235,7 +234,7 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     if (isVoiceEnabledRef.current) {
       setTimeout(() => {
-        playVietnameseVoiceAudio('Đơn hàng đã được hủy qua nút bấm.');
+        playVietnameseVoiceAudio('Đơn hàng đã được hủy.');
       }, 400);
     }
   };
@@ -266,71 +265,13 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   };
 
-  // WebSocket Live Real-time Listener
+  // Order sounds are owned by the notification bell, which deduplicates
+  // socket, HTTP and reconciliation events before announcing them.
   useEffect(() => {
-    if (!user) return;
     const socket = getSocket();
-
-    const handleOrderCreated = (payload: any) => {
-      // Deduplicate event by order ID or order number within 3 seconds
-      const orderId = payload?.order?.id || payload?.orderNumber || payload?.order?.orderNumber || payload?.id;
-      if (orderId) {
-        const lastTime = recentProcessedOrders.get(orderId);
-        const now = Date.now();
-        if (lastTime && now - lastTime < 3000) {
-          return;
-        }
-        recentProcessedOrders.set(orderId, now);
-        if (recentProcessedOrders.size > 80) {
-          for (const [key, t] of recentProcessedOrders.entries()) {
-            if (now - t > 10000) recentProcessedOrders.delete(key);
-          }
-        }
-      }
-
-      const isStore = user && ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN'].includes(user.role);
-
-      if (isStore) {
-        announceStoreOrder({
-          customerName: payload?.customerName || payload?.order?.customerName,
-          productName: payload?.productName,
-          quantity: payload?.quantity,
-          totalAmount: payload?.order?.totalAmount,
-          orderNumber: payload?.order?.orderNumber,
-        });
-      }
-    };
-
-    const handleOrderCancelled = (payload?: any) => {
-      const isStore = user && ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN'].includes(user.role);
-      if (!isStore) return;
-
-      const cancelId = payload?.orderId || payload?.order?.id || payload?.id;
-      if (cancelId) {
-        const key = `cancel_${cancelId}`;
-        const lastTime = recentProcessedOrders.get(key);
-        const now = Date.now();
-        if (lastTime && now - lastTime < 3000) {
-          return;
-        }
-        recentProcessedOrders.set(key, now);
-      }
-      playCancelChime();
-    };
-
-    const handleButtonPressing = () => {
-      playButtonClickSound();
-    };
-
-    socket.on('ORDER_CREATED', handleOrderCreated);
-    socket.on('ORDER_CANCELLED', handleOrderCancelled);
+    const handleButtonPressing = () => playButtonClickSound();
     socket.on('BUTTON_PRESSING', handleButtonPressing);
-
-    return () => {
-      socket.off('ORDER_CREATED', handleOrderCreated);
-      socket.off('ORDER_CANCELLED', handleOrderCancelled);
-      socket.off('BUTTON_PRESSING', handleButtonPressing);
-    };
+    return () => { socket.off('BUTTON_PRESSING', handleButtonPressing); };
   }, [user]);
 
   return (

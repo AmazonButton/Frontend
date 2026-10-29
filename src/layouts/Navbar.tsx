@@ -142,7 +142,9 @@ export const Navbar: React.FC = () => {
           : 'bg-transparent border-b border-transparent backdrop-blur-sm'
       }`}
     >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
+      <div className={`h-16 flex items-center justify-between gap-4 transition-all duration-200 ${
+        user ? 'w-full px-4 sm:px-6 lg:px-8' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'
+      }`}>
 
         {/* ================================================================= */}
         {/* LEFT: Clean Brand Logo & Name                                     */}

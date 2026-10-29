@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
@@ -10,6 +10,9 @@ import { useSound } from '../../context/OrderSoundContext';
 import { toast } from '../../context/ToastContext';
 import { AnalyticsChart } from '../../components/AnalyticsChart';
 import { Order } from '../../types';
+import { mergeOrderUpdate, normalizeOrder, normalizeOrderEvent, ORDER_EVENT, publishOrderEvent } from '../../services/order-events';
+import { ShippingContact } from '../../components/orders/ShippingContact';
+import { getUserStoreId } from '../../services/order-reconciliation';
 import {
   Wallet,
   ShoppingBag,
@@ -64,13 +67,19 @@ const buildChartDataFromOrders = (orders: Order[]) => {
 };
 
 export const StoreDashboard: React.FC = () => {
+  const location = useLocation();
   const { user, token } = useAuth();
+  const storeId = getUserStoreId(user);
   const { announceStoreOrder, testStoreBankSpeaker } = useSound();
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  useEffect(() => {
+    const orderNumber = new URLSearchParams(location.search).get('order');
+    if (orderNumber) { setSearchQuery(orderNumber); setStatusFilter('ALL'); }
+  }, [location.search]);
   const [sortBy, setSortBy] = useState<'PRIORITY' | 'NEWEST' | 'OLDEST'>('PRIORITY');
   const [showChart, setShowChart] = useState(false);
 
@@ -105,7 +114,7 @@ export const StoreDashboard: React.FC = () => {
     try {
       const orderRes = await api.get('/orders');
       if (orderRes.data.success) {
-        const fetchedOrders: Order[] = orderRes.data.data;
+        const fetchedOrders: Order[] = orderRes.data.data.map(normalizeOrder);
         setOrders(fetchedOrders);
         setChartData(buildChartDataFromOrders(fetchedOrders));
 
@@ -135,13 +144,15 @@ export const StoreDashboard: React.FC = () => {
     if (!token) return;
     fetchOrders();
 
-    if (user?.storeId) {
-      subscribeToStore(user.storeId);
+    if (storeId) {
+      subscribeToStore(storeId);
     }
 
     const socket = getSocket();
 
     const handleOrderCreated = (payload: any) => {
+      payload = normalizeOrderEvent(payload);
+      if (storeId && payload.order.storeId && String(payload.order.storeId) !== storeId) return;
       const rawNum =
         payload.order?.orderNumber ||
         payload.orderNumber ||
@@ -153,6 +164,7 @@ export const StoreDashboard: React.FC = () => {
         type: 'CREATE',
         orderNumber,
         customerName: payload.customerName || payload.order?.customerName || payload.order?.customer?.user?.fullName || 'Khách hàng',
+        customerPhone: payload.order?.customerPhone || payload.customerPhone,
         productName: payload.productName || payload.order?.items?.[0]?.product?.name || payload.order?.items?.[0]?.productName || 'Nhu yếu phẩm',
         quantity: payload.quantity || payload.order?.items?.[0]?.quantity || 1,
         totalAmount: payload.order?.totalAmount ?? payload.totalAmount,
@@ -179,6 +191,8 @@ export const StoreDashboard: React.FC = () => {
     };
 
     const handleOrderCancelled = (payload: any) => {
+      payload = normalizeOrderEvent(payload, 'ORDER_CANCELLED');
+      if (storeId && payload.order.storeId && String(payload.order.storeId) !== storeId) return;
       const rawNum =
         payload.order?.orderNumber ||
         payload.orderNumber ||
@@ -186,9 +200,12 @@ export const StoreDashboard: React.FC = () => {
       const orderNumber = String(rawNum).replace(/^#/, '');
 
       setNewOrderAlert({
+        customerName: payload.order.customerName,
+        customerPhone: payload.order.customerPhone,
+        deliveryAddress: payload.order.deliveryAddress,
         type: 'CANCEL',
         orderNumber,
-        reason: payload.reason || payload.cancellationReason || 'Khách hủy qua nút bấm · Đã tự động hoàn kho',
+        reason: payload.reason || payload.cancellationReason || 'Đơn hàng đã được hủy',
       });
       if (payload.order?.id) {
         setOrders((prev) =>
@@ -204,10 +221,16 @@ export const StoreDashboard: React.FC = () => {
     };
 
     const handleOrderUpdated = (data?: any) => {
+      if (['CANCELLED', 'REJECTED'].includes(normalizeOrderEvent(data).status)) {
+        handleOrderCancelled(data);
+        return;
+      }
       const updated = data?.order || data;
-      if (updated && updated.id) {
+      if (storeId && updated?.storeId && String(updated.storeId) !== storeId) return;
+      const updatedId = String(updated?.id || updated?.orderId || '');
+      if (updatedId) {
         setOrders((prev) =>
-          prev.map((o) => (o.id === updated.id ? { ...o, ...updated } : o))
+          prev.map((o) => (o.id === updatedId ? mergeOrderUpdate(o, { ...updated, id: updatedId }) : o))
         );
       }
       fetchOrders();
@@ -232,6 +255,15 @@ export const StoreDashboard: React.FC = () => {
         });
       }
     };
+
+    const handleLocalEvent = (event: Event) => {
+      const { type, payload } = (event as CustomEvent).detail;
+      if (type === 'ORDER_CREATED') handleOrderCreated(payload);
+      else if (type === 'ORDER_CANCELLED') handleOrderCancelled(payload);
+      else handleOrderUpdated(payload);
+    };
+    window.addEventListener(ORDER_EVENT, handleLocalEvent);
+    window.addEventListener('focus', fetchOrders);
 
     const handleDevicesAllocated = (payload: any) => {
       if (user?.storeId && payload?.storeId && String(user.storeId) !== String(payload.storeId)) {
@@ -278,6 +310,8 @@ export const StoreDashboard: React.FC = () => {
       socket.off('ORDER_CANCELLED', handleOrderCancelled);
       socket.off('DEVICES_ALLOCATED', handleDevicesAllocated);
       socket.off('devices:allocated', handleDevicesAllocated);
+      window.removeEventListener(ORDER_EVENT, handleLocalEvent);
+      window.removeEventListener('focus', fetchOrders);
       if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
     };
   }, [user]);
@@ -305,6 +339,11 @@ export const StoreDashboard: React.FC = () => {
     try {
       const res = await api.patch(`/orders/${orderId}/status`, { status: nextStatus });
       if (res.data.success) {
+        const existingOrder = orders.find((order) => order.id === orderId);
+        const returnedOrder = res.data.data || { id: orderId, status: nextStatus };
+        const updatedOrder = existingOrder ? mergeOrderUpdate(existingOrder, returnedOrder) : normalizeOrder(returnedOrder);
+        setOrders((current) => current.map((order) => order.id === orderId ? updatedOrder : order));
+        publishOrderEvent(['CANCELLED', 'REJECTED'].includes(nextStatus) ? 'ORDER_CANCELLED' : 'ORDER_STATUS_CHANGED', { order: updatedOrder });
         if (nextStatus === 'CONFIRMED') {
           toast.success('Đơn hàng đã được tiếp nhận.', { title: 'Đã nhận đơn', duration: 4000 });
         } else if (nextStatus === 'PREPARING') {
@@ -317,8 +356,6 @@ export const StoreDashboard: React.FC = () => {
           toast.success('Đã xác nhận giao hàng. Hãy hoàn tất đơn để cộng tiền vào ví.', { title: 'Đã giao', duration: 5000 });
         } else if (nextStatus === 'COMPLETED') {
           toast.success('Đã giao thành công! Tiền đã cộng vào Ví Cửa Hàng.', { title: 'Giao thành công 🎉', duration: 5000 });
-        } else if (nextStatus === 'CANCELLED' || nextStatus === 'REJECTED') {
-          toast.info('Đơn hàng đã được hủy.', { title: 'Đã hủy đơn', duration: 4000 });
         }
       } else {
         fetchOrders();
@@ -830,7 +867,7 @@ export const StoreDashboard: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Tìm mã đơn, tên, SĐT..."
+                placeholder="Tìm mã đơn, tên, SĐT, địa chỉ..."
                 className="w-full pl-8 pr-7 py-1 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-[#287DA8] focus:ring-1 focus:ring-[#287DA8]/20 transition-colors"
               />
               {searchQuery && (
@@ -879,7 +916,7 @@ export const StoreDashboard: React.FC = () => {
                 <thead>
                   <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-800/40 text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
                     <th className="py-2 px-3.5 font-semibold">Mã Đơn</th>
-                    <th className="py-2 px-3.5 font-semibold">Khách Hàng</th>
+                    <th className="py-2 px-3.5 font-semibold">Người nhận</th>
                     <th className="py-2 px-3.5 font-semibold">Địa Chỉ</th>
                     <th className="py-2 px-3.5 font-semibold">Mặt Hàng</th>
                     <th className="py-2 px-3.5 font-semibold">Trạng Thái</th>
@@ -932,24 +969,24 @@ export const StoreDashboard: React.FC = () => {
                           </div>
                         </td>
 
-                        {/* Khách Hàng */}
-                        <td className="py-2.5 px-3.5 whitespace-nowrap">
-                          <div className="font-semibold text-[11.5px] text-zinc-900 dark:text-zinc-100">
-                            {order.customerName}
+                        {/* Người nhận ghi trên đơn hàng */}
+                        <td className="py-2.5 px-3.5 min-w-[160px] max-w-[240px]">
+                          <div className="font-semibold text-[11.5px] text-zinc-900 dark:text-zinc-100 whitespace-normal break-words">
+                            {order.customerName || 'Chưa có tên người nhận'}
                           </div>
                           <div className="text-[10px] font-mono text-zinc-400 flex items-center gap-1 mt-0.5">
                             <Phone className="w-2.5 h-2.5" />
-                            {order.customerPhone || (order as any).customer?.phoneNumber || '—'}
+                            {order.customerPhone ? <a href={`tel:${order.customerPhone}`} className="break-all hover:underline">{order.customerPhone}</a> : 'Chưa có số điện thoại'}
                           </div>
                         </td>
 
                         {/* Địa Chỉ */}
                         <td className="py-2.5 px-3.5 max-w-[240px]">
                           <div
-                            className="truncate text-[11.5px] text-zinc-700 dark:text-zinc-300 font-medium"
+                            className="whitespace-pre-line break-words text-[11.5px] text-zinc-700 dark:text-zinc-300 font-medium"
                             title={order.deliveryAddress}
                           >
-                            {order.deliveryAddress}
+                            {order.deliveryAddress || 'Chưa có địa chỉ giao hàng'}
                           </div>
                           {order.device && (
                             <div className="text-[9.5px] font-mono text-zinc-400 flex items-center gap-1 mt-0.5">
@@ -1544,150 +1581,7 @@ export const StoreDashboard: React.FC = () => {
     </AnimatePresence>,
     document.body
   )}
-      {/* ── Floating Toast (Bottom-Right) for Realtime Order Events & Cancellations ── */}
-      <AnimatePresence>
-        {isAlertVisible && newOrderAlert && (
-          <motion.div
-            key={newOrderAlert.type + '-' + (cleanOrderNumber || '')}
-            initial={{ opacity: 0, y: 20, scale: 0.96 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 12, scale: 0.96 }}
-            transition={{ duration: 0.25, ease: 'easeOut' }}
-            className={`fixed bottom-6 right-6 z-[100] w-full max-w-[380px] bg-white dark:bg-[#0c121e] border border-slate-200/90 dark:border-zinc-800 rounded-xl shadow-2xl p-4 transition-all duration-300 animate-in slide-in-from-bottom-5 ${
-              newOrderAlert.type === 'CANCEL'
-                ? 'border-l-4 border-l-rose-500'
-                : 'border-l-4 border-l-[#0E6BA8]'
-            }`}
-          >
-            {newOrderAlert.type === 'CANCEL' ? (
-              <div>
-                {/* Dòng 1: Chấm tròn đỏ + Tiêu đề Đơn đã hủy · #8446 + Vừa xong + Nút đóng X */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="w-2 h-2 rounded-full bg-rose-500 shrink-0" />
-                    <span className="text-xs font-semibold text-rose-600 dark:text-rose-400 shrink-0">
-                      Đơn đã hủy
-                    </span>
-                    <span className="text-xs text-slate-300 dark:text-zinc-600">·</span>
-                    <span
-                      className="text-xs font-mono font-bold text-slate-900 dark:text-white tabular-nums truncate cursor-help"
-                      title={cleanOrderNumber ? `Mã đầy đủ: #${cleanOrderNumber}` : undefined}
-                    >
-                      #{alertShortCode}
-                    </span>
-                    <span className="text-[11px] text-slate-400 dark:text-zinc-500 font-normal shrink-0 ml-1">
-                      Vừa xong
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
-                      setNewOrderAlert(null);
-                    }}
-                    className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors p-0.5 cursor-pointer shrink-0"
-                    title="Đóng"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
 
-                {/* Dòng 2: Khách hủy qua nút bấm — Đã tự động hoàn kho */}
-                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1.5">
-                  Khách hủy qua nút bấm — Đã tự động hoàn kho
-                </p>
-              </div>
-            ) : (
-              <div>
-                {/* Dòng 1: Chấm tròn xanh bg-[#0E6BA8] animate-pulse + Đơn mới · #8446 + Vừa xong + Nút đóng X */}
-                <div className="flex items-center justify-between gap-2">
-                  <div className="flex items-center gap-1.5 min-w-0">
-                    <span className="w-2 h-2 rounded-full bg-[#0E6BA8] animate-pulse shrink-0" />
-                    <span className="text-xs font-semibold text-[#0E6BA8] dark:text-[#38a5da] shrink-0">
-                      Đơn mới
-                    </span>
-                    <span className="text-xs text-slate-300 dark:text-zinc-600">·</span>
-                    <span
-                      className="text-xs font-mono font-bold text-slate-900 dark:text-white tabular-nums truncate cursor-help"
-                      title={cleanOrderNumber ? `Mã đầy đủ: #${cleanOrderNumber}` : undefined}
-                    >
-                      #{alertShortCode}
-                    </span>
-                    <span className="text-[11px] text-slate-400 dark:text-zinc-500 font-normal shrink-0 ml-1">
-                      Vừa xong
-                    </span>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setNewOrderAlert(null)}
-                    className="text-slate-400 hover:text-slate-600 dark:hover:text-zinc-200 transition-colors p-0.5 cursor-pointer shrink-0"
-                    title="Đóng"
-                  >
-                    <X className="w-4 h-4" />
-                  </button>
-                </div>
-
-                {/* Dòng 2: Tên khách (in đậm) — Mặt hàng */}
-                <div className="text-xs text-slate-700 dark:text-zinc-300 mt-1.5 truncate">
-                  <span className="font-bold text-slate-900 dark:text-white">
-                    {newOrderAlert.customerName || 'Khách hàng'}
-                  </span>
-                  <span className="text-slate-400 mx-1.5">—</span>
-                  <span>
-                    {newOrderAlert.quantity ? `${newOrderAlert.quantity}× ` : ''}
-                    {newOrderAlert.productName || 'Nhu yếu phẩm'}
-                  </span>
-                </div>
-
-                {/* Dòng 3: Giá tiền bên trái + Cụm 2 nút hành động bên phải */}
-                <div className="flex items-center justify-between gap-2 mt-3 pt-2.5 border-t border-slate-100 dark:border-zinc-800">
-                  <div className="font-mono font-bold text-sm text-[#0E6BA8] dark:text-[#38a5da] tabular-nums">
-                    {newOrderAlert.totalAmount !== undefined
-                      ? `${Number(newOrderAlert.totalAmount).toLocaleString('vi-VN')} đ`
-                      : ''}
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        announceStoreOrder({
-                          customerName: newOrderAlert.customerName,
-                          productName: newOrderAlert.productName,
-                          quantity: newOrderAlert.quantity,
-                          totalAmount: newOrderAlert.totalAmount,
-                          orderNumber: alertShortCode || cleanOrderNumber,
-                        });
-                      }}
-                      className="bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 px-3 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer"
-                    >
-                      Nghe lại
-                    </button>
-                    <motion.button
-                      type="button"
-                      whileTap={{ scale: 0.96 }}
-                      onClick={() => {
-                        const matched = orders.find(
-                          (o) =>
-                            (newOrderAlert.orderId && o.id === newOrderAlert.orderId) ||
-                            (cleanOrderNumber && String(o.orderNumber || '').replace(/^#/, '') === cleanOrderNumber)
-                        );
-                        const targetId = newOrderAlert.orderId || matched?.id;
-                        if (targetId) {
-                          handleUpdateStatus(targetId, 'CONFIRMED');
-                        }
-                        setNewOrderAlert(null);
-                      }}
-                      className="bg-[#0E6BA8] hover:bg-[#0B5586] text-white px-3.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer shadow-xs active:scale-[0.98]"
-                    >
-                      Tiếp nhận đơn
-                    </motion.button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </motion.div>
-        )}
-      </AnimatePresence>
     </div>
   );
 };

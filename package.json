@@ -6,6 +6,12 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
+    "test:hooks": "node --test tests/hooks-fast-refresh.test.mjs",
+    "test:payos": "node --experimental-strip-types --test tests/payos-checkout.test.mjs",
+    "test:orders": "node --experimental-strip-types --test tests/order-list-refresh.test.mjs",
+    "test:notifications": "node --experimental-strip-types --test tests/store-cancellation-notifications.test.mjs",
+    "test:payment-sync": "node --experimental-strip-types --test tests/payment-method-sync.test.mjs",
+    "test:google": "node --experimental-strip-types --test tests/google-login.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

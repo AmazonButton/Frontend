@@ -178,6 +178,10 @@ export interface OrderItem {
 
 export interface Order {
   id: string;
+  orderId?: string;
+  orderCode?: string;
+  orderStatus?: string;
+  updatedAt?: string;
   orderNumber: string;
   storeId: string;
   customerId: string;

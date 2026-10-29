@@ -1,3 +1,5 @@
+// @refresh reset
+// Reset this development-only refresh boundary when its hook layout changes.
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -18,6 +20,10 @@ import { useAuth } from '../../context/AuthContext';
 import { useSound } from '../../context/OrderSoundContext';
 import { toast } from '../../context/ToastContext';
 import { useNavigate } from 'react-router-dom';
+import { normalizeOrder, normalizeOrderEvent, ORDER_EVENT, orderEventKey } from '../../services/order-events';
+import { useOrderSync } from '../../hooks/useOrderSync';
+import { getUserStoreId } from '../../services/order-reconciliation';
+import { getOrderItemsSummary, getOrderNotificationMessage, ORDER_NOTIFICATION_DURATION } from '../../services/order-notifications';
 
 export interface AppNotification {
   id: string;
@@ -36,10 +42,13 @@ export interface AppNotification {
   orderNumber?: string;
   orderId?: string;
   productName?: string;
+  itemsSummary?: string;
   quantity?: number;
   totalAmount?: number;
   reason?: string;
   customerName?: string;
+  customerPhone?: string;
+  deliveryAddress?: string;
   storeName?: string;
   status?: string;
   isRead: boolean;
@@ -77,7 +86,8 @@ function formatRelativeTime(isoString: string): string {
 
 export const NotificationBellPopover: React.FC = () => {
   const { user, token, isLoading } = useAuth();
-  const { playOrderChime, playCancelChime } = useSound();
+  const { playOrderChime, playCancelChime, announceStoreOrder } = useSound();
+  useOrderSync();
   const navigate = useNavigate();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -86,6 +96,7 @@ export const NotificationBellPopover: React.FC = () => {
   const isAdmin = Boolean(user && ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user.role));
   const isStore = Boolean(user && ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'STAFF_ORDER', 'STAFF_INVENTORY', 'STAFF_BUTTON', 'STAFF_DELIVERY'].includes(user.role));
   const isCustomer = Boolean(user && user.role === 'CUSTOMER');
+  const storeId = getUserStoreId(user);
 
   const storageKey = useMemo(() => getNotificationStorageKey(user), [user]);
 
@@ -96,16 +107,29 @@ export const NotificationBellPopover: React.FC = () => {
     } catch {}
     return [];
   });
+  const [notificationOwner, setNotificationOwner] = useState(storageKey);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const seenOrderEvents = useRef(new Set<string>());
+  const acceptOrderEvent = (type: string, payload: any) => {
+    const key = orderEventKey(type, payload);
+    if (seenOrderEvents.current.has(key)) return false;
+    seenOrderEvents.current.add(key);
+    return true;
+  };
 
   // When user account or role changes, reload strictly that user's notifications
   useEffect(() => {
     try {
       const saved = localStorage.getItem(storageKey);
-      setNotifications(saved ? JSON.parse(saved) : []);
+      const rows = saved ? JSON.parse(saved) : [];
+      setNotifications(rows);
+      setNotificationOwner(storageKey);
+      seenOrderEvents.current = new Set(rows.map((row: AppNotification) => row.id));
     } catch {
       setNotifications([]);
+      setNotificationOwner(storageKey);
+      seenOrderEvents.current.clear();
     }
     setActiveTab('ALL');
   }, [storageKey]);
@@ -113,9 +137,10 @@ export const NotificationBellPopover: React.FC = () => {
   // Sync to user-scoped localStorage
   useEffect(() => {
     try {
+      if (notificationOwner !== storageKey) return;
       localStorage.setItem(storageKey, JSON.stringify(notifications.slice(0, 50)));
     } catch {}
-  }, [notifications, storageKey]);
+  }, [notifications, storageKey, notificationOwner]);
 
   // Click outside to close
   useEffect(() => {
@@ -198,7 +223,7 @@ export const NotificationBellPopover: React.FC = () => {
         // ========================================================
         // 2. STORE OWNER SCOPE: Only orders of this store & devices
         // ========================================================
-        else if (isStore && user.storeId) {
+        else if (isStore) {
           const [ordersRes, devicesRes] = await Promise.all([
             api.get('/orders').catch(() => ({ data: { data: [] } })),
             api.get('/devices').catch(() => ({ data: { data: [] } })),
@@ -208,16 +233,16 @@ export const NotificationBellPopover: React.FC = () => {
           const devicesData = devicesRes?.data?.data || devicesRes?.data || [];
 
           if (Array.isArray(ordersData)) {
-            ordersData.slice(0, 25).forEach((ord: any) => {
+            ordersData.slice(0, 25).map(normalizeOrder).forEach((ord: any) => {
               const firstItem = ord.items?.[0];
               const productName = firstItem?.product?.name || firstItem?.productName || 'Nhu yếu phẩm';
               const qty = firstItem?.quantity || 1;
-              const isCancelled = ord.status === 'CANCELLED';
+              const isCancelled = ['CANCELLED', 'REJECTED'].includes(ord.status);
               const orderNum = ord.orderNumber || (ord.id ? String(ord.id).slice(-6) : 'SOB');
 
               if (isCancelled) {
                 realNotifs.push({
-                  id: `notif_cancel_${ord.id}`,
+                  id: orderEventKey('ORDER_CANCELLED', ord),
                   type: 'ORDER_CANCELLED',
                   roleScope: 'STORE',
                   title: `Đã hủy #${orderNum}`,
@@ -228,13 +253,15 @@ export const NotificationBellPopover: React.FC = () => {
                   totalAmount: ord.totalAmount,
                   reason: ord.cancellationReason || 'Khách hủy đơn',
                   customerName: ord.customerName || ord.customer?.user?.fullName || 'Khách hàng',
-                  status: 'CANCELLED',
+                  customerPhone: ord.customerPhone,
+                  deliveryAddress: ord.deliveryAddress,
+                  status: ord.status,
                   isRead: true,
                   timestamp: ord.cancelledAt || ord.updatedAt || ord.createdAt,
                 });
               } else {
                 realNotifs.push({
-                  id: `notif_new_${ord.id}`,
+                  id: orderEventKey('ORDER_CREATED', ord),
                   type: 'ORDER_CREATED',
                   roleScope: 'STORE',
                   title: `Đơn mới #${orderNum}`,
@@ -244,6 +271,8 @@ export const NotificationBellPopover: React.FC = () => {
                   quantity: qty,
                   totalAmount: ord.totalAmount,
                   customerName: ord.customerName || ord.customer?.user?.fullName || 'Khách hàng',
+                  customerPhone: ord.customerPhone,
+                  deliveryAddress: ord.deliveryAddress,
                   status: ord.status,
                   isRead: true,
                   timestamp: ord.createdAt,
@@ -283,7 +312,7 @@ export const NotificationBellPopover: React.FC = () => {
           const ordersData = ordersRes.data?.data || ordersRes.data || [];
 
           if (Array.isArray(ordersData)) {
-            ordersData.slice(0, 25).forEach((ord: any) => {
+            ordersData.slice(0, 25).map(normalizeOrder).forEach((ord: any) => {
               const firstItem = ord.items?.[0];
               const productName = firstItem?.product?.name || firstItem?.productName || 'Sản phẩm';
               const qty = firstItem?.quantity || 1;
@@ -296,7 +325,7 @@ export const NotificationBellPopover: React.FC = () => {
                 : `Đặt hàng thành công #${orderNum}`;
               let type: AppNotification['type'] = 'ORDER_CREATED';
 
-              if (ord.status === 'CANCELLED') {
+              if (['CANCELLED', 'REJECTED'].includes(ord.status)) {
                 title = `Đơn hàng #${orderNum} đã hủy`;
                 type = 'ORDER_CANCELLED';
               } else if (ord.status === 'DELIVERED') {
@@ -311,7 +340,7 @@ export const NotificationBellPopover: React.FC = () => {
               }
 
               realNotifs.push({
-                id: `notif_cust_${ord.id}_${ord.status}`,
+                id: orderEventKey(type, ord),
                 type,
                 roleScope: 'CUSTOMER',
                 title,
@@ -321,6 +350,9 @@ export const NotificationBellPopover: React.FC = () => {
                 quantity: qty,
                 totalAmount: ord.totalAmount,
                 reason: ord.cancellationReason,
+                customerName: ord.customerName,
+                customerPhone: ord.customerPhone,
+                deliveryAddress: ord.deliveryAddress,
                 status: ord.status,
                 isRead: true,
                 timestamp: ord.updatedAt || ord.createdAt,
@@ -359,16 +391,34 @@ export const NotificationBellPopover: React.FC = () => {
     if (!user) return;
     const socket = getSocket();
 
+    const resolveItemsSummary = (ord: any) => {
+      try {
+        if (typeof getOrderItemsSummary === 'function') return getOrderItemsSummary(ord);
+      } catch {}
+      return (ord?.items || []).map((item: any) => ((item.quantity || 1) + '× ' + (item.productName || item.product?.name || 'Sản phẩm'))).join(', ');
+    };
+    const resolveNotificationMessage = (p: any, fallback: string) => {
+      try {
+        if (typeof getOrderNotificationMessage === 'function') return getOrderNotificationMessage(p);
+      } catch {}
+      return fallback;
+    };
+    const notifDuration = typeof ORDER_NOTIFICATION_DURATION !== 'undefined' ? ORDER_NOTIFICATION_DURATION : 5000;
+
     // ========================================================
     // A. STORE STAFF & OWNER SOCKET LISTENERS
     // ========================================================
-    if (isStore && user.storeId) {
-      subscribeToStore(user.storeId);
+    if (isStore) {
+      // Authenticated sockets also join the owner's authorized rooms on the
+      // server. Missing optional profile metadata must not disable listeners.
+      if (storeId) subscribeToStore(storeId);
 
       const handleStoreOrderCreated = (payload: any) => {
+        payload = normalizeOrderEvent(payload);
         const order = payload.order || payload;
         // Verify order belongs to this store
-        if (order.storeId && String(order.storeId) !== String(user.storeId)) return;
+        if (storeId && order.storeId && String(order.storeId) !== storeId) return;
+        if (!acceptOrderEvent('ORDER_CREATED', payload)) return;
 
         const firstItem = order.items?.[0];
         const productName = firstItem?.product?.name || firstItem?.productName || 'Nhu yếu phẩm';
@@ -377,61 +427,73 @@ export const NotificationBellPopover: React.FC = () => {
         const customerName = order.customerName || order.customer?.user?.fullName || payload.customerName || 'Khách hàng';
 
         const newNotif: AppNotification = {
-          id: `notif_rt_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          id: orderEventKey('ORDER_CREATED', payload),
           type: 'ORDER_CREATED',
           roleScope: 'STORE',
           title: `Đơn mới #${orderNum}`,
           orderNumber: orderNum,
           orderId: order.id,
           productName,
+          itemsSummary: resolveItemsSummary(order),
           quantity: qty,
           totalAmount: order.totalAmount,
           customerName,
+          customerPhone: order.customerPhone,
+          deliveryAddress: order.deliveryAddress,
           status: order.status || 'PENDING',
           isRead: false,
           timestamp: new Date().toISOString(),
         };
 
-        setNotifications((prev) => [newNotif, ...prev]);
+        setNotifications((prev) => [newNotif, ...prev.filter((notification) => notification.id !== newNotif.id)]);
 
         try {
-          playOrderChime();
+          announceStoreOrder({ customerName, productName, quantity: qty });
         } catch {}
 
-        toast.success(`Khách ${customerName} vừa đặt ${qty}x ${productName}`, {
+        toast.success(resolveNotificationMessage(payload, `Đơn hàng mới #${orderNum}`), {
           title: '🔔 Đơn hàng mới!',
-          duration: 5000,
+          duration: notifDuration,
         });
       };
 
       const handleStoreOrderCancelled = (payload: any) => {
+        payload = normalizeOrderEvent(payload, 'ORDER_CANCELLED');
+        if (storeId && payload.order.storeId && String(payload.order.storeId) !== storeId) return;
+        if (!acceptOrderEvent('ORDER_CANCELLED', payload)) return;
         const orderId = payload.orderId || payload.id;
         const orderNum = payload.orderNumber || (orderId ? String(orderId).slice(-6) : 'SOB');
         const reason = payload.reason || payload.cancellationReason || 'Khách hủy đơn';
 
         const cancelNotif: AppNotification = {
-          id: `notif_rt_cancel_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          id: orderEventKey('ORDER_CANCELLED', payload),
           type: 'ORDER_CANCELLED',
           roleScope: 'STORE',
           title: `Đã hủy #${orderNum}`,
           orderNumber: orderNum,
           orderId,
-          productName: payload.productName || 'Đơn hàng',
+          productName: payload.order.items?.[0]?.productName || payload.productName || 'Đơn hàng',
+          itemsSummary: resolveItemsSummary(payload.order),
+          quantity: payload.order.items?.[0]?.quantity,
+          totalAmount: payload.order.totalAmount,
+          customerName: payload.customerName || payload.order?.customerName,
+          customerPhone: payload.customerPhone || payload.order?.customerPhone,
+          deliveryAddress: payload.deliveryAddress || payload.order?.deliveryAddress,
           reason,
-          status: 'CANCELLED',
+          status: payload.status,
           isRead: false,
           timestamp: payload.cancelledAt || new Date().toISOString(),
         };
 
-        setNotifications((prev) => [cancelNotif, ...prev]);
+        setNotifications((prev) => [cancelNotif, ...prev.filter((notification) => notification.id !== cancelNotif.id)]);
 
         try {
           playCancelChime();
         } catch {}
 
-        toast.info(`Đơn hàng #${orderNum} đã bị hủy: ${reason}`, {
+        toast.info(resolveNotificationMessage({ ...payload, reason }, reason ? ('Đơn hàng #' + orderNum + ' đã bị hủy. Lý do: ' + reason) : ('Đơn hàng #' + orderNum + ' đã bị hủy')), {
           title: 'Đơn hàng đã hủy',
-          duration: 5000,
+          duration: notifDuration,
         });
       };
 
@@ -462,6 +524,18 @@ export const NotificationBellPopover: React.FC = () => {
         });
       };
 
+      const handleStoreStatus = (payload: any) => {
+        const event = normalizeOrderEvent(payload);
+        if (['CANCELLED', 'REJECTED'].includes(event.status)) handleStoreOrderCancelled(event);
+      };
+      const handleLocalEvent = (event: Event) => {
+        const { type, payload } = (event as CustomEvent).detail;
+        if (type === 'ORDER_CREATED') handleStoreOrderCreated(payload);
+        else if (type === 'ORDER_CANCELLED') handleStoreOrderCancelled(payload);
+        else handleStoreStatus(payload);
+      };
+      window.addEventListener(ORDER_EVENT, handleLocalEvent);
+      socket.on('ORDER_STATUS_CHANGED', handleStoreStatus);
       socket.on('ORDER_CREATED', handleStoreOrderCreated);
       socket.on('order:created', handleStoreOrderCreated);
       socket.on('ORDER_CANCELLED', handleStoreOrderCancelled);
@@ -470,6 +544,8 @@ export const NotificationBellPopover: React.FC = () => {
       socket.on('devices:allocated', handleDevicesAllocated);
 
       return () => {
+        window.removeEventListener(ORDER_EVENT, handleLocalEvent);
+        socket.off('ORDER_STATUS_CHANGED', handleStoreStatus);
         socket.off('ORDER_CREATED', handleStoreOrderCreated);
         socket.off('order:created', handleStoreOrderCreated);
         socket.off('ORDER_CANCELLED', handleStoreOrderCancelled);
@@ -482,11 +558,33 @@ export const NotificationBellPopover: React.FC = () => {
     // ========================================================
     // B. CUSTOMER SOCKET LISTENERS (Personal Order Status ONLY)
     // ========================================================
-    else if (isCustomer && user.customerProfileId) {
-      subscribeToCustomer(user.customerProfileId);
+    else if (isCustomer) {
+      const customerId =
+        user.customerProfileId ||
+        (user as any)?.customerProfile?.customerId ||
+        (user as any)?.customerProfile?.id ||
+        (user.role === 'CUSTOMER' ? user.id : null);
+
+      if (customerId) {
+        subscribeToCustomer(String(customerId));
+      }
+      if (user.id && String(user.id) !== String(customerId)) {
+        subscribeToCustomer(String(user.id));
+      }
 
       const handleCustomerOrderCreated = (payload: any) => {
+        payload = normalizeOrderEvent(payload);
         const order = payload.order || payload;
+        const orderCustId = order.customerId || payload.customerId;
+        if (
+          customerId &&
+          orderCustId &&
+          String(orderCustId) !== String(customerId) &&
+          String(orderCustId) !== String(user.id)
+        ) {
+          return;
+        }
+        if (!acceptOrderEvent('ORDER_CREATED', payload)) return;
         const orderNum = order.orderNumber || (order.id ? String(order.id).slice(-6) : 'SOB');
         const firstItem = order.items?.[0];
         const productName = firstItem?.product?.name || firstItem?.productName || 'Sản phẩm';
@@ -497,33 +595,50 @@ export const NotificationBellPopover: React.FC = () => {
           : `Đặt hàng thành công #${orderNum}`;
 
         const newNotif: AppNotification = {
-          id: `notif_rt_cust_${Date.now()}`,
+          id: orderEventKey('ORDER_CREATED', payload),
           type: 'ORDER_CREATED',
           roleScope: 'CUSTOMER',
           title,
           orderNumber: orderNum,
           orderId: order.id,
           productName,
+          itemsSummary: resolveItemsSummary(order),
           quantity: firstItem?.quantity || 1,
           totalAmount: order.totalAmount,
+          customerName: order.customerName,
+          customerPhone: order.customerPhone,
+          deliveryAddress: order.deliveryAddress,
           status: order.status || 'PENDING',
           isRead: false,
           timestamp: new Date().toISOString(),
         };
 
-        setNotifications((prev) => [newNotif, ...prev]);
+        setNotifications((prev) => [newNotif, ...prev.filter((notification) => notification.id !== newNotif.id)]);
+        playOrderChime(true);
         if (awaitingPayOS) {
-          toast.info(`Đơn #${orderNum} đã được tạo và đang chờ bạn hoàn tất thanh toán PayOS.`, {
+          toast.info(resolveNotificationMessage(payload, title), {
             title: 'Chờ thanh toán PayOS',
+            duration: notifDuration,
           });
         } else {
-          toast.success(`Bạn đã đặt hàng thành công đơn #${orderNum}! Cửa hàng đang chuẩn bị hàng.`, {
+          toast.success(resolveNotificationMessage(payload, title), {
             title: '🎉 Đặt hàng thành công',
+            duration: notifDuration,
           });
         }
       };
 
       const handleCustomerOrderStatus = (payload: any) => {
+        payload = normalizeOrderEvent(payload);
+        const orderCustId = payload.order?.customerId || payload.customerId;
+        if (
+          customerId &&
+          orderCustId &&
+          String(orderCustId) !== String(customerId) &&
+          String(orderCustId) !== String(user.id)
+        ) {
+          return;
+        }
         const orderId = payload.orderId || payload.id;
         const orderNum = payload.orderNumber || (orderId ? String(orderId).slice(-6) : 'SOB');
         const status = payload.status || payload.orderStatus;
@@ -531,10 +646,10 @@ export const NotificationBellPopover: React.FC = () => {
         let title = `Đơn hàng #${orderNum} cập nhật: ${status}`;
         let type: AppNotification['type'] = 'ORDER_STATUS_CHANGED';
 
-        if (status === 'DELIVERED') {
+        if (['DELIVERED', 'COMPLETED'].includes(status)) {
           title = `Đơn hàng #${orderNum} đã giao thành công`;
           type = 'ORDER_DELIVERED';
-        } else if (status === 'CANCELLED') {
+        } else if (['CANCELLED', 'REJECTED'].includes(status)) {
           title = `Đơn hàng #${orderNum} đã bị hủy`;
           type = 'ORDER_CANCELLED';
         } else if (['SHIPPING', 'OUT_FOR_DELIVERY'].includes(status)) {
@@ -543,36 +658,57 @@ export const NotificationBellPopover: React.FC = () => {
           title = `Cửa hàng đã xác nhận đơn hàng #${orderNum}`;
         }
 
+        if (!acceptOrderEvent(type, payload)) return;
+        if (type === 'ORDER_CANCELLED') playCancelChime();
+
         const newNotif: AppNotification = {
-          id: `notif_rt_cust_status_${Date.now()}`,
+          id: orderEventKey(type, payload),
           type,
           roleScope: 'CUSTOMER',
           title,
           orderNumber: orderNum,
           orderId,
-          productName: payload.productName || 'Đơn hàng của bạn',
+          productName: payload.order.items?.[0]?.productName || payload.productName || 'Đơn hàng của bạn',
+          itemsSummary: resolveItemsSummary(payload.order),
+          quantity: payload.order.items?.[0]?.quantity,
+          totalAmount: payload.order.totalAmount,
+          customerName: payload.customerName || payload.order?.customerName,
+          customerPhone: payload.customerPhone || payload.order?.customerPhone,
+          deliveryAddress: payload.deliveryAddress || payload.order?.deliveryAddress,
           reason: payload.reason || payload.cancellationReason,
           status,
           isRead: false,
           timestamp: new Date().toISOString(),
         };
 
-        setNotifications((prev) => [newNotif, ...prev]);
-        toast.info(title, { title: 'Cập nhật đơn hàng' });
+        setNotifications((prev) => [newNotif, ...prev.filter((notification) => notification.id !== newNotif.id)]);
+        toast.info(resolveNotificationMessage(payload, title), { title, duration: notifDuration });
       };
+
+      const handleCancelled = (payload: any) => handleCustomerOrderStatus(normalizeOrderEvent(payload, 'ORDER_CANCELLED'));
+      const handleLocalEvent = (event: Event) => {
+        const { type, payload } = (event as CustomEvent).detail;
+        if (type === 'ORDER_CREATED') handleCustomerOrderCreated(payload);
+        else if (type === 'ORDER_CANCELLED') handleCancelled(payload);
+        else handleCustomerOrderStatus(payload);
+      };
+      window.addEventListener(ORDER_EVENT, handleLocalEvent);
 
       socket.on('ORDER_CREATED', handleCustomerOrderCreated);
       socket.on('order:created', handleCustomerOrderCreated);
       socket.on('ORDER_STATUS_CHANGED', handleCustomerOrderStatus);
       socket.on('ORDER_DELIVERED', handleCustomerOrderStatus);
-      socket.on('ORDER_CANCELLED', handleCustomerOrderStatus);
+      socket.on('ORDER_CANCELLED', handleCancelled);
+      socket.on('order:cancelled', handleCancelled);
 
       return () => {
+        window.removeEventListener(ORDER_EVENT, handleLocalEvent);
         socket.off('ORDER_CREATED', handleCustomerOrderCreated);
         socket.off('order:created', handleCustomerOrderCreated);
         socket.off('ORDER_STATUS_CHANGED', handleCustomerOrderStatus);
         socket.off('ORDER_DELIVERED', handleCustomerOrderStatus);
-        socket.off('ORDER_CANCELLED', handleCustomerOrderStatus);
+        socket.off('ORDER_CANCELLED', handleCancelled);
+        socket.off('order:cancelled', handleCancelled);
       };
     }
 
@@ -636,7 +772,7 @@ export const NotificationBellPopover: React.FC = () => {
         socket.off('withdrawal:requested', handleWithdrawalRequested);
       };
     }
-  }, [playOrderChime, playCancelChime, user, isAdmin, isStore, isCustomer]);
+  }, [playOrderChime, playCancelChime, announceStoreOrder, user, storeId, isAdmin, isStore, isCustomer]);
 
   const unreadCount = useMemo(() => {
     return notifications.filter((n) => !n.isRead).length;
@@ -719,12 +855,12 @@ export const NotificationBellPopover: React.FC = () => {
         navigate('/store/devices');
         return;
       }
-      navigate('/store/dashboard');
+      navigate(`/store/dashboard${notif.orderNumber ? `?order=${encodeURIComponent(notif.orderNumber)}` : ''}`);
       return;
     }
 
     if (isCustomer) {
-      navigate('/customer/home');
+      navigate(`/customer/orders?orderId=${encodeURIComponent(notif.orderId || '')}&order=${encodeURIComponent(notif.orderNumber || '')}`);
       return;
     }
   };
@@ -896,8 +1032,8 @@ export const NotificationBellPopover: React.FC = () => {
 
                         {/* Row 2: Subtitle / Product info */}
                         <div className="text-xs text-slate-700 dark:text-zinc-300 font-medium truncate mt-0.5">
-                          <span>{notif.productName || (isStorePending ? 'Chờ phê duyệt' : 'Nhu yếu phẩm')}</span>
-                          {notif.quantity && notif.quantity > 1 ? ` (${notif.quantity}x)` : ''}
+                          <span>{notif.itemsSummary || notif.productName || (isStorePending ? 'Chờ phê duyệt' : 'Nhu yếu phẩm')}</span>
+                          {!notif.itemsSummary && notif.quantity && notif.quantity > 1 ? ` (${notif.quantity}x)` : ''}
                           {notif.totalAmount !== undefined && (
                             <span className="text-slate-900 dark:text-white font-semibold ml-1.5 tabular-nums">
                               • {notif.totalAmount.toLocaleString('vi-VN')} đ
@@ -906,6 +1042,8 @@ export const NotificationBellPopover: React.FC = () => {
                         </div>
 
                         {/* Row 3: Secondary Context */}
+                        {notif.customerName && <p className="mt-1 text-[11px] text-slate-500 break-words">{notif.customerName}{notif.customerPhone ? ` · ${notif.customerPhone}` : ''}</p>}
+                        {notif.deliveryAddress && <p className="mt-1 text-[11px] text-slate-500 whitespace-pre-line break-words">{notif.deliveryAddress}</p>}
                         <div className="text-[11px] text-slate-400 dark:text-zinc-500 mt-0.5 truncate">
                           {isStorePending ? (
                             <span className="text-amber-600 dark:text-amber-400 font-medium">Bấm để xem hồ sơ và phê duyệt đại lý →</span>
@@ -945,7 +1083,7 @@ export const NotificationBellPopover: React.FC = () => {
                 } else if (isStore) {
                   navigate('/store/dashboard');
                 } else {
-                  navigate('/customer/home');
+                  navigate('/customer/orders');
                 }
               }}
               className="w-full py-2.5 text-center text-xs font-medium text-slate-600 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white bg-slate-50/60 hover:bg-slate-100 dark:bg-zinc-900/60 dark:hover:bg-zinc-800 border-t border-slate-100 dark:border-zinc-800 block transition-colors cursor-pointer"

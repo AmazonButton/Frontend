@@ -13,6 +13,8 @@ import {
   Cell,
 } from 'recharts';
 import { api } from '../../services/api';
+import { normalizeOrder } from '../../services/order-events';
+import { ShippingContact } from '../../components/orders/ShippingContact';
 import { toast } from '../../context/ToastContext';
 import { Order, Device, Product } from '../../types';
 import {
@@ -69,7 +71,7 @@ export const StoreAnalyticsPage: React.FC = () => {
       ]);
 
       if (orderRes.data?.success && Array.isArray(orderRes.data.data)) {
-        setOrders(orderRes.data.data);
+        setOrders(orderRes.data.data.map(normalizeOrder));
       }
       if (devRes.data?.success && Array.isArray(devRes.data.data)) {
         setDevices(devRes.data.data);
@@ -337,9 +339,11 @@ export const StoreAnalyticsPage: React.FC = () => {
           const q = ledgerSearch.toLowerCase().trim();
           const matchNum = o.orderNumber?.toLowerCase().includes(q);
           const matchCust = o.customerName?.toLowerCase().includes(q);
+          const matchPhone = o.customerPhone?.toLowerCase().includes(q);
+          const matchAddress = o.deliveryAddress?.toLowerCase().includes(q);
           const matchDev = o.deviceId?.toLowerCase().includes(q);
           const matchItem = o.items?.some((it) => it.productName?.toLowerCase().includes(q));
-          return matchNum || matchCust || matchDev || matchItem;
+          return matchNum || matchCust || matchPhone || matchAddress || matchDev || matchItem;
         }
         return true;
       })
@@ -348,12 +352,12 @@ export const StoreAnalyticsPage: React.FC = () => {
 
   // Export CSV handler
   const handleExportCSV = () => {
-    const headers = ['Mã Đơn', 'Thời Gian', 'Khách Hàng', 'Số Điện Thoại', 'Địa Chỉ', 'Nút Bấm IoT', 'Sản Phẩm', 'Tổng Tiền (VNĐ)', 'Trạng Thái'];
+    const headers = ['Mã Đơn', 'Thời Gian', 'Người Nhận', 'Số Điện Thoại', 'Địa Chỉ', 'Nút Bấm IoT', 'Sản Phẩm', 'Tổng Tiền (VNĐ)', 'Trạng Thái'];
     const rows = filteredOrders.map((o) => [
       `"${o.orderNumber}"`,
       `"${new Date(o.createdAt).toLocaleString('vi-VN')}"`,
-      `"${o.customerName || 'Khách vãng lai'}"`,
-      `"${o.customerPhone || ''}"`,
+      `"${(o.customerName || 'Chưa có tên người nhận').replace(/"/g, '""')}"`,
+      `"${(o.customerPhone || '').replace(/"/g, '""')}"`,
       `"${(o.deliveryAddress || '').replace(/"/g, '""')}"`,
       `"${o.deviceId || 'Đặt trực tiếp'}"`,
       `"${(o.items?.map((it) => `${it.productName} (x${it.quantity})`).join(', ') || '').replace(/"/g, '""')}"`,
@@ -837,7 +841,7 @@ export const StoreAnalyticsPage: React.FC = () => {
               <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Tìm mã đơn, khách hàng..."
+                placeholder="Tìm mã đơn, tên, SĐT, địa chỉ..."
                 value={ledgerSearch}
                 onChange={(e) => setLedgerSearch(e.target.value)}
                 className="w-full pl-8 pr-2 py-1 text-xs rounded-md bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400 transition-colors"
@@ -862,7 +866,7 @@ export const StoreAnalyticsPage: React.FC = () => {
             <thead>
               <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[10.5px] uppercase font-mono text-zinc-400 dark:text-zinc-500">
                 <th className="py-2.5 px-3">Mã Đơn & Thời Gian</th>
-                <th className="py-2.5 px-3">Khách Hàng</th>
+                <th className="py-2.5 px-3">Thông Tin Người Nhận</th>
                 <th className="py-2.5 px-3">Kênh Đặt (Nút IoT)</th>
                 <th className="py-2.5 px-3">Sản Phẩm Đặt</th>
                 <th className="py-2.5 px-3 text-right">Tổng Tiền</th>
@@ -896,13 +900,8 @@ export const StoreAnalyticsPage: React.FC = () => {
                           })}
                         </div>
                       </td>
-                      <td className="py-2.5 px-3">
-                        <div className="font-medium text-zinc-800 dark:text-zinc-200">
-                          {order.customerName || 'Khách vãng lai'}
-                        </div>
-                        <div className="text-[10px] text-zinc-400 truncate max-w-[160px]" title={order.deliveryAddress}>
-                          {order.deliveryAddress || 'Tại cửa hàng'}
-                        </div>
+                      <td className="py-2.5 px-3 min-w-[220px] max-w-[320px]">
+                        <ShippingContact order={order} />
                       </td>
                       <td className="py-2.5 px-3 font-mono">
                         {order.deviceId ? (

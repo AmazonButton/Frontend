@@ -23,7 +23,7 @@ import {
 import { api } from '../../services';
 import { useAuth } from '../../context/AuthContext';
 
-const card = 'rounded-2xl border border-zinc-200 bg-white p-5 shadow-sm dark:border-zinc-800 dark:bg-zinc-900';
+const card = 'rounded-2xl border border-zinc-200/80 bg-white p-6 shadow-sm dark:border-zinc-800/80 dark:bg-zinc-900';
 const primaryButton = 'inline-flex items-center justify-center gap-2 rounded-lg bg-[#287DA8] px-3.5 py-2 text-xs font-semibold text-white shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-colors hover:bg-[#206588] disabled:cursor-not-allowed disabled:opacity-50';
 
 const StatusPill: React.FC<{ value?: string }> = ({ value }) => {
@@ -226,23 +226,23 @@ export const CustomerVerificationPage: React.FC = () => {
   };
 
   return (
-    <main className="mx-auto max-w-5xl space-y-5 px-4 py-7 sm:px-6">
+    <main className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
       {/* Top Hero Banner */}
       {isApproved ? (
-        <section className="relative overflow-hidden rounded-2xl border border-emerald-500/20 bg-gradient-to-br from-emerald-700 via-teal-700 to-sky-900 p-6 text-white shadow-lg">
+        <section className="relative overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-800 via-teal-800 to-sky-950 p-6 text-white shadow-sm">
           <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
             <div>
               <div className="mb-2 flex items-center gap-2 text-emerald-200">
                 <ShieldCheck className="h-5 w-5 text-emerald-300" />
                 <span className="text-xs font-bold uppercase tracking-[0.16em]">Danh tính đã chứng thực</span>
               </div>
-              <h1 className="text-2xl font-bold">Xác minh danh tính thành công</h1>
-              <p className="mt-2 max-w-xl text-sm text-emerald-100">
+              <h1 className="text-2xl font-bold tracking-tight text-white">Xác minh danh tính thành công</h1>
+              <p className="mt-2 max-w-xl text-sm leading-relaxed text-emerald-50/90">
                 Hồ sơ eKYC của bạn đã được chứng thực thành công qua nhà cung cấp Didit. Toàn bộ tính năng tài khoản và bảo vệ thanh toán đã được kích hoạt.
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <div className="inline-flex items-center gap-2 rounded-xl bg-white/15 px-4 py-2.5 text-xs font-bold text-white backdrop-blur-md ring-1 ring-white/30 shadow-sm">
+              <div className="inline-flex cursor-default select-none items-center gap-1.5 rounded-full border border-emerald-300/30 bg-emerald-950/40 px-3.5 py-1.5 text-xs font-semibold tracking-wide text-emerald-200 backdrop-blur-md">
                 <CheckCircle2 className="h-4 w-4 text-emerald-300" />
                 ĐÃ HOÀN TẤT eKYC
               </div>
@@ -250,14 +250,14 @@ export const CustomerVerificationPage: React.FC = () => {
           </div>
         </section>
       ) : isPending ? (
-        <section className="relative overflow-hidden rounded-2xl border border-[#287DA8]/20 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-lg">
+        <section className="relative overflow-hidden rounded-2xl border border-[#287DA8]/25 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-sm">
           <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
             <div>
               <div className="mb-2 flex items-center gap-2 text-sky-100">
                 <Clock3 className="h-5 w-5 text-amber-300" />
                 <span className="text-xs font-bold uppercase tracking-[0.16em]">Đang chờ đối soát eKYC</span>
               </div>
-              <h1 className="text-2xl font-bold">Xác minh danh tính đang xử lý</h1>
+              <h1 className="text-2xl font-bold tracking-tight text-white">Xác minh danh tính đang xử lý</h1>
               <p className="mt-2 max-w-xl text-sm text-sky-50">
                 Nếu bạn đã hoàn thành chụp ảnh trên Didit, hãy bấm nút đồng bộ bên cạnh để cập nhật kết quả duyệt tức thì.
               </p>
@@ -275,14 +275,14 @@ export const CustomerVerificationPage: React.FC = () => {
           </div>
         </section>
       ) : (
-        <section className="overflow-hidden rounded-2xl border border-[#287DA8]/20 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-lg">
+        <section className="overflow-hidden rounded-2xl border border-[#287DA8]/25 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-sm">
           <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
             <div>
               <div className="mb-2 flex items-center gap-2 text-sky-100">
                 <ShieldCheck className="h-5 w-5" />
                 <span className="text-xs font-bold uppercase tracking-[0.16em]">Bảo vệ tài khoản</span>
               </div>
-              <h1 className="text-2xl font-bold">Xác minh danh tính</h1>
+              <h1 className="text-2xl font-bold tracking-tight text-white">Xác minh danh tính</h1>
               <p className="mt-2 max-w-xl text-sm text-sky-50">
                 Hoàn tất eKYC để tăng độ tin cậy và mở các tính năng yêu cầu xác minh.
               </p>
@@ -322,9 +322,9 @@ export const CustomerVerificationPage: React.FC = () => {
       )}
 
       {/* Main Status Grid */}
-      <section className="grid gap-4 md:grid-cols-[1.15fr_.85fr]">
+      <section className="grid gap-6 md:grid-cols-[1.15fr_.85fr] items-stretch">
         {/* Latest Status Card */}
-        <div className={card}>
+        <div className={`${card} flex flex-col justify-between`}>
           <div className="flex items-center justify-between">
             <h2 className="font-bold text-zinc-900 dark:text-white">Trạng thái gần nhất</h2>
             {latest && (
@@ -387,7 +387,7 @@ export const CustomerVerificationPage: React.FC = () => {
 
               {/* Verified Details Card for APPROVED */}
               {isApproved && (
-                <div className="rounded-xl border border-emerald-100 bg-emerald-50/50 p-4 dark:border-emerald-900/30 dark:bg-emerald-950/20">
+                <div className="rounded-xl border border-emerald-100/90 bg-emerald-50/40 p-4 dark:border-emerald-900/30 dark:bg-emerald-950/20">
                   <div className="mb-2 flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-emerald-800 dark:text-emerald-300">
                     <UserCheck className="h-4 w-4" />
                     Hồ sơ danh tính đã chứng thực
@@ -482,28 +482,28 @@ export const CustomerVerificationPage: React.FC = () => {
         </div>
 
         {/* Benefits / Process Card */}
-        <div className={card}>
+        <div className={`${card} flex flex-col justify-between`}>
           {isApproved ? (
             <>
               <div className="flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-emerald-600" />
                 <h2 className="font-bold text-zinc-900 dark:text-white">Đặc quyền bảo mật đã mở</h2>
               </div>
-              <ul className="mt-4 space-y-3 text-sm text-zinc-600 dark:text-zinc-300">
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+              <ul className="mt-4 flex flex-1 flex-col justify-between gap-3 text-sm text-zinc-600 dark:text-zinc-300">
+                <li className="flex items-start gap-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3.5 dark:border-zinc-800/80 dark:bg-zinc-800/30">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                   <span>
                     <strong>Rút tiền & quản lý ví:</strong> Mở toàn bộ hạn mức rút tiền về tài khoản ngân hàng liên kết.
                   </span>
                 </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                <li className="flex items-start gap-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3.5 dark:border-zinc-800/80 dark:bg-zinc-800/30">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                   <span>
                     <strong>Bảo vệ 2 lớp:</strong> Ngăn chặn giả mạo thông tin tài khoản và hỗ trợ xử lý tranh chấp ưu tiên.
                   </span>
                 </li>
-                <li className="flex items-start gap-2">
-                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                <li className="flex items-start gap-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3.5 dark:border-zinc-800/80 dark:bg-zinc-800/30">
+                  <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                   <span>
                     <strong>Huy hiệu xác minh:</strong> Tự động kích hoạt nhãn chứng thực số trên toàn bộ nền tảng Smart Order.
                   </span>
@@ -513,20 +513,20 @@ export const CustomerVerificationPage: React.FC = () => {
           ) : (
             <>
               <h2 className="font-bold text-zinc-900 dark:text-white">Quy trình xác minh</h2>
-              <ol className="mt-4 space-y-3 text-sm text-zinc-600 dark:text-zinc-300">
-                <li className="flex items-start gap-2">
+              <ol className="mt-4 flex flex-1 flex-col justify-between gap-3 text-sm text-zinc-600 dark:text-zinc-300">
+                <li className="flex items-start gap-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3.5 dark:border-zinc-800/80 dark:bg-zinc-800/30">
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#287DA8]/10 text-xs font-bold text-[#287DA8]">
                     1
                   </span>
                   <span>Mở phiên xác minh an toàn do Didit bảo đảm.</span>
                 </li>
-                <li className="flex items-start gap-2">
+                <li className="flex items-start gap-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3.5 dark:border-zinc-800/80 dark:bg-zinc-800/30">
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#287DA8]/10 text-xs font-bold text-[#287DA8]">
                     2
                   </span>
                   <span>Chụp 2 mặt giấy tờ tùy thân và quét khuôn mặt (Liveness Check).</span>
                 </li>
-                <li className="flex items-start gap-2">
+                <li className="flex items-start gap-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3.5 dark:border-zinc-800/80 dark:bg-zinc-800/30">
                   <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[#287DA8]/10 text-xs font-bold text-[#287DA8]">
                     3
                   </span>

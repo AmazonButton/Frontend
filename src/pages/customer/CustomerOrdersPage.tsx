@@ -1,4 +1,6 @@
-import React, { useEffect, useMemo, useState } from 'react';
+// @refresh reset
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronDown,
@@ -23,6 +25,8 @@ import { toast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { getSocket, subscribeToCustomer } from '../../services/socket';
 import { Order } from '../../types';
+import { normalizeOrder, ORDER_EVENT, publishOrderEvent } from '../../services/order-events';
+import { ShippingContact } from '../../components/orders/ShippingContact';
 
 type OrderFilter = 'ALL' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
 const ORDERS_PER_PAGE = 8;
@@ -47,8 +51,10 @@ const formatDate = (value: string) =>
 
 export const CustomerOrdersPage: React.FC = () => {
   const { user } = useAuth();
+  const location = useLocation();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<OrderFilter>('ALL');
   const [query, setQuery] = useState('');
@@ -57,23 +63,57 @@ export const CustomerOrdersPage: React.FC = () => {
   const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isSwitchingCod, setIsSwitchingCod] = useState<string | null>(null);
-
-  const loadOrders = async () => {
-    setIsLoading(true);
-    setError(null);
-    try {
-      const response = await api.get('/orders');
-      const data = response.data?.data ?? response.data;
-      setOrders(Array.isArray(data) ? data : []);
-    } catch (requestError) {
-      setError('Không thể tải danh sách đơn hàng. Vui lòng thử lại.');
-    } finally {
-      setIsLoading(false);
-    }
-  };
+  const orderRequests = useRef({ generation: 0, flight: null as Promise<void> | null, queued: false });
 
   useEffect(() => {
-    loadOrders();
+    const params = new URLSearchParams(location.search);
+    if (params.get('orderId')) setExpandedOrder(params.get('orderId'));
+    if (params.get('order')) { setQuery(params.get('order') || ''); setFilter('ALL'); }
+  }, [location.search]);
+
+  const loadOrders = useCallback(async (initial = false) => {
+    const requests = orderRequests.current;
+    if (requests.flight) {
+      requests.queued = true;
+      return requests.flight;
+    }
+    const generation = requests.generation;
+    if (initial) setIsLoading(true);
+    else setIsRefreshing(true);
+
+    const fetchLatest = async () => {
+      do {
+        requests.queued = false;
+        try {
+          const response = await api.get('/orders');
+          const data = response.data?.data ?? response.data;
+          if (!Array.isArray(data)) throw new Error('Invalid order list');
+          if (requests.generation !== generation) return;
+          setOrders(data.map(normalizeOrder));
+          setError(null);
+        } catch {
+          if (requests.generation !== generation) return;
+          setError(initial ? 'Không thể tải danh sách đơn hàng. Vui lòng thử lại.' : 'Chưa cập nhật được đơn hàng. Dữ liệu hiện có vẫn được giữ lại.');
+          return;
+        }
+      } while (requests.queued && requests.generation === generation);
+    };
+
+    const flight = fetchLatest();
+    requests.flight = flight;
+    try {
+      await flight;
+    } finally {
+      if (requests.generation === generation) {
+        requests.flight = null;
+        setIsLoading(false);
+        setIsRefreshing(false);
+      }
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadOrders(true);
 
     const customerId = user?.customerProfileId || (user?.role === 'CUSTOMER' ? user?.id : undefined);
     if (customerId) {
@@ -84,14 +124,6 @@ export const CustomerOrdersPage: React.FC = () => {
 
     const handleStatusChanged = (payload: any) => {
       loadOrders();
-      const updatedOrder = payload?.order || payload;
-      const orderNum = updatedOrder?.orderNumber || updatedOrder?.orderCode || '';
-      const newStatus = updatedOrder?.status || payload?.status;
-      // Không spam thông báo khi đơn tự động chuyển sang CONFIRMED ở background
-      if (orderNum && newStatus && !['PENDING', 'CONFIRMED'].includes(newStatus)) {
-        const label = statusMeta[newStatus]?.label || newStatus;
-        toast.info(`Đơn hàng #${orderNum} đã chuyển sang: ${label}`, { title: 'Cập nhật trạng thái đơn hàng' });
-      }
     };
 
     const handleOrderCreated = () => {
@@ -115,15 +147,22 @@ export const CustomerOrdersPage: React.FC = () => {
     socket.on('ORDER_CANCELLED', handleOrderCancelled);
     socket.on('ORDER_PAYMENT_CONFIRMED', handlePaymentConfirmed);
     socket.on('ORDER_DELIVERED', handleStatusChanged);
+    window.addEventListener(ORDER_EVENT, handleOrderCreated);
+    window.addEventListener('focus', handleOrderCreated);
 
     return () => {
+      orderRequests.current.generation += 1;
+      orderRequests.current.flight = null;
+      orderRequests.current.queued = false;
       socket.off('ORDER_STATUS_CHANGED', handleStatusChanged);
       socket.off('ORDER_CREATED', handleOrderCreated);
       socket.off('ORDER_CANCELLED', handleOrderCancelled);
       socket.off('ORDER_PAYMENT_CONFIRMED', handlePaymentConfirmed);
       socket.off('ORDER_DELIVERED', handleStatusChanged);
+      window.removeEventListener(ORDER_EVENT, handleOrderCreated);
+      window.removeEventListener('focus', handleOrderCreated);
     };
-  }, [user]);
+  }, [loadOrders, user?.id, user?.role, user?.customerProfileId]);
 
   const getOrderStatus = (o: any) => o?.status || o?.orderStatus || 'PENDING';
 
@@ -138,6 +177,10 @@ export const CustomerOrdersPage: React.FC = () => {
         reason: 'Khách hàng hủy đơn khi chưa hoàn tất thanh toán/tiếp nhận',
       });
       const updatedOrder = response.data?.data;
+      publishOrderEvent('ORDER_CANCELLED', {
+        order: updatedOrder || { ...orderToCancel, status: 'CANCELLED' },
+        reason: 'Khách hàng hủy đơn khi chưa hoàn tất thanh toán/tiếp nhận',
+      });
       setOrders((current) => current.map((order) => {
         const oId = order.id || (order as any).orderId;
         return oId === targetId
@@ -145,7 +188,6 @@ export const CustomerOrdersPage: React.FC = () => {
           : order;
       }));
       setExpandedOrder(null);
-      toast.success(`Đã hủy đơn hàng #${targetCode}.`);
       setOrderToCancel(null);
     } catch (requestError: any) {
       toast.error(requestError.response?.data?.message || 'Không thể hủy đơn hàng lúc này.');
@@ -219,11 +261,11 @@ export const CustomerOrdersPage: React.FC = () => {
         </div>
         <button
           type="button"
-          onClick={loadOrders}
-          disabled={isLoading}
+          onClick={() => void loadOrders()}
+          disabled={isLoading || isRefreshing}
           className="inline-flex self-start sm:self-auto items-center gap-2 px-3.5 py-2 rounded-lg border border-slate-200 bg-white text-xs font-semibold text-slate-700 shadow-xs transition hover:border-slate-300 hover:bg-slate-50 disabled:opacity-60 dark:bg-zinc-900 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"
         >
-          <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
+          <RefreshCw className={`w-3.5 h-3.5 ${isLoading || isRefreshing ? 'animate-spin' : ''}`} />
           Làm mới
         </button>
       </section>
@@ -282,16 +324,17 @@ export const CustomerOrdersPage: React.FC = () => {
         </div>
 
         <div className="p-3 sm:p-4">
+          {!isLoading && error && orders.length > 0 && <p role="status" className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">{error}</p>}
           {isLoading ? (
             <div className="py-20 flex flex-col items-center text-center">
               <RefreshCw className="w-5 h-5 text-[#287DA8] animate-spin" />
               <p className="mt-3 text-sm font-medium text-slate-600 dark:text-zinc-300">Đang tải đơn hàng của bạn</p>
             </div>
-          ) : error ? (
+          ) : error && orders.length === 0 ? (
             <div className="py-16 flex flex-col items-center text-center">
               <CircleAlert className="w-8 h-8 text-rose-400" />
               <p className="mt-3 text-sm font-medium text-slate-700 dark:text-zinc-200">{error}</p>
-              <button type="button" onClick={loadOrders} className="mt-4 text-xs font-semibold text-[#0E6BA8] hover:text-[#0B5586]">Thử lại</button>
+              <button type="button" onClick={() => void loadOrders(true)} className="mt-4 text-xs font-semibold text-[#0E6BA8] hover:text-[#0B5586]">Thử lại</button>
             </div>
           ) : filteredOrders.length === 0 ? (
             <div className="py-16 flex flex-col items-center text-center">
@@ -363,7 +406,8 @@ export const CustomerOrdersPage: React.FC = () => {
                                 </div>
                               </div>
                               <div className="md:w-64 space-y-3 text-xs">
-                                <div className="flex gap-2 text-slate-500 dark:text-zinc-400"><MapPin className="w-3.5 h-3.5 mt-0.5 shrink-0 text-slate-400" /><span>{order.deliveryAddress || 'Chưa cập nhật địa chỉ giao hàng'}</span></div>
+                                <ShippingContact order={order} />
+                                {isCancelled && order.cancellationReason && <p className="text-rose-600">Lý do hủy: {order.cancellationReason}</p>}
                                 <div className="flex gap-2 text-slate-500 dark:text-zinc-400"><CreditCard className="w-3.5 h-3.5 shrink-0 text-slate-400" /><span>{isCancelled ? 'Đơn đã hủy, không phát sinh thanh toán' : ['COD', 'CASH_ON_DELIVERY'].includes(order.paymentMethod as string) ? (order.paymentStatus === 'PAID' ? 'Đã thu tiền mặt khi nhận hàng' : 'Tiền mặt khi nhận hàng (Chờ thanh toán)') : order.paymentStatus === 'PAID' ? 'Đã thanh toán trực tuyến qua PayOS' : 'Thanh toán trực tuyến PayOS (Chờ thanh toán)'}</span></div>
                               </div>
                             </div>
