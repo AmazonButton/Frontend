@@ -208,9 +208,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
   // ==========================================
   const [googleLoading, setGoogleLoading] = useState(false);
   const [googleError, setGoogleError] = useState<string | null>(null);
+  const googleRequestInFlight = useRef(false);
   const { scriptLoadedSuccessfully } = useGoogleOAuth();
 
   const handleGoogleSuccess = async (tokenResponse: any) => {
+    if (googleRequestInFlight.current) return;
+    googleRequestInFlight.current = true;
     try {
       setGoogleLoading(true);
       setGoogleError(null);
@@ -280,6 +283,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
       setGoogleError(errMsg);
       toast.error(errMsg);
     } finally {
+      googleRequestInFlight.current = false;
       setGoogleLoading(false);
     }
   };

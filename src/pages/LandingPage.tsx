@@ -5,6 +5,7 @@ import { Play, Pause, Volume2, VolumeX, ArrowRight, ShieldCheck, Zap, Battery, C
 import { InteractiveHeroBackground } from '../components/InteractiveHeroBackground';
 import { api } from '../services/api';
 import { getSocket } from '../services/socket';
+import { subscribeCatalogChanges } from '../services/catalog-sync';
 import { toast } from '../context/ToastContext';
 
 /**
@@ -170,10 +171,13 @@ export const LandingPage: React.FC = () => {
   const [cartPulse, setCartPulse] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<any | null>(null);
   const brandScrollRef = useRef<HTMLDivElement>(null);
+  const catalogRequest = useRef(0);
 
   const fetchStorefrontProducts = () => {
+    const request = ++catalogRequest.current;
     api.get('/products/storefront/catalog')
       .then(({ data }) => {
+        if (request !== catalogRequest.current) return;
         const list = (data.data || []).map((p: any) => ({
           ...p,
           category: typeof p.category === 'object' && p.category !== null
@@ -182,8 +186,8 @@ export const LandingPage: React.FC = () => {
         }));
         setStorefrontProducts(list);
       })
-      .catch(() => { setStorefrontProducts([]); })
-      .finally(() => { setProductsLoading(false); });
+      .catch(() => { /* Keep the last loaded catalog during a transient failure. */ })
+      .finally(() => { if (request === catalogRequest.current) setProductsLoading(false); });
   };
 
   useEffect(() => {
@@ -199,19 +203,7 @@ export const LandingPage: React.FC = () => {
       fetchStorefrontProducts();
     };
 
-    socket.on('PRODUCT_CREATED', handleProductChange);
-    socket.on('PRODUCT_UPDATED', handleProductChange);
-    socket.on('PRODUCT_DELETED', handleProductChange);
-    socket.on('PRODUCT_STOCK_CHANGED', handleProductChange);
-    socket.on('CATALOG_UPDATED', handleProductChange);
-
-    return () => {
-      socket.off('PRODUCT_CREATED', handleProductChange);
-      socket.off('PRODUCT_UPDATED', handleProductChange);
-      socket.off('PRODUCT_DELETED', handleProductChange);
-      socket.off('PRODUCT_STOCK_CHANGED', handleProductChange);
-      socket.off('CATALOG_UPDATED', handleProductChange);
-    };
+    return subscribeCatalogChanges(socket, handleProductChange);
   }, []);
 
   const addProductToCart = (product: any) => {

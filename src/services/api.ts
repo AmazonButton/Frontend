@@ -186,6 +186,18 @@ api.interceptors.request.use(async (config) => {
 
   const isAuthEndpoint = isPublicAuthEndpoint(config.url);
 
+  // AuthContext sets an application JWT on Axios defaults. Google login must
+  // send only its fresh OAuth token in the body, never that previous session.
+  if (/\/auth\/google(?:-login)?(?:\?|$)/.test(config.url || '') && config.headers) {
+    if (typeof (config.headers as any).delete === 'function') {
+      (config.headers as any).delete('Authorization');
+      (config.headers as any).delete('authorization');
+    } else {
+      delete (config.headers as any)['Authorization'];
+      delete (config.headers as any)['authorization'];
+    }
+  }
+
   if (!isAuthEndpoint) {
     const validToken = await getOrRefreshValidToken();
     if (validToken) {

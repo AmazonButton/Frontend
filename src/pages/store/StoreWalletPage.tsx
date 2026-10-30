@@ -59,6 +59,7 @@ export const StoreWalletPage: React.FC = () => {
   const [withdrawing, setWithdrawing] = useState(false);
   const [syncingId, setSyncingId] = useState<string | number | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [historyWarning, setHistoryWarning] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'WITHDRAWALS' | 'TRANSACTIONS'>('WITHDRAWALS');
 
@@ -87,19 +88,39 @@ export const StoreWalletPage: React.FC = () => {
 
   const refresh = useCallback(async () => {
     setError(null);
+    setHistoryWarning(null);
     try {
-      const [walletRes, transactionsRes, withdrawalsRes, banksRes] = await Promise.all([
+      const [walletResult, transactionsResult, withdrawalsResult, banksResult] = await Promise.allSettled([
         walletService.getWallet(),
         walletService.getTransactions(),
         walletService.getWithdrawals(),
         api.get('/banks'),
       ]);
 
-      const nextWallet = walletRes.data as StoreWalletInfo;
+      if (walletResult.status !== 'fulfilled') throw walletResult.reason;
+
+      const nextWallet = walletResult.value.data as StoreWalletInfo;
       setWallet(nextWallet);
-      setTransactions(transactionsRes.data || []);
-      setWithdrawals(withdrawalsRes.data || []);
-      const realBanks = (banksRes.data?.data || []) as VietnameseBank[];
+      const unavailableHistories: string[] = [];
+      if (transactionsResult.status === 'fulfilled') {
+        setTransactions(transactionsResult.value.data || []);
+      } else {
+        setTransactions([]);
+        unavailableHistories.push('biến động số dư');
+      }
+      if (withdrawalsResult.status === 'fulfilled') {
+        setWithdrawals(withdrawalsResult.value.data || []);
+      } else {
+        setWithdrawals([]);
+        unavailableHistories.push('lịch sử rút tiền');
+      }
+      if (unavailableHistories.length > 0) {
+        setHistoryWarning(`Chưa tải được ${unavailableHistories.join(' và ')} từ máy chủ. Số dư ví vẫn được hiển thị.`);
+      }
+
+      const realBanks = banksResult.status === 'fulfilled'
+        ? (banksResult.value.data?.data || []) as VietnameseBank[]
+        : [];
       setBanks(realBanks);
 
       if (nextWallet.bankAccount?.bankBin) {
@@ -823,6 +844,12 @@ export const StoreWalletPage: React.FC = () => {
 
       {/* ── Bottom Section: History & Ledger Tabs ── */}
       <div className="rounded-2xl border border-zinc-200 bg-white shadow-xs dark:border-zinc-800 dark:bg-zinc-900">
+        {historyWarning && (
+          <div role="status" className="m-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{historyWarning}</span>
+          </div>
+        )}
         <div className="flex items-center justify-between border-b border-zinc-200 px-5 pt-3 dark:border-zinc-800">
           <div className="flex items-center gap-3">
             <button
@@ -855,7 +882,7 @@ export const StoreWalletPage: React.FC = () => {
           <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {withdrawals.length === 0 ? (
               <div className="p-8 text-center text-xs text-zinc-400">
-                Chưa có yêu cầu rút tiền nào được tạo.
+                {historyWarning?.includes('lịch sử rút tiền') ? 'Lịch sử rút tiền đang tạm thời không khả dụng.' : 'Chưa có yêu cầu rút tiền nào được tạo.'}
               </div>
             ) : (
               withdrawals.map((item) => {
@@ -945,7 +972,7 @@ export const StoreWalletPage: React.FC = () => {
           <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
             {transactions.length === 0 ? (
               <div className="p-8 text-center text-xs text-zinc-400">
-                Chưa có giao dịch nào được ghi nhận. Đơn hàng thành công qua nút Smart Button sẽ được tự động cộng vào ví.
+                {historyWarning?.includes('biến động số dư') ? 'Lịch sử biến động số dư đang tạm thời không khả dụng.' : 'Chưa có giao dịch nào được ghi nhận. Đơn hàng thành công qua nút Smart Button sẽ được tự động cộng vào ví.'}
               </div>
             ) : (
               transactions.map((tx) => (

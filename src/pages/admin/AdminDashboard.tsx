@@ -296,17 +296,17 @@ export const AdminDashboard: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   // Navigation tabs organized sequentially by physical IoT operational lifecycle
   const [activeTab, setActiveTab] = useState<
-    'OVERVIEW' | 'STORES' | 'CATALOG' | 'DEVICES' | 'RBAC' | 'TELEMETRY' | 'ANALYTICS' | 'NOTIFICATIONS' | 'SECURITY'
+    'OVERVIEW' | 'STORES' | 'PLANS' | 'CATALOG' | 'DEVICES' | 'RBAC' | 'TELEMETRY' | 'ANALYTICS' | 'NOTIFICATIONS' | 'SECURITY'
   >(() => {
     const section = searchParams.get('section');
-    return ['OVERVIEW', 'STORES', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS', 'SECURITY'].includes(section || '')
+    return ['OVERVIEW', 'STORES', 'PLANS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS', 'SECURITY'].includes(section || '')
       ? section as any
       : 'OVERVIEW';
   });
 
   useEffect(() => {
     const section = searchParams.get('section');
-    if (section && ['OVERVIEW', 'STORES', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS', 'SECURITY'].includes(section)) {
+    if (section && ['OVERVIEW', 'STORES', 'PLANS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS', 'SECURITY'].includes(section)) {
       setActiveTab(section as any);
     } else if (!section) {
       setActiveTab('OVERVIEW');
@@ -319,12 +319,24 @@ export const AdminDashboard: React.FC = () => {
   };
 
   const [pendingStores, setPendingStores] = useState<Store[]>([]);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<any[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+  const [planSaving, setPlanSaving] = useState(false);
+  const [newPlan, setNewPlan] = useState({
+    planCode: '',
+    planName: '',
+    description: '',
+    price: '0',
+    durationDays: '30',
+    maxProducts: '50',
+  });
   const [stats, setStats] = useState<any>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(DEFAULT_AUDIT_LOGS);
   const [loading, setLoading] = useState(true);
 
   // Reject modal state
   const [rejectingStoreId, setRejectingStoreId] = useState<string | null>(null);
+  const [storeAction, setStoreAction] = useState<'REJECT' | 'SUSPEND'>('REJECT');
   const [rejectReason, setRejectReason] = useState('');
 
   // Device Batch Inventory & Allocation State
@@ -544,7 +556,7 @@ export const AdminDashboard: React.FC = () => {
 
   const fetchAdminData = async () => {
     try {
-      const [pendingRes, statsRes, logsRes, unassignedRes, storesRes, usersRes, secRes] = await Promise.all([
+      const [pendingRes, statsRes, logsRes, unassignedRes, storesRes, usersRes, secRes, plansRes] = await Promise.all([
         api.get('/admin/stores/pending'),
         api.get('/admin/stats'),
         api.get('/admin/audit-logs'),
@@ -552,6 +564,7 @@ export const AdminDashboard: React.FC = () => {
         api.get('/admin/stores'),
         api.get('/admin/users').catch(() => ({ data: { success: false, data: [] } })),
         api.get('/admin/security/devices').catch(() => ({ data: { success: false, data: [] } })),
+        api.get('/admin/plans').catch(() => ({ data: { success: false, data: [] } })),
       ]);
 
       if (pendingRes.data.success) setPendingStores(pendingRes.data.data);
@@ -581,6 +594,9 @@ export const AdminDashboard: React.FC = () => {
       }
       if (secRes?.data?.success && Array.isArray(secRes.data.data)) {
         setSecurityIncidents(secRes.data.data);
+      }
+      if (plansRes?.data?.success && Array.isArray(plansRes.data.data)) {
+        setSubscriptionPlans(plansRes.data.data);
       }
     } catch (e) {
       toast.error('Không tải được dữ liệu admin. Vui lòng thử lại.');
@@ -614,13 +630,79 @@ export const AdminDashboard: React.FC = () => {
         reason: rejectReason,
       });
       if (res.data.success) {
-        toast.info('Đã từ chối đơn đăng ký cửa hàng');
+        toast.info(storeAction === 'SUSPEND' ? 'Đã ngừng hoạt động cửa hàng' : 'Đã từ chối đơn đăng ký cửa hàng');
         setRejectingStoreId(null);
         setRejectReason('');
+        setStoreAction('REJECT');
         fetchAdminData();
       }
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Không thể từ chối');
+    }
+  };
+
+  const openStoreActionModal = (storeId: string, action: 'REJECT' | 'SUSPEND') => {
+    setStoreAction(action);
+    setRejectReason('');
+    setRejectingStoreId(storeId);
+  };
+
+  const loadSubscriptionPlans = async () => {
+    setPlansLoading(true);
+    try {
+      const res = await api.get('/admin/plans');
+      if (res.data?.success && Array.isArray(res.data.data)) {
+        setSubscriptionPlans(res.data.data);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không thể tải danh sách gói dịch vụ.');
+    } finally {
+      setPlansLoading(false);
+    }
+  };
+
+  const handleCreatePlan = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (planSaving) return;
+    const payload = {
+      planCode: newPlan.planCode.trim().toUpperCase(),
+      planName: newPlan.planName.trim(),
+      description: newPlan.description.trim() || undefined,
+      price: Number(newPlan.price),
+      durationDays: Number(newPlan.durationDays),
+      maxProducts: Number(newPlan.maxProducts),
+    };
+    if (!payload.planCode || !payload.planName || payload.price < 0 || payload.durationDays < 1 || payload.maxProducts < 1) {
+      toast.warning('Vui lòng nhập mã, tên, thời hạn và giới hạn sản phẩm hợp lệ.');
+      return;
+    }
+    setPlanSaving(true);
+    try {
+      const res = await api.post('/admin/plans', payload);
+      if (!res.data?.success) throw new Error(res.data?.message || 'Không thể tạo gói.');
+      setNewPlan({ planCode: '', planName: '', description: '', price: '0', durationDays: '30', maxProducts: '50' });
+      toast.success(res.data.message || 'Đã tạo gói dịch vụ. Gói mới đang hoạt động.');
+      await loadSubscriptionPlans();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Không thể tạo gói dịch vụ.');
+    } finally {
+      setPlanSaving(false);
+    }
+  };
+
+  const handlePlanActiveChange = async (plan: any) => {
+    const planId = plan.planId || plan.id;
+    if (!planId) return;
+    const nextActive = !Boolean(plan.isActive);
+    try {
+      const res = await api.put(`/admin/plans/${encodeURIComponent(String(planId))}`, { isActive: nextActive });
+      if (!res.data?.success) throw new Error(res.data?.message || 'Không thể cập nhật gói.');
+      setSubscriptionPlans((current) => current.map((item) =>
+        String(item.planId || item.id) === String(planId) ? { ...item, isActive: nextActive } : item
+      ));
+      toast.success(nextActive ? 'Đã bật gói dịch vụ.' : 'Đã tạm dừng gói dịch vụ.');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Không thể cập nhật trạng thái gói.');
     }
   };
 
@@ -1094,7 +1176,7 @@ export const AdminDashboard: React.FC = () => {
                           <span>Phê Duyệt</span>
                         </button>
                         <button
-                          onClick={() => setRejectingStoreId(sId)}
+                          onClick={() => openStoreActionModal(sId, 'REJECT')}
                           className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 flex items-center gap-1.5 active:scale-[0.97] transition-all shadow-2xs cursor-pointer"
                         >
                           <XCircle className="w-3.5 h-3.5" />
@@ -1133,6 +1215,7 @@ export const AdminDashboard: React.FC = () => {
                       <th className="py-2 px-3">Liên Hệ</th>
                       <th className="py-2 px-3">Địa Chỉ Kho</th>
                       <th className="py-2 px-3">Trạng Thái</th>
+                      <th className="py-2 px-3 text-right">Thao Tác</th>
                     </tr>
                   </thead>
                   <motion.tbody
@@ -1165,9 +1248,22 @@ export const AdminDashboard: React.FC = () => {
                         <td className="py-2 px-3 text-zinc-500 dark:text-zinc-400 text-[11px] max-w-xs truncate">{s.address}</td>
                         <td className="py-2 px-3">
                           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                            <span>Hoạt động</span>
+                            <span className={`w-1.5 h-1.5 rounded-full ${s.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                            <span>{s.status === 'ACTIVE' ? 'Hoạt động' : 'Đã ngừng'}</span>
                           </span>
+                        </td>
+                        <td className="py-2 px-3 text-right">
+                          {s.status === 'ACTIVE' ? (
+                            <button
+                              type="button"
+                              onClick={() => openStoreActionModal(String(sId), 'SUSPEND')}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300"
+                            >
+                              <ShieldAlert className="h-3.5 w-3.5" /> Ngừng hoạt động
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-zinc-400">Đã ngừng</span>
+                          )}
                         </td>
                       </motion.tr>
                     );
@@ -1462,6 +1558,51 @@ export const AdminDashboard: React.FC = () => {
       {/* ========================================================================= */}
       {/* MODULE 3: 4.2.2 MASTER PRODUCT CATALOG (CRUD & BUTTON BINDING)            */}
       {/* ========================================================================= */}
+      {activeTab === 'PLANS' && (
+        <div className="space-y-5">
+          <div className="flex flex-col gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-5 dark:border-sky-900/50 dark:from-sky-950/30 dark:to-zinc-900 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="flex items-center gap-2">
+                <Layers className="h-5 w-5 text-[#0E6BA8]" />
+                <h2 className="text-base font-bold text-zinc-900 dark:text-white">Gói dịch vụ cửa hàng</h2>
+              </div>
+              <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                Tạo ít nhất một gói đang hoạt động. Khi chủ cửa hàng thêm sản phẩm lần đầu, hệ thống sẽ tự tạo gói dùng thử 30 ngày từ gói hoạt động đầu tiên.
+              </p>
+            </div>
+            <button onClick={loadSubscriptionPlans} disabled={plansLoading} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700">
+              <RefreshCw className={`h-3.5 w-3.5 ${plansLoading ? 'animate-spin' : ''}`} /> Làm mới
+            </button>
+          </div>
+
+          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+            <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+                <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Danh sách gói</h3><p className="mt-0.5 text-xs text-zinc-500">Dữ liệu trực tiếp từ API Admin.</p></div>
+                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{subscriptionPlans.length} gói</span>
+              </div>
+              {plansLoading ? <div className="p-8 text-center text-sm text-zinc-500">Đang tải gói dịch vụ…</div> : subscriptionPlans.length === 0 ? <div className="p-8 text-center text-sm text-zinc-500">Chưa có gói nào. Tạo gói đầu tiên ở biểu mẫu bên phải.</div> : <div className="divide-y divide-zinc-100 dark:divide-zinc-800">{subscriptionPlans.map((plan) => {
+                const planId = String(plan.planId || plan.id || '');
+                return <div key={planId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                  <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{plan.planName}</p><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${plan.isActive ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>{plan.isActive ? 'ĐANG HOẠT ĐỘNG' : 'TẠM DỪNG'}</span></div><p className="mt-1 text-xs text-zinc-500">{plan.planCode} · {Number(plan.price || 0).toLocaleString('vi-VN')} ₫ · {plan.durationDays} ngày · tối đa {plan.maxProducts} sản phẩm</p>{plan.description && <p className="mt-1 text-xs text-zinc-500">{plan.description}</p>}</div>
+                  <button type="button" onClick={() => handlePlanActiveChange(plan)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${plan.isActive ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{plan.isActive ? 'Tạm dừng' : 'Kích hoạt'}</button>
+                </div>;
+              })}</div>}
+            </section>
+
+            <form onSubmit={handleCreatePlan} className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+              <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo gói mới</h3><p className="mt-0.5 text-xs text-zinc-500">Gói mới được API tạo ở trạng thái hoạt động.</p></div>
+              <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mã gói</label><input required value={newPlan.planCode} onChange={(e) => setNewPlan({ ...newPlan, planCode: e.target.value.toUpperCase() })} placeholder="VD: TRIAL-30" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-mono outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+              <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tên gói</label><input required value={newPlan.planName} onChange={(e) => setNewPlan({ ...newPlan, planName: e.target.value })} placeholder="VD: Dùng thử 30 ngày" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+              <div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giá (₫)</label><input required min="0" type="number" value={newPlan.price} onChange={(e) => setNewPlan({ ...newPlan, price: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Thời hạn</label><input required min="1" type="number" value={newPlan.durationDays} onChange={(e) => setNewPlan({ ...newPlan, durationDays: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div></div>
+              <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giới hạn sản phẩm</label><input required min="1" type="number" value={newPlan.maxProducts} onChange={(e) => setNewPlan({ ...newPlan, maxProducts: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+              <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mô tả</label><textarea rows={2} value={newPlan.description} onChange={(e) => setNewPlan({ ...newPlan, description: e.target.value })} className="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+              <button disabled={planSaving} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50"><Plus className="h-3.5 w-3.5" /> {planSaving ? 'Đang tạo…' : 'Tạo gói đang hoạt động'}</button>
+            </form>
+          </div>
+        </div>
+      )}
+
       {activeTab === 'CATALOG' && (
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xs p-5 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -2102,22 +2243,24 @@ export const AdminDashboard: React.FC = () => {
                 exit="exit"
                 className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl max-w-md w-full p-5 shadow-2xl border border-zinc-200 dark:border-zinc-800"
               >
-                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Từ Chối Phê Duyệt Cửa Hàng</h3>
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">{storeAction === 'SUSPEND' ? 'Ngừng Hoạt Động Cửa Hàng' : 'Từ Chối Phê Duyệt Cửa Hàng'}</h3>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                  Bắt buộc phải nhập lý do từ chối để hệ thống gửi thông báo cho chủ cơ sở.
+                  {storeAction === 'SUSPEND'
+                    ? 'Cửa hàng sẽ chuyển sang trạng thái ngừng hoạt động. Hãy nhập lý do để lưu lại quyết định này.'
+                    : 'Bắt buộc phải nhập lý do từ chối để hệ thống gửi thông báo cho chủ cơ sở.'}
                 </p>
 
                 <form onSubmit={handleReject} className="space-y-3 mt-4">
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                      Lý do từ chối
+                      {storeAction === 'SUSPEND' ? 'Lý do ngừng hoạt động' : 'Lý do từ chối'}
                     </label>
                     <textarea
                       required
                       rows={3}
                       value={rejectReason}
                       onChange={(e) => setRejectReason(e.target.value)}
-                      placeholder="VD: Không cung cấp được giấy phép kinh doanh..."
+                      placeholder={storeAction === 'SUSPEND' ? 'VD: Tạm ngừng kinh doanh theo yêu cầu quản trị...' : 'VD: Không cung cấp được giấy phép kinh doanh...'}
                       className="w-full px-3 py-2 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-900"
                     />
                   </div>
@@ -2125,7 +2268,7 @@ export const AdminDashboard: React.FC = () => {
                   <div className="flex justify-end gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={() => setRejectingStoreId(null)}
+                      onClick={() => { setRejectingStoreId(null); setRejectReason(''); setStoreAction('REJECT'); }}
                       className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
                     >
                       Hủy
@@ -2134,7 +2277,7 @@ export const AdminDashboard: React.FC = () => {
                       type="submit"
                       className="px-4 py-1.5 text-xs font-medium text-white bg-rose-600 hover:bg-rose-700 active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
                     >
-                      Xác Nhận Từ Chối
+                      {storeAction === 'SUSPEND' ? 'Xác Nhận Ngừng Hoạt Động' : 'Xác Nhận Từ Chối'}
                     </button>
                   </div>
                 </form>

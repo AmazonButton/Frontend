@@ -3,6 +3,7 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { api, productsService, mediaService } from '../../services';
+import { notifyCatalogChanged } from '../../services/catalog-sync';
 import { toast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { getSocket, subscribeToStore } from '../../services/socket';
@@ -46,6 +47,80 @@ const tableRowVariants: Variants = {
   },
 };
 
+/**
+ * Tự động chuẩn hóa URL hình ảnh sản phẩm để đáp ứng tiêu chuẩn @IsUrl của Backend.
+ * Nếu là đường dẫn tương đối (/assets/...) hoặc localhost, tự động map sang domain chính thức để Backend không bị lỗi 400.
+ */
+export const sanitizeProductImageUrl = (url?: string): string | undefined => {
+  if (!url) return undefined;
+  const trimmed = url.trim();
+  if (
+    !trimmed ||
+    trimmed.startsWith('data:') ||
+    trimmed.includes('\\') ||
+    trimmed.startsWith('file:') ||
+    trimmed.startsWith('blob:')
+  ) {
+    return undefined;
+  }
+
+  // Nếu là đường dẫn tương đối trong assets nội bộ
+  if (trimmed.startsWith('/assets/') || trimmed.startsWith('assets/')) {
+    const cleanPath = trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+    return `https://buttontdash.vercel.app${cleanPath}`;
+  }
+
+  // Nếu là URL localhost dev server
+  if (trimmed.includes('localhost:') || trimmed.includes('127.0.0.1:')) {
+    const assetIndex = trimmed.indexOf('/assets/');
+    if (assetIndex !== -1) {
+      return `https://buttontdash.vercel.app${trimmed.substring(assetIndex)}`;
+    }
+    return undefined;
+  }
+
+  let candidate = trimmed;
+  // Nếu thiếu giao thức https:// (ví dụ user dán res.cloudinary.com/...)
+  if (!candidate.startsWith('http://') && !candidate.startsWith('https://')) {
+    if (candidate.startsWith('//')) {
+      candidate = `https:${candidate}`;
+    } else if (candidate.includes('.') && candidate.includes('/') && !candidate.includes(' ')) {
+      candidate = `https://${candidate}`;
+    } else {
+      return undefined;
+    }
+  }
+
+  try {
+    const parsed = new URL(candidate);
+    if (['http:', 'https:'].includes(parsed.protocol) && parsed.hostname.includes('.')) {
+      return candidate;
+    }
+  } catch {
+    return undefined;
+  }
+
+  return undefined;
+};
+
+export const extractProductErrorMessage = (err: any, defaultMsg: string): string => {
+  const data = err?.response?.data;
+  if (!data) return err?.message || defaultMsg;
+  if (Array.isArray(data.errors) && data.errors.length > 0) {
+    return data.errors.map((e: any) => (typeof e === 'string' ? e : e.message || JSON.stringify(e))).join('; ');
+  }
+  if (Array.isArray(data.message) && data.message.length > 0) {
+    return data.message.map((m: any) => (typeof m === 'string' ? m : m.message || JSON.stringify(m))).join('; ');
+  }
+  if (typeof data.message === 'string' && data.message.trim()) {
+    return data.message.trim();
+  }
+  if (typeof data.error === 'string' && data.error.trim()) {
+    return data.error.trim();
+  }
+  return err.message || defaultMsg;
+};
+
 export const StoreProductsPage: React.FC = () => {
   const { user } = useAuth();
   const [products, setProducts] = useState<Product[]>([]);
@@ -66,6 +141,7 @@ export const StoreProductsPage: React.FC = () => {
   const [imageUploading, setImageUploading] = useState(false);
   const [submitLoading, setSubmitLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const productRequest = useRef(0);
 
   // Edit Product Modal State
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -95,8 +171,10 @@ export const StoreProductsPage: React.FC = () => {
   useBodyScrollLock(showAddModal || !!editingProduct || !!statusConfirmation);
 
   const fetchProducts = async () => {
+    const request = ++productRequest.current;
     try {
       const res = await api.get('/products');
+      if (request !== productRequest.current) return;
       if (res.data?.success && Array.isArray(res.data?.data)) {
         setProducts(
           res.data.data.map((p: any) => ({
@@ -118,10 +196,11 @@ export const StoreProductsPage: React.FC = () => {
         setProducts([]);
       }
     } catch (e) {
+      if (request !== productRequest.current) return;
       toast.error('Không tải được danh sách sản phẩm. Vui lòng thử lại.');
       setProducts([]);
     } finally {
-      setLoading(false);
+      if (request === productRequest.current) setLoading(false);
     }
   };
 
@@ -207,35 +286,101 @@ export const StoreProductsPage: React.FC = () => {
 
   const handleCreateProduct = async (e: React.FormEvent) => {
     e.preventDefault();
+    if (submitLoading) return;
+
+    const currentUser = typeof user !== 'undefined' ? user : undefined;
+    if (currentUser && !currentUser.storeId && currentUser.role !== 'SUPER_ADMIN') {
+      const msg = 'Tài khoản hiện tại chưa được liên kết với cửa hàng nào để tạo sản phẩm. Vui lòng đăng nhập bằng tài khoản Chủ cửa hàng (STORE_OWNER).';
+      if (typeof toast?.error === 'function') {
+        toast.error(msg);
+      } else {
+        alert(msg);
+      }
+      return;
+    }
+
     if (imageUploading) {
-      alert('Image is still uploading. Please wait before saving the product.');
+      if (typeof toast?.warning === 'function') {
+        toast.warning('Ảnh đang được tải lên. Vui lòng đợi trong giây lát trước khi lưu sản phẩm.');
+      } else {
+        alert('Image is still uploading. Please wait before saving the product.');
+      }
       return;
     }
     if (imageUrl.startsWith('data:')) {
-      alert('Image upload did not complete. Please upload the image again before saving.');
+      if (typeof toast?.warning === 'function') {
+        toast.warning('Ảnh chưa hoàn tất tải lên hệ thống. Vui lòng tải lại ảnh trước khi lưu.');
+      } else {
+        alert('Image upload did not complete. Please upload the image again before saving.');
+      }
       return;
     }
+
+    const cleanName = name.trim();
+    if (!cleanName) {
+      toast.error('Vui lòng nhập tên sản phẩm.');
+      return;
+    }
+
+    const numPrice = Number(price);
+    if (isNaN(numPrice) || numPrice < 0) {
+      toast.error('Vui lòng nhập đơn giá hợp lệ (không được để trống hoặc âm).');
+      return;
+    }
+
+    const numStock = Number(stock);
+    if (isNaN(numStock) || numStock < 0) {
+      toast.error('Vui lòng nhập số lượng tồn kho hợp lệ (không được âm).');
+      return;
+    }
+
+    const cleanUnit = unit.trim() || 'Bình 20L';
+    const cleanBrand = brand.trim() || 'Khác';
+    const cleanSku = sku.trim().toUpperCase() || `SKU-${Date.now().toString(36).toUpperCase()}`;
+    const sanitizeFn = typeof sanitizeProductImageUrl === 'function' ? sanitizeProductImageUrl : (u?: string) => u?.trim() || undefined;
+    const validImageUrl = sanitizeFn(imageUrl);
+
     setSubmitLoading(true);
 
     try {
-      const res = await api.post('/products', {
-        name,
-        brand,
-        sku: sku.trim().toUpperCase(),
+      const payload: any = {
+        name: cleanName,
+        brand: cleanBrand,
+        sku: cleanSku,
         category,
-        unit,
-        price: parseFloat(price),
-        stock: parseInt(stock, 10),
-        imageUrl: imageUrl.trim() || undefined,
-      });
+        unit: cleanUnit,
+        price: numPrice,
+        stock: numStock,
+      };
+      if (validImageUrl) {
+        payload.imageUrl = validImageUrl;
+      }
+
+      const res = await api.post('/products', payload);
 
       if (res.data.success) {
         setShowAddModal(false);
         resetAddForm();
-        fetchProducts();
+        notifyCatalogChanged();
+        toast.success('Thêm sản phẩm thành công.');
+        setSearchQuery('');
+        setCategoryFilter('ALL');
+        await fetchProducts();
+      } else {
+        throw new Error(res.data?.message || 'Không thể tạo sản phẩm');
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể tạo sản phẩm');
+      const getErrMsg = typeof extractProductErrorMessage === 'function' ? extractProductErrorMessage : (e: any, fallback: string) => e?.response?.data?.message || e?.message || fallback;
+      const errorMsg = getErrMsg(err, 'Không thể tạo sản phẩm. Vui lòng kiểm tra lại thông tin.');
+      if (typeof toast?.error === 'function') {
+        toast.error(errorMsg);
+      } else {
+        alert(errorMsg);
+      }
+      console.error('Lỗi tạo sản phẩm:', err);
+      if (err?.response?.data) {
+        console.error('Chi tiết lỗi từ máy chủ:', err.response.data);
+      }
     } finally {
       setSubmitLoading(false);
     }
@@ -257,33 +402,67 @@ export const StoreProductsPage: React.FC = () => {
     e.preventDefault();
     if (!editingProduct) return;
     if (imageUploading) {
-      alert('Image is still uploading. Please wait before saving the product.');
+      toast.warning('Ảnh đang được tải lên. Vui lòng đợi trong giây lát trước khi lưu sản phẩm.');
       return;
     }
     if (editImageUrl.startsWith('data:')) {
-      alert('Image upload did not complete. Please upload the image again before saving.');
+      toast.warning('Ảnh chưa hoàn tất tải lên hệ thống. Vui lòng tải lại ảnh trước khi lưu.');
       return;
     }
+
+    const cleanName = editName.trim();
+    if (!cleanName) {
+      toast.error('Vui lòng nhập tên sản phẩm.');
+      return;
+    }
+
+    const numPrice = parseFloat(editPrice);
+    if (isNaN(numPrice) || numPrice < 0) {
+      toast.error('Vui lòng nhập đơn giá hợp lệ (không được âm).');
+      return;
+    }
+
+    const numStock = parseInt(editStock, 10);
+    if (isNaN(numStock) || numStock < 0) {
+      toast.error('Vui lòng nhập số lượng tồn kho hợp lệ (không được âm).');
+      return;
+    }
+
+    const cleanUnit = editUnit.trim() || 'Cái';
+    const cleanBrand = editBrand.trim() || 'Khác';
+    const validImageUrl = sanitizeProductImageUrl(editImageUrl);
+
     setEditLoading(true);
 
     try {
-      const res = await api.put(`/products/${editingProduct.id}`, {
-        name: editName,
-        brand: editBrand,
+      const updatePayload: any = {
+        name: cleanName,
+        brand: cleanBrand,
         category: editCategory,
-        unit: editUnit,
-        price: parseFloat(editPrice),
-        stock: parseInt(editStock, 10),
-        imageUrl: editImageUrl?.trim() || undefined,
-      });
+        unit: cleanUnit,
+        price: numPrice,
+        stock: numStock,
+      };
+      if (validImageUrl) {
+        updatePayload.imageUrl = validImageUrl;
+      }
+
+      const res = await api.put(`/products/${editingProduct.id}`, updatePayload);
 
       if (res.data.success) {
         toast.success('Cập nhật sản phẩm thành công!');
         setEditingProduct(null);
         fetchProducts();
+      } else {
+        throw new Error(res.data?.message || 'Không thể cập nhật sản phẩm');
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Không thể cập nhật sản phẩm');
+      const errorMsg = extractProductErrorMessage(err, 'Không thể cập nhật sản phẩm. Vui lòng kiểm tra lại thông tin.');
+      toast.error(errorMsg);
+      console.error('Lỗi cập nhật sản phẩm:', err);
+      if (err?.response?.data) {
+        console.error('Chi tiết lỗi từ máy chủ:', err.response.data);
+      }
     } finally {
       setEditLoading(false);
     }
@@ -388,6 +567,15 @@ export const StoreProductsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 text-zinc-900 dark:text-zinc-100">
+      {!user?.storeId && user?.role !== 'SUPER_ADMIN' && (
+        <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center gap-3 text-xs text-amber-800 dark:text-amber-200 animate-in fade-in">
+          <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
+          <span>
+            <strong>Lưu ý:</strong> Tài khoản của bạn hiện chưa được liên kết với cửa hàng nào. Vui lòng đăng nhập bằng tài khoản Chủ cửa hàng (ví dụ: <code className="px-1 py-0.5 rounded bg-amber-100 dark:bg-amber-900/50 font-mono">store@smartorder.local</code>) để đăng hoặc cập nhật sản phẩm.
+          </span>
+        </div>
+      )}
+
       {/* 1. Command Bar Header */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-2 border-b border-zinc-200 dark:border-zinc-800">
         <div>
@@ -1020,7 +1208,7 @@ export const StoreProductsPage: React.FC = () => {
                         <div className="flex gap-2">
                           <input
                             type="text"
-                            placeholder="Dán link ảnh (https://... hoặc /assets/products/...)"
+                            placeholder="Dán link ảnh (https://...) hoặc tải ảnh từ máy"
                             value={imageUrl}
                             onChange={(e) => setImageUrl(e.target.value)}
                             className="flex-1 px-2.5 py-1.5 rounded-md bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 text-xs focus:outline-none focus:ring-1 focus:ring-[#287DA8]"
@@ -1261,7 +1449,7 @@ export const StoreProductsPage: React.FC = () => {
                         <div className="flex gap-2">
                           <input
                             type="text"
-                            placeholder="Dán link ảnh (https://... hoặc /assets/products/...)"
+                            placeholder="Dán link ảnh (https://...) hoặc tải ảnh từ máy"
                             value={editImageUrl}
                             onChange={(e) => setEditImageUrl(e.target.value)}
                             className="flex-1 px-2.5 py-1.5 rounded-md bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 text-xs focus:outline-none focus:ring-1 focus:ring-[#287DA8]"

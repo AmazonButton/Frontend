@@ -12,6 +12,9 @@
     "test:notifications": "node --experimental-strip-types --test tests/store-cancellation-notifications.test.mjs",
     "test:payment-sync": "node --experimental-strip-types --test tests/payment-method-sync.test.mjs",
     "test:google": "node --experimental-strip-types --test tests/google-login.test.mjs",
+    "test:products": "node --test tests/catalog-sync.test.mjs",
+    "test:plans": "node --test tests/admin-plans.test.mjs",
+    "test:wallet": "node --test tests/wallet-partial-load.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
