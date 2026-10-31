@@ -49,3 +49,4 @@ test('WhiteDeviceAirPodsModal dynamically fetches catalog from API and defaults 
   // Verify loading state indicator
   assert.match(content, /isLoadingCatalog/, 'Must have loading state indicator');
 });
+
