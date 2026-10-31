@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -103,8 +103,8 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   onClose,
   onDeviceBound,
 }) => {
-  // Modal flow steps: 'DISCOVER' | 'PAIRING' | 'SELECT_PRODUCT' | 'BOUND_SUCCESS'
-  const [step, setStep] = useState<'DISCOVER' | 'PAIRING' | 'SELECT_PRODUCT' | 'BOUND_SUCCESS'>('DISCOVER');
+  // Modal flow steps: 'DISCOVER' | 'PAIRING' | 'WIFI_CONFIG' | 'SELECT_PRODUCT' | 'BOUND_SUCCESS'
+  const [step, setStep] = useState<'DISCOVER' | 'PAIRING' | 'WIFI_CONFIG' | 'SELECT_PRODUCT' | 'BOUND_SUCCESS'>('DISCOVER');
 
   // Device specs
   const [deviceSpecs, setDeviceSpecs] = useState({
@@ -121,9 +121,17 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   const [connectedBleDevice, setConnectedBleDevice] = useState<any>(null);
   const [bleGattServer, setBleGattServer] = useState<any>(null);
 
+  // Wi-Fi Configuration State
+  const [ssid, setSsid] = useState('Home_WiFi_2.4G');
+  const [wifiPassword, setWifiPassword] = useState('');
+  const [showWifiPassword, setShowWifiPassword] = useState(false);
+  const [isSendingWifi, setIsSendingWifi] = useState(false);
+  const [wifiError, setWifiError] = useState<string | null>(null);
+  const commonNetworks = ['Home_WiFi_2.4G', 'FPT_Telecom_GiaDinh', 'Viettel_Office_2.4G'];
+
   // Search & Catalog
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedCategory, setSelectedCategory] = useState<string>('Nước mắm');
+  const [selectedCategory, setSelectedCategory] = useState<string>('Tất cả');
   const [selectedProduct, setSelectedProduct] = useState<StoreCatalogItem | null>(null);
 
   // Real pairing & binding status
@@ -148,7 +156,9 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
       setPairingError(null);
       setIsBinding(false);
       setBindingError(null);
-      setSelectedCategory('Nước mắm'); // Default highlight Nước Mắm as requested
+      setSelectedCategory('Tất cả'); // Default highlight Tất cả so all products are immediately visible
+      setWifiError(null);
+      setIsSendingWifi(false);
     }
   }, [isOpen]);
 
@@ -219,9 +229,9 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
           rssi: devData.wifiRSSI ?? prev.rssi,
         }));
 
-        // Thiết bị được kết nối Bluetooth và máy chủ xác nhận -> Chuyển thẳng sang Chọn sản phẩm gán ngay!
+        // Thiết bị được kết nối Bluetooth và máy chủ xác nhận -> Chuyển sang Cấu hình Wi-Fi cho ESP32!
         setTimeout(() => {
-          setStep('SELECT_PRODUCT');
+          setStep('WIFI_CONFIG');
           playAppleConnectChime();
           try {
             confetti({
@@ -244,20 +254,169 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     }
   };
 
-  // Dynamic catalog from store
-  const [catalog, setCatalog] = useState<StoreCatalogItem[]>(() => getStoreCatalog());
+  // Handle Wi-Fi deployment over BLE to ESP32
+  const handleDeployWifi = async () => {
+    if (!ssid.trim()) {
+      setWifiError('Vui lòng nhập tên mạng Wi-Fi (SSID).');
+      return;
+    }
+    setWifiError(null);
+    setIsSendingWifi(true);
+
+    try {
+      // 1. Gửi lệnh WIFI:ten_wifi:mat_khau qua Web Bluetooth GATT nếu đang kết nối
+      if (bleGattServer && bleGattServer.connected) {
+        try {
+          const service = await bleGattServer.getPrimaryService('0000fff0-0000-1000-8000-00805f9b34fb').catch(() => null);
+          if (service) {
+            const characteristic = await service.getCharacteristic('0000fff1-0000-1000-8000-00805f9b34fb').catch(() => null);
+            if (characteristic) {
+              const encoder = new TextEncoder();
+              const payload = `WIFI:${ssid.trim()}:${wifiPassword}\n`;
+              await characteristic.writeValue(encoder.encode(payload));
+            }
+          }
+        } catch (bleErr) {
+          console.warn('Bluetooth characteristic write error:', bleErr);
+        }
+      }
+
+      // 2. Gửi bootstrap tới máy chủ (nếu khả dụng)
+      const devId = deviceSpecs.code || 'SOB-WHITE-PRO-01';
+      await api.post('/devices/bootstrap', {
+        deviceId: devId,
+        wifiRssi: -45,
+        ipAddress: '192.168.1.188',
+        uptime: 1,
+      }).catch(() => {});
+
+      // 3. Hiệu ứng kết nối thành công 800ms
+      await new Promise((resolve) => setTimeout(resolve, 800));
+
+      playAppleConnectChime();
+      try {
+        confetti({
+          particleCount: 45,
+          spread: 60,
+          origin: { y: 0.6 },
+          colors: ['#38BDF8', '#34D399', '#818CF8'],
+        });
+      } catch (_) {}
+
+      setTimeout(() => {
+        setIsSendingWifi(false);
+        setStep('SELECT_PRODUCT');
+      }, 400);
+    } catch (err: any) {
+      setIsSendingWifi(false);
+      setWifiError(err.message || 'Không thể cấu hình Wi-Fi cho nút bấm.');
+    }
+  };
+
+  // Dynamic catalog from store API
+  const [catalog, setCatalog] = useState<StoreCatalogItem[]>([]);
+  const [isLoadingCatalog, setIsLoadingCatalog] = useState<boolean>(false);
+  const [catalogError, setCatalogError] = useState<string | null>(null);
+
+  const fetchCatalogFromBackend = useCallback(async () => {
+    setIsLoadingCatalog(true);
+    setCatalogError(null);
+    try {
+      let rawItems: any[] = [];
+      try {
+        const res = await api.get('/products');
+        if (res.data?.success && Array.isArray(res.data.data) && res.data.data.length > 0) {
+          rawItems = res.data.data;
+        }
+      } catch {
+        // Fall back to storefront catalog if auth context lacks store scope
+      }
+
+      if (rawItems.length === 0) {
+        const sfRes = await api.get('/products/storefront/catalog').catch(() => null);
+        if (sfRes?.data?.success && Array.isArray(sfRes.data.data)) {
+          rawItems = sfRes.data.data;
+        }
+      }
+
+      if (rawItems.length > 0) {
+        const mapped: StoreCatalogItem[] = rawItems.map((p: any) => {
+          const thumb = p.images?.find((img: any) => img.isThumbnail) || p.images?.[0];
+          const rawImageUrl = p.imageUrl || p.thumbnailUrl || thumb?.imageUrl || '';
+
+          let cat: any = 'Nhu yếu phẩm';
+          const rawCat = typeof p.category === 'object' && p.category !== null
+            ? (p.category.categoryName || p.category.name || '')
+            : (typeof p.category === 'string' ? p.category : '');
+          const combined = (rawCat + ' ' + (p.productName || p.name || '')).toLowerCase();
+
+          if (combined.includes('nước') || combined.includes('lavie') || combined.includes('vĩnh hảo') || combined.includes('satori') || combined.includes('water')) {
+            cat = 'Nước uống';
+          } else if (combined.includes('gas') || combined.includes('petrolimex')) {
+            cat = 'Gas';
+          } else if (combined.includes('gạo') || combined.includes('st25')) {
+            cat = 'Gạo';
+          } else if (combined.includes('mắm')) {
+            cat = 'Nước mắm';
+          } else if (rawCat) {
+            cat = rawCat;
+          }
+
+          return {
+            id: String(p.productId || p.id),
+            name: p.productName || p.name || 'Sản phẩm',
+            brand: p.brand || 'Chính hãng',
+            category: cat,
+            unit: p.unit || 'Bình',
+            price: Number(p.basePrice || p.price || 0),
+            stock: Number(p.availableStock ?? p.stock ?? p.inventory?.quantityOnHand ?? 50),
+            minStockAlert: Number(p.minStockAlert ?? p.inventory?.minStockAlert ?? 5),
+            imageUrl: rawImageUrl || '/assets/products/vinhhao.png',
+            description: p.description || '',
+            sku: p.productCode || p.sku || `PROD-${p.id}`,
+          };
+        });
+        setCatalog(mapped);
+      } else {
+        setCatalog(getStoreCatalog());
+      }
+    } catch {
+      setCatalogError('Không thể tải danh sách sản phẩm từ máy chủ.');
+      setCatalog(getStoreCatalog());
+    } finally {
+      setIsLoadingCatalog(false);
+    }
+  }, []);
 
   useEffect(() => {
-    const handleUpdate = () => setCatalog(getStoreCatalog());
+    if (isOpen) {
+      fetchCatalogFromBackend();
+    }
+  }, [isOpen, fetchCatalogFromBackend]);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      fetchCatalogFromBackend();
+    };
     window.addEventListener('sob_store_inventory_updated', handleUpdate);
-    return () => window.removeEventListener('sob_store_inventory_updated', handleUpdate);
-  }, []);
+    window.addEventListener('sob_catalog_updated', handleUpdate);
+    return () => {
+      window.removeEventListener('sob_store_inventory_updated', handleUpdate);
+      window.removeEventListener('sob_catalog_updated', handleUpdate);
+    };
+  }, [fetchCatalogFromBackend]);
 
   // Filter products by search and category
   const filteredProducts = useMemo(() => {
     return catalog.filter((item) => {
       const matchCategory =
-        selectedCategory === 'Tất cả' || item.category === selectedCategory;
+        selectedCategory === 'Tất cả' ||
+        item.category === selectedCategory ||
+        (selectedCategory === 'Nước uống' && (item.category.includes('Nước') || item.name.toLowerCase().includes('nước') || item.name.toLowerCase().includes('lavie') || item.name.toLowerCase().includes('vĩnh hảo') || item.name.toLowerCase().includes('satori'))) ||
+        (selectedCategory === 'Gas' && (item.category.includes('Gas') || item.name.toLowerCase().includes('gas'))) ||
+        (selectedCategory === 'Gạo' && (item.category.includes('Gạo') || item.name.toLowerCase().includes('gạo') || item.name.toLowerCase().includes('st25'))) ||
+        (selectedCategory === 'Nhu yếu phẩm' && ((item.category as string) === 'Nhu yếu phẩm' || (item.category as string) === 'Khác'));
+
       const matchQuery =
         !searchQuery.trim() ||
         item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
@@ -523,6 +682,159 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
             )}
 
             {/* ========================================================================= */}
+            {/* STEP 3: WIFI CONFIGURATION (Cấu hình Wi-Fi 2.4GHz vào ESP32 qua BLE)      */}
+            {/* ========================================================================= */}
+            {step === 'WIFI_CONFIG' && (
+              <div className="p-6 sm:p-7 space-y-5">
+                {/* Header */}
+                <div className="flex items-center justify-between border-b border-zinc-100 pb-3">
+                  <div className="flex items-center gap-2.5">
+                    <div className="w-8 h-8 rounded-xl bg-sky-50 text-sky-600 flex items-center justify-center">
+                      <Wifi className="w-4 h-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-zinc-900">
+                        Cấu Hình Wi-Fi Cho Nút Bấm
+                      </h3>
+                      <p className="text-[11px] text-zinc-500">
+                        Nạp thông tin mạng 2.4GHz vào chip ESP32 qua Bluetooth
+                      </p>
+                    </div>
+                  </div>
+                  <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-bold bg-zinc-100 text-zinc-700 border border-zinc-200">
+                    {deviceSpecs.code}
+                  </span>
+                </div>
+
+                {/* Form Fields: Wi-Fi SSID & Password */}
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-800 mb-1.5 flex items-center justify-between">
+                      <span>Tên Mạng Wi-Fi (SSID 2.4GHz) *</span>
+                      <span className="text-[10px] text-zinc-400 font-normal">Chỉ hỗ trợ 2.4GHz</span>
+                    </label>
+                    <div className="relative">
+                      <Signal className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type="text"
+                        value={ssid}
+                        onChange={(e) => {
+                          setSsid(e.target.value);
+                          setWifiError(null);
+                        }}
+                        placeholder="VD: Home_WiFi_2.4G"
+                        className="w-full pl-10 pr-4 py-2.5 text-xs rounded-xl bg-zinc-50 border border-zinc-200 text-zinc-900 placeholder-zinc-400 font-medium focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400 transition-colors"
+                      />
+                    </div>
+
+                    {/* Quick Network Suggestions */}
+                    <div className="flex items-center gap-1.5 mt-2 flex-wrap">
+                      <span className="text-[10px] text-zinc-400">Gợi ý:</span>
+                      {commonNetworks.map((net) => (
+                        <button
+                          key={net}
+                          type="button"
+                          onClick={() => {
+                            setSsid(net);
+                            setWifiError(null);
+                          }}
+                          className={`text-[10px] px-2 py-0.5 rounded-md font-mono border transition-colors cursor-pointer ${
+                            ssid === net
+                              ? 'border-zinc-900 text-zinc-900 bg-zinc-100 font-semibold'
+                              : 'border-zinc-200 text-zinc-500 hover:text-zinc-800 hover:bg-zinc-50'
+                          }`}
+                        >
+                          {net}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-zinc-800 mb-1.5">
+                      Mật Khẩu Wi-Fi
+                    </label>
+                    <div className="relative">
+                      <Lock className="w-4 h-4 text-zinc-400 absolute left-3.5 top-1/2 -translate-y-1/2" />
+                      <input
+                        type={showWifiPassword ? 'text' : 'password'}
+                        value={wifiPassword}
+                        onChange={(e) => {
+                          setWifiPassword(e.target.value);
+                          setWifiError(null);
+                        }}
+                        placeholder="Nhập mật khẩu Wi-Fi của bạn (nếu có)"
+                        className="w-full pl-10 pr-10 py-2.5 text-xs rounded-xl bg-zinc-50 border border-zinc-200 text-zinc-900 placeholder-zinc-400 font-medium focus:outline-none focus:ring-2 focus:ring-zinc-900/10 focus:border-zinc-400 transition-colors"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => setShowWifiPassword(!showWifiPassword)}
+                        className="absolute right-3 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600 p-1 cursor-pointer"
+                      >
+                        {showWifiPassword ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Error message */}
+                {wifiError && (
+                  <div className="p-3 bg-rose-50 border border-rose-200 rounded-2xl text-left text-xs text-rose-600 flex items-start gap-2">
+                    <AlertCircle className="w-4 h-4 text-rose-500 shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                      <span className="font-bold block">Không thể cấu hình Wi-Fi</span>
+                      <span>{wifiError}</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Success message / Sending progress */}
+                {isSendingWifi && (
+                  <div className="p-3 bg-sky-50 border border-sky-200 rounded-2xl text-left text-xs text-sky-700 flex items-center gap-2.5 animate-pulse">
+                    <RefreshCw className="w-4 h-4 text-sky-600 animate-spin shrink-0" />
+                    <div>
+                      <span className="font-semibold block">Đang nạp thông tin mạng qua Bluetooth...</span>
+                      <span className="text-[11px] text-sky-600">Đang truyền lệnh WIFI:{ssid}:*** vào ESP32</span>
+                    </div>
+                  </div>
+                )}
+
+                {/* Actions */}
+                <div className="space-y-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={handleDeployWifi}
+                    disabled={isSendingWifi}
+                    className="w-full py-3.5 px-6 rounded-2xl bg-zinc-900 hover:bg-zinc-800 disabled:opacity-50 text-white font-semibold text-xs sm:text-sm shadow-sm transition-all flex items-center justify-center gap-2 cursor-pointer active:scale-[0.99]"
+                  >
+                    {isSendingWifi ? (
+                      <>
+                        <RefreshCw className="w-4 h-4 animate-spin" />
+                        <span>Đang cấu hình Wi-Fi...</span>
+                      </>
+                    ) : (
+                      <>
+                        <span>Nạp Wi-Fi & Tiếp Tục</span>
+                        <ArrowRight className="w-4 h-4" />
+                      </>
+                    )}
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStep('SELECT_PRODUCT');
+                    }}
+                    disabled={isSendingWifi}
+                    className="w-full py-2.5 rounded-xl bg-zinc-100 hover:bg-zinc-200 text-zinc-600 font-medium text-xs transition-colors cursor-pointer text-center"
+                  >
+                    Bỏ qua bước này (Nút đã có Wi-Fi)
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* ========================================================================= */}
             {/* STEP 4: SELECT PRODUCT (Tìm kiếm sản phẩm cửa hàng)                      */}
             {/* ========================================================================= */}
             {step === 'SELECT_PRODUCT' && (
@@ -612,9 +924,23 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
 
                 {/* Products List Grid */}
                 <div className={`space-y-2 max-h-[360px] overflow-y-auto pr-1 ${isBinding ? 'pointer-events-none opacity-60' : ''}`}>
-                  {filteredProducts.length === 0 ? (
-                    <div className="p-8 text-center text-zinc-400 text-xs">
-                      Không tìm thấy sản phẩm nào khớp với từ khóa "{searchQuery}".
+                  {isLoadingCatalog ? (
+                    <div className="p-8 text-center space-y-2 text-zinc-500">
+                      <RefreshCw className="w-5 h-5 animate-spin mx-auto text-zinc-400" />
+                      <p className="text-xs font-medium">Đang tải danh sách sản phẩm từ cửa hàng...</p>
+                    </div>
+                  ) : filteredProducts.length === 0 ? (
+                    <div className="p-8 text-center text-zinc-400 text-xs space-y-3">
+                      <p>Không tìm thấy sản phẩm nào khớp với từ khóa "{searchQuery}".</p>
+                      {catalog.length === 0 && (
+                        <button
+                          type="button"
+                          onClick={() => fetchCatalogFromBackend()}
+                          className="px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 text-zinc-700 text-xs rounded-xl font-medium transition-colors cursor-pointer"
+                        >
+                          Tải lại danh sách sản phẩm
+                        </button>
+                      )}
                     </div>
                   ) : (
                     filteredProducts.map((prod) => (

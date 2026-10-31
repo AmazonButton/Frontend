@@ -3,7 +3,7 @@ export interface StoreCatalogItem {
   id: string;
   name: string;
   brand: string;
-  category: 'Nước mắm' | 'Nước uống' | 'Gas' | 'Gạo' | 'Dầu ăn & Gia vị' | 'Nhu yếu phẩm';
+  category: 'Nước mắm' | 'Nước uống' | 'Gas' | 'Gạo' | 'Dầu ăn & Gia vị' | 'Nhu yếu phẩm' | 'Khác' | string;
   unit: string;
   price: number;
   stock: number;
