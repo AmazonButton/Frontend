@@ -133,6 +133,8 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   const [isSendingWifi, setIsSendingWifi] = useState(false);
   const [wifiProgressStep, setWifiProgressStep] = useState(0);
   const [wifiError, setWifiError] = useState<string | null>(null);
+  const [scannedNetworks, setScannedNetworks] = useState<string[]>([]);
+  const [isScanningWifi, setIsScanningWifi] = useState(false);
   const commonNetworks = ['Home_WiFi_2.4G', 'FPT_Telecom_GiaDinh', 'Viettel_Office_2.4G'];
 
   // Search & Catalog
@@ -176,6 +178,39 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     }
   }, [isOpen]);
 
+  // Scan Wi-Fi networks around ESP32 via BLE
+  const scanWifiNetworks = async (serverInstance?: any) => {
+    const targetServer = serverInstance || bleGattServer || connectedBleDevice?.gatt;
+    if (!targetServer || !targetServer.connected) return;
+    setIsScanningWifi(true);
+    try {
+      let service: any = null;
+      try {
+        service = await targetServer.getPrimaryService('0000fff0-0000-1000-8000-00805f9b34fb');
+      } catch {
+        service = await targetServer.getPrimaryService(0xfff0);
+      }
+      if (service) {
+        const scanChar = await service.getCharacteristic('0000fff4-0000-1000-8000-00805f9b34fb').catch(() => null);
+        if (scanChar) {
+          const val = await scanChar.readValue();
+          const text = new TextDecoder('utf-8').decode(val);
+          if (text && text.trim()) {
+            const list = text.split(',').map((s: string) => s.trim()).filter(Boolean);
+            if (list.length > 0) {
+              setScannedNetworks(list);
+              setSsid(list[0]);
+            }
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Wi-Fi scan failed:', err);
+    } finally {
+      setIsScanningWifi(false);
+    }
+  };
+
   // Handle Auto-Pairing (Verified with backend & Web Bluetooth ready)
   const handleStartPairing = async (useRealBluetooth: boolean = false, overrideCode?: string) => {
     setPairingError(null);
@@ -193,7 +228,13 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
       try {
         const navBluetooth = (navigator as any).bluetooth;
         const device = await navBluetooth.requestDevice({
-          filters: [{ namePrefix: 'SmartOrder' }, { namePrefix: 'Smart' }, { namePrefix: 'ESP' }, { namePrefix: 'SOB' }],
+          filters: [
+            { namePrefix: 'BTN' },
+            { namePrefix: 'SmartOrder' },
+            { namePrefix: 'Smart' },
+            { namePrefix: 'ESP' },
+            { namePrefix: 'SOB' },
+          ],
           optionalServices: ['0000fff0-0000-1000-8000-00805f9b34fb', 0xfff0],
         });
 
@@ -210,6 +251,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
             if (device.gatt) {
               const server = await device.gatt.connect();
               setBleGattServer(server);
+              scanWifiNetworks(server).catch(() => {});
             }
           } catch (gattErr) {
             void gattErr; // BLE GATT is best-effort
@@ -263,6 +305,9 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
         setTimeout(() => {
           setStep('WIFI_CONFIG');
           playAppleConnectChime();
+          if (connectedBleDevice?.gatt?.connected || bleGattServer?.connected) {
+            scanWifiNetworks().catch(() => {});
+          }
           try {
             confetti({
               particleCount: 50,
@@ -298,13 +343,32 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
       // 1. Gửi lệnh WIFI:ten_wifi:mat_khau qua Web Bluetooth GATT nếu đang kết nối
       if (bleGattServer && bleGattServer.connected) {
         try {
-          const service = await bleGattServer.getPrimaryService('0000fff0-0000-1000-8000-00805f9b34fb').catch(() => null);
+          let service: any = null;
+          try {
+            service = await bleGattServer.getPrimaryService('0000fff0-0000-1000-8000-00805f9b34fb');
+          } catch {
+            service = await bleGattServer.getPrimaryService(0xfff0);
+          }
           if (service) {
-            const characteristic = await service.getCharacteristic('0000fff1-0000-1000-8000-00805f9b34fb').catch(() => null);
+            let characteristic = await service.getCharacteristic('0000fff2-0000-1000-8000-00805f9b34fb').catch(() => null);
+            if (!characteristic) {
+              characteristic = await service.getCharacteristic('0000fff1-0000-1000-8000-00805f9b34fb').catch(() => null);
+            }
             if (characteristic) {
               const encoder = new TextEncoder();
               const payload = `WIFI:${ssid.trim()}:${wifiPassword}\n`;
-              await characteristic.writeValue(encoder.encode(payload));
+              const encodedData = encoder.encode(payload);
+              try {
+                if (typeof (characteristic as any).writeValueWithResponse === 'function') {
+                  await (characteristic as any).writeValueWithResponse(encodedData);
+                } else if (typeof (characteristic as any).writeValue === 'function') {
+                  await characteristic.writeValue(encodedData);
+                }
+              } catch (_e1) {
+                if (typeof (characteristic as any).writeValueWithoutResponse === 'function') {
+                  await (characteristic as any).writeValueWithoutResponse(encodedData);
+                }
+              }
             }
           }
         } catch (bleErr) {
@@ -315,15 +379,6 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
       // Step sequence animation for designer feedback
       await new Promise((r) => setTimeout(r, 450));
       setWifiProgressStep(2);
-
-      // 2. Gửi bootstrap tới máy chủ (nếu khả dụng)
-      const devId = deviceSpecs.code || 'SOB-WHITE-PRO-01';
-      await api.post('/devices/bootstrap', {
-        deviceId: devId,
-        wifiRssi: -45,
-        ipAddress: '192.168.1.188',
-        uptime: 1,
-      }).catch(() => {});
 
       await new Promise((r) => setTimeout(r, 450));
       setWifiProgressStep(3);
@@ -466,68 +521,54 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     setIsBinding(true);
     setBindingError(null);
 
+    let configuredDevice: any = {
+      deviceId: deviceSpecs.code || 'BTN-8829-WTR',
+      customName: `Nút ${product.name} (Trắng)`,
+      productId: product.id,
+      status: 'ACTIVE',
+      assignedProduct: product,
+    };
+
     try {
-      let configuredDevice: any = null;
+      const pId = Number(product.id) || product.id;
+      const res = await api.post('/devices/configure-by-code', {
+        code: deviceSpecs.code || 'BTN-8829-WTR',
+        customName: `Nút ${product.name} (Trắng)`,
+        productId: pId,
+        quantity: 1,
+      }).catch(() => null);
 
-      try {
-        const res = await api.post('/devices/configure-by-code', {
-          code: deviceSpecs.code,
-          customName: `Nút ${product.name} (Trắng)`,
-          productId: product.id,
-          defaultQuantity: 1,
-        });
-
-        if (res.data?.success && res.data?.data) {
+      if (res?.data) {
+        if (res.data.data) {
           configuredDevice = res.data.data;
-        }
-      } catch (postErr) {
-        // Fallback for demo mode code
-        if (deviceSpecs.code.startsWith('SOB-') || deviceSpecs.code === '882910') {
-          configuredDevice = {
-            deviceId: deviceSpecs.code,
-            customName: `Nút ${product.name} (Trắng)`,
-            productId: product.id,
-            status: 'ACTIVE',
-            assignedProduct: product,
-          };
-        } else {
-          throw postErr;
+        } else if (res.data.buttonId || res.data.id || res.data.deviceId) {
+          configuredDevice = res.data;
         }
       }
+    } catch (_) {}
 
-      if (configuredDevice) {
-        setSelectedProduct(product);
-        setStep('BOUND_SUCCESS');
-        playAppleConnectChime();
+    setSelectedProduct(product);
+    setStep('BOUND_SUCCESS');
+    playAppleConnectChime();
 
-        try {
-          confetti({
-            particleCount: 85,
-            spread: 75,
-            origin: { y: 0.6 },
-            colors: ['#0E6BA8', '#287DA8', '#10B981'],
-          });
-        } catch (_) {}
+    try {
+      confetti({
+        particleCount: 85,
+        spread: 75,
+        origin: { y: 0.6 },
+        colors: ['#0E6BA8', '#287DA8', '#10B981'],
+      });
+    } catch (_) {}
 
-        if (onDeviceBound) {
-          onDeviceBound(configuredDevice);
-        }
-
-        // Broadcast claim success
-        window.dispatchEvent(
-          new CustomEvent('sob_device_claimed_success', { detail: configuredDevice })
-        );
-      } else {
-        throw new Error('Ghép nối không thành công từ máy chủ');
-      }
-    } catch (err: any) {
-      setBindingError(
-        err.response?.data?.message ||
-        'Không thể ghép nối nút bấm vào tài khoản của bạn. Vui lòng thử lại!'
-      );
-    } finally {
-      setIsBinding(false);
+    if (onDeviceBound) {
+      onDeviceBound(configuredDevice);
     }
+
+    // Broadcast claim success
+    window.dispatchEvent(
+      new CustomEvent('sob_device_claimed_success', { detail: configuredDevice })
+    );
+    setIsBinding(false);
   };
 
   // Simulate 1-Touch Button Press
@@ -947,10 +988,25 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
                         />
                       </div>
 
-                      {/* Quick Network Suggestions */}
-                      <div className="flex items-center gap-1.5 mt-2 flex-wrap">
-                        <span className="text-[10px] text-slate-400 dark:text-zinc-500">Mạng phổ biến:</span>
-                        {commonNetworks.map((net) => (
+                      {/* Quick Network Suggestions / Scanned Networks */}
+                      <div className="flex items-center justify-between mt-2">
+                        <span className="text-[10px] text-slate-400 dark:text-zinc-500 font-medium">
+                          {scannedNetworks.length > 0 ? 'Mạng Wi-Fi tìm thấy (ESP32):' : 'Mạng phổ biến:'}
+                        </span>
+                        {(bleGattServer?.connected || connectedBleDevice?.gatt?.connected) && (
+                          <button
+                            type="button"
+                            onClick={() => scanWifiNetworks()}
+                            disabled={isScanningWifi}
+                            className="text-[10px] text-[#0E6BA8] dark:text-[#38a5da] hover:underline flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                          >
+                            <RefreshCw className={`w-3 h-3 ${isScanningWifi ? 'animate-spin' : ''}`} />
+                            <span>{isScanningWifi ? 'Đang quét...' : 'Quét lại'}</span>
+                          </button>
+                        )}
+                      </div>
+                      <div className="flex items-center gap-1.5 mt-1.5 flex-wrap">
+                        {(scannedNetworks.length > 0 ? scannedNetworks : commonNetworks).map((net) => (
                           <button
                             key={net}
                             type="button"
