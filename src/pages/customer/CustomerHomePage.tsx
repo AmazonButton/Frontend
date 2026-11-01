@@ -703,10 +703,12 @@ export const CustomerHomePage: React.FC = () => {
       const navBluetooth = (navigator as any).bluetooth;
       const device = await navBluetooth.requestDevice({
         filters: [
+          { namePrefix: 'BTN' },
           { namePrefix: 'SmartOrder' },
           { namePrefix: 'SmartButton' },
           { namePrefix: 'Smart' },
           { namePrefix: 'ESP' },
+          { namePrefix: 'SOB' },
         ],
         optionalServices: [
           '0000fff0-0000-1000-8000-00805f9b34fb',
@@ -765,13 +767,24 @@ export const CustomerHomePage: React.FC = () => {
               service = await server.getPrimaryService(0xfff0);
             }
             if (service) {
-              const char = await service.getCharacteristic('0000fff2-0000-1000-8000-00805f9b34fb');
-              const encoder = new TextEncoder();
-              const payload = encoder.encode(`${wifiSsidInput.trim()}:${wifiPasswordInput}`);
-              if (typeof (char as any).writeValueWithoutResponse === 'function') {
-                await (char as any).writeValueWithoutResponse(payload);
-              } else {
-                await char.writeValue(payload);
+              let char = await service.getCharacteristic('0000fff2-0000-1000-8000-00805f9b34fb').catch(() => null);
+              if (!char) {
+                char = await service.getCharacteristic('0000fff1-0000-1000-8000-00805f9b34fb').catch(() => null);
+              }
+              if (char) {
+                const encoder = new TextEncoder();
+                const payload = encoder.encode(`${wifiSsidInput.trim()}:${wifiPasswordInput}\n`);
+                try {
+                  if (typeof (char as any).writeValueWithResponse === 'function') {
+                    await (char as any).writeValueWithResponse(payload);
+                  } else if (typeof (char as any).writeValue === 'function') {
+                    await char.writeValue(payload);
+                  }
+                } catch (_e1) {
+                  if (typeof (char as any).writeValueWithoutResponse === 'function') {
+                    await (char as any).writeValueWithoutResponse(payload);
+                  }
+                }
               }
             }
           }
