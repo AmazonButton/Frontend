@@ -2005,6 +2005,7 @@ export const CustomerHomePage: React.FC = () => {
       <WhiteDeviceAirPodsModal
         isOpen={showAirPodsModal}
         onClose={() => setShowAirPodsModal(false)}
+        availableProducts={availableProducts}
         onDeviceBound={() => {
           fetchData();
         }}

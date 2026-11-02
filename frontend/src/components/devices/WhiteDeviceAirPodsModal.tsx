@@ -97,12 +97,14 @@ interface WhiteDeviceAirPodsModalProps {
   isOpen: boolean;
   onClose: () => void;
   onDeviceBound?: (deviceData: any) => void;
+  availableProducts?: any[];
 }
 
 export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = ({
   isOpen,
   onClose,
   onDeviceBound,
+  availableProducts,
 }) => {
   // Modal flow steps: 'DISCOVER' | 'PAIRING' | 'WIFI_CONFIG' | 'SELECT_PRODUCT' | 'BOUND_SUCCESS'
   const [step, setStep] = useState<'DISCOVER' | 'PAIRING' | 'WIFI_CONFIG' | 'SELECT_PRODUCT' | 'BOUND_SUCCESS'>('DISCOVER');
@@ -406,6 +408,64 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     }
   };
 
+  // Helper: map backend / parent product to StoreCatalogItem
+  const mapProductItem = useCallback((p: any): StoreCatalogItem => {
+    const thumb = p.images?.find((img: any) => img.isThumbnail) || p.images?.[0];
+    const rawImageUrl = p.imageUrl || p.thumbnailUrl || thumb?.imageUrl || '';
+
+    let cat: any = 'Nhu yếu phẩm';
+    const rawCat = typeof p.category === 'object' && p.category !== null
+      ? (p.category.categoryName || p.category.name || '')
+      : (typeof p.category === 'string' ? p.category : '');
+    const combined = (rawCat + ' ' + (p.productName || p.name || '')).toLowerCase();
+
+    if (
+      combined.includes('nước') ||
+      combined.includes('lavie') ||
+      combined.includes('vĩnh hảo') ||
+      combined.includes('satori') ||
+      combined.includes('aquafina') ||
+      combined.includes('water')
+    ) {
+      cat = 'Nước uống';
+    } else if (combined.includes('gas') || combined.includes('petrolimex') || combined.includes('saigon')) {
+      cat = 'Gas';
+    } else if (combined.includes('gạo') || combined.includes('st25') || combined.includes('rice')) {
+      cat = 'Gạo';
+    } else if (combined.includes('mắm') || combined.includes('gia vị') || combined.includes('dầu ăn')) {
+      cat = 'Nhu yếu phẩm';
+    } else if (rawCat) {
+      cat = rawCat;
+    }
+
+    let img = rawImageUrl;
+    if (!img || img.includes('photo-1548839140') || img.includes('photo-1586201375')) {
+      if (combined.includes('gas') || combined.includes('petrolimex')) {
+        img = '/assets/products/Petrolimex.png';
+      } else if (combined.includes('gạo') || combined.includes('st25') || combined.includes('rice')) {
+        img = '/assets/products/rice-st25.png';
+      } else if (combined.includes('giấy') || combined.includes('toilet')) {
+        img = '/assets/products/toilet-paper.jpg';
+      } else {
+        img = '/assets/products/vinhhao.png';
+      }
+    }
+
+    return {
+      id: String(p.productId || p.id),
+      name: p.productName || p.name || 'Sản phẩm',
+      brand: p.brand || (combined.includes('vĩnh hảo') ? 'Vĩnh Hảo' : combined.includes('lavie') ? 'La Vie' : 'Chính hãng'),
+      category: cat,
+      unit: p.unit || (cat === 'Nước uống' ? 'Bình 20L' : cat === 'Gas' ? 'Bình 12kg' : 'Bình'),
+      price: Number(p.basePrice || p.price || 0),
+      stock: Number(p.availableStock ?? p.stock ?? p.inventory?.quantityOnHand ?? 50),
+      minStockAlert: Number(p.minStockAlert ?? p.inventory?.minStockAlert ?? 5),
+      imageUrl: img || '/assets/products/vinhhao.png',
+      description: p.description || '',
+      sku: p.productCode || p.sku || `PROD-${p.id}`,
+    };
+  }, []);
+
   // Fetch product catalog dynamically from backend API
   const fetchCatalogFromBackend = useCallback(async () => {
     setIsLoadingCatalog(true);
@@ -416,6 +476,10 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
         const res = await api.get('/products');
         if (res.data?.success && Array.isArray(res.data.data) && res.data.data.length > 0) {
           rawItems = res.data.data;
+        } else if (Array.isArray(res.data) && res.data.length > 0) {
+          rawItems = res.data;
+        } else if (Array.isArray(res.data?.items) && res.data.items.length > 0) {
+          rawItems = res.data.items;
         }
       } catch {
         // Fall back to storefront catalog if auth context lacks store scope
@@ -423,49 +487,15 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
 
       if (rawItems.length === 0) {
         const sfRes = await api.get('/products/storefront/catalog').catch(() => null);
-        if (sfRes?.data?.success && Array.isArray(sfRes.data.data)) {
+        if (sfRes?.data?.success && Array.isArray(sfRes.data.data) && sfRes.data.data.length > 0) {
           rawItems = sfRes.data.data;
+        } else if (Array.isArray(sfRes?.data) && sfRes.data.length > 0) {
+          rawItems = sfRes.data;
         }
       }
 
       if (rawItems.length > 0) {
-        const mapped: StoreCatalogItem[] = rawItems.map((p: any) => {
-          const thumb = p.images?.find((img: any) => img.isThumbnail) || p.images?.[0];
-          const rawImageUrl = p.imageUrl || p.thumbnailUrl || thumb?.imageUrl || '';
-
-          let cat: any = 'Nhu yếu phẩm';
-          const rawCat = typeof p.category === 'object' && p.category !== null
-            ? (p.category.categoryName || p.category.name || '')
-            : (typeof p.category === 'string' ? p.category : '');
-          const combined = (rawCat + ' ' + (p.productName || p.name || '')).toLowerCase();
-
-          if (combined.includes('nước') || combined.includes('lavie') || combined.includes('vĩnh hảo') || combined.includes('satori') || combined.includes('water')) {
-            cat = 'Nước uống';
-          } else if (combined.includes('gas') || combined.includes('petrolimex')) {
-            cat = 'Gas';
-          } else if (combined.includes('gạo') || combined.includes('st25')) {
-            cat = 'Gạo';
-          } else if (combined.includes('mắm')) {
-            cat = 'Nước mắm';
-          } else if (rawCat) {
-            cat = rawCat;
-          }
-
-          return {
-            id: String(p.productId || p.id),
-            name: p.productName || p.name || 'Sản phẩm',
-            brand: p.brand || 'Chính hãng',
-            category: cat,
-            unit: p.unit || 'Bình',
-            price: Number(p.basePrice || p.price || 0),
-            stock: Number(p.availableStock ?? p.stock ?? p.inventory?.quantityOnHand ?? 50),
-            minStockAlert: Number(p.minStockAlert ?? p.inventory?.minStockAlert ?? 5),
-            imageUrl: rawImageUrl || '/assets/products/vinhhao.png',
-            description: p.description || '',
-            sku: p.productCode || p.sku || `PROD-${p.id}`,
-          };
-        });
-        setCatalog(mapped);
+        setCatalog(rawItems.map(mapProductItem));
       } else {
         setCatalog(getStoreCatalog());
       }
@@ -475,13 +505,16 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     } finally {
       setIsLoadingCatalog(false);
     }
-  }, []);
+  }, [mapProductItem]);
 
   useEffect(() => {
     if (isOpen) {
+      if (Array.isArray(availableProducts) && availableProducts.length > 0) {
+        setCatalog(availableProducts.map(mapProductItem));
+      }
       fetchCatalogFromBackend();
     }
-  }, [isOpen, fetchCatalogFromBackend]);
+  }, [isOpen, availableProducts, mapProductItem, fetchCatalogFromBackend]);
 
   useEffect(() => {
     const handleUpdate = () => {
@@ -495,8 +528,19 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     };
   }, [fetchCatalogFromBackend]);
 
+  // Accent-insensitive normalization for Vietnamese search
+  const removeVietnameseTones = (str: string): string => {
+    return str
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .toLowerCase();
+  };
+
   // Filter products by search and category
   const filteredProducts = useMemo(() => {
+    const q = removeVietnameseTones(searchQuery.trim());
     return catalog.filter((item) => {
       const matchCategory =
         selectedCategory === 'Tất cả' ||
@@ -506,13 +550,17 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
         (selectedCategory === 'Gạo' && (item.category.includes('Gạo') || item.name.toLowerCase().includes('gạo') || item.name.toLowerCase().includes('st25'))) ||
         (selectedCategory === 'Nhu yếu phẩm' && ((item.category as string) === 'Nhu yếu phẩm' || (item.category as string) === 'Khác'));
 
-      const matchQuery =
-        !searchQuery.trim() ||
-        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.brand.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.unit.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchQuery.toLowerCase());
-      return matchCategory && matchQuery;
+      if (!q) return matchCategory;
+
+      const normName = removeVietnameseTones(item.name);
+      const normBrand = removeVietnameseTones(item.brand);
+      const normUnit = removeVietnameseTones(item.unit);
+      const normDesc = removeVietnameseTones(item.description);
+
+      return (
+        matchCategory &&
+        (normName.includes(q) || normBrand.includes(q) || normUnit.includes(q) || normDesc.includes(q))
+      );
     });
   }, [catalog, searchQuery, selectedCategory]);
 
@@ -674,6 +722,20 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
             {/* Header: Title + Close Button */}
             <div className="px-5 sm:px-6 pt-4 pb-3 flex items-center justify-between border-b border-slate-100 dark:border-zinc-800/80 shrink-0">
               <div className="flex items-center gap-2.5">
+                {step !== 'DISCOVER' && step !== 'PAIRING' && step !== 'BOUND_SUCCESS' && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (step === 'WIFI_CONFIG') setStep('DISCOVER');
+                      else if (step === 'SELECT_PRODUCT') setStep('WIFI_CONFIG');
+                    }}
+                    className="w-8 h-8 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-600 dark:text-zinc-300 flex items-center justify-center transition-colors cursor-pointer"
+                    aria-label="Quay lại bước trước"
+                    title="Quay lại bước trước"
+                  >
+                    <ArrowLeft className="w-4 h-4" />
+                  </button>
+                )}
                 <div className="w-8 h-8 rounded-xl bg-[#0E6BA8]/10 dark:bg-[#0E6BA8]/25 text-[#0E6BA8] dark:text-[#38a5da] flex items-center justify-center font-bold">
                   <Radio className="w-4 h-4 animate-pulse" />
                 </div>
