@@ -1,9 +1,10 @@
 import { io, Socket } from 'socket.io-client';
-import { API_URL, isTokenExpired, resolveApiUrl } from './api';
+import { API_URL, isTokenExpired, resolveApiUrl, getOrRefreshValidToken } from './api';
 
 let socket: Socket | null = null;
 let subscribedStoreId: string | null = typeof window !== 'undefined' ? localStorage.getItem('smart_order_sub_store') : null;
 let subscribedCustomerId: string | null = typeof window !== 'undefined' ? localStorage.getItem('smart_order_sub_customer') : null;
+let isRefreshingSocket = false;
 
 const getStoredToken = () => {
   const token = typeof window !== 'undefined' ? localStorage.getItem('smart_order_token') : null;
@@ -11,6 +12,32 @@ const getStoredToken = () => {
   // the polling request with a 400, which is unrelated to the current page.
   return token && !isTokenExpired(token) ? token : null;
 };
+
+/**
+ * Tự động làm mới Token và kết nối lại Socket.IO ngay lập tức
+ * khi token hết hạn hoặc kết nối bị từ chối (lỗi 401 / connect_error).
+ */
+export async function reconnectSocketWithFreshToken(): Promise<void> {
+  if (isRefreshingSocket) return;
+  isRefreshingSocket = true;
+  try {
+    const freshToken = await getOrRefreshValidToken();
+    if (freshToken && socket) {
+      (socket as any).auth = { token: `Bearer ${freshToken}` };
+      if (!socket.connected) {
+        socket.connect();
+      } else {
+        socket.emit('authenticate', { token: freshToken });
+      }
+    }
+  } catch (err) {
+    console.warn('Socket token auto-refresh failed:', err);
+  } finally {
+    isRefreshingSocket = false;
+  }
+}
+
+export const reconnectSocket = reconnectSocketWithFreshToken;
 
 const CLUSTER_WEBSOCKET_NODES = [
   'https://backend-fae8.onrender.com',
@@ -43,8 +70,11 @@ export function getSocket(): Socket {
   if (!socket) {
     socket = io(targetUrl, {
       autoConnect: true,
-      auth: (cb) => {
-        const t = getStoredToken();
+      auth: async (cb) => {
+        let t = getStoredToken();
+        if (!t) {
+          t = await getOrRefreshValidToken().catch(() => null);
+        }
         cb({ token: t ? `Bearer ${t}` : undefined });
       },
       // Use direct WebSocket transport to bypass Render proxy sticky-session limitations
@@ -86,14 +116,28 @@ export function getSocket(): Socket {
       resubscribe();
     });
 
-    socket.on('disconnect', (reason) => {
+    socket.on('disconnect', async (reason) => {
+      if (reason === 'io server disconnect') {
+        // Khi server ngắt kết nối do token hết hạn hoặc xác thực thất bại -> tự động refresh và kết nối lại
+        await reconnectSocketWithFreshToken();
+      }
       if (reason !== 'io client disconnect') {
         lastAuthRole = null;
       }
     });
 
-    socket.on('connect_error', () => {
-      // Quietly handle transient connection errors without noisy unhandled exceptions
+    socket.on('connect_error', async (err: any) => {
+      // Khi token hết hạn hoặc kết nối bị từ chối ( connect_error / 401 ),
+      // hệ thống tự động gọi refresh token mới và reconnect() lại Socket ngay lập tức.
+      const currentToken = getStoredToken();
+      const msg = err?.message || '';
+      if (!currentToken || /auth|unauthorized|jwt|token|401|403|forbidden/i.test(msg)) {
+        await reconnectSocketWithFreshToken();
+      }
+    });
+
+    socket.on('unauthorized', async () => {
+      await reconnectSocketWithFreshToken();
     });
 
     // Cleanly disconnect when page enters Back-Forward Cache (bfcache)

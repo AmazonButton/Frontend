@@ -70,7 +70,7 @@ export const StoreDashboard: React.FC = () => {
   const location = useLocation();
   const { user, token } = useAuth();
   const storeId = getUserStoreId(user);
-  const { announceStoreOrder, testStoreBankSpeaker } = useSound();
+  const { playOrderChime, announceStoreOrder, testStoreBankSpeaker } = useSound();
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [loading, setLoading] = useState(true);
@@ -150,42 +150,53 @@ export const StoreDashboard: React.FC = () => {
 
     const socket = getSocket();
 
-    const handleOrderCreated = (payload: any) => {
-      payload = normalizeOrderEvent(payload);
-      if (storeId && payload.order.storeId && String(payload.order.storeId) !== storeId) return;
+    const handleOrderCreated = (newOrderPayload: any) => {
+      const normalizedEvent = normalizeOrderEvent(newOrderPayload);
+      const newOrder = normalizedEvent.order || newOrderPayload;
+      if (storeId && newOrder?.storeId && String(newOrder.storeId) !== storeId) return;
+
+      // 1. Phát âm thanh chuông "Ting Ting" thông báo
+      playOrderChime();
+
+      // 2. Chèn ngay đơn hàng mới lên đầu danh sách mà KHÔNG CẦN F5 tải lại trang
+      setOrders((prevOrders) => {
+        const orderId = String(newOrder.id || newOrder.orderId || '');
+        const exists = prevOrders.some(
+          (o) => (orderId && o.id === orderId) || (newOrder.orderNumber && o.orderNumber === newOrder.orderNumber)
+        );
+        if (exists) return prevOrders;
+        const safeOrder = {
+          ...newOrder,
+          items: Array.isArray(newOrder.items) ? newOrder.items : [],
+        };
+        return [safeOrder, ...prevOrders];
+      });
+
+      // 3. Hiện toast thông báo góc màn hình
+      const code = newOrder.orderCode || newOrder.orderNumber || newOrder.id;
+      toast.success(`Đã nhận đơn hàng mới #${code}!`, {
+        title: '🔔 Đơn hàng mới 1-Chạm!',
+        duration: 5000,
+      });
+
       const rawNum =
-        payload.order?.orderNumber ||
-        payload.orderNumber ||
-        (payload.order?.id ? String(payload.order.id).slice(-6) : 'SOB');
+        newOrder?.orderNumber ||
+        newOrder?.orderCode ||
+        (newOrder?.id ? String(newOrder.id).slice(-6) : 'SOB');
       const orderNumber = String(rawNum).replace(/^#/, '');
 
       if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
       setNewOrderAlert({
         type: 'CREATE',
         orderNumber,
-        customerName: payload.customerName || payload.order?.customerName || payload.order?.customer?.user?.fullName || 'Khách hàng',
-        customerPhone: payload.order?.customerPhone || payload.customerPhone,
-        productName: payload.productName || payload.order?.items?.[0]?.product?.name || payload.order?.items?.[0]?.productName || 'Nhu yếu phẩm',
-        quantity: payload.quantity || payload.order?.items?.[0]?.quantity || 1,
-        totalAmount: payload.order?.totalAmount ?? payload.totalAmount,
-        deliveryAddress: payload.order?.deliveryAddress || payload.deliveryAddress,
-        orderId: payload.order?.id || payload.orderId || payload.id,
+        customerName: normalizedEvent.customerName || newOrder?.customerName || newOrder?.customer?.user?.fullName || 'Khách hàng',
+        customerPhone: newOrder?.customerPhone || normalizedEvent.customerPhone,
+        productName: normalizedEvent.productName || newOrder?.items?.[0]?.product?.name || newOrder?.items?.[0]?.productName || 'Nhu yếu phẩm',
+        quantity: normalizedEvent.quantity || newOrder?.items?.[0]?.quantity || 1,
+        totalAmount: newOrder?.totalAmount ?? normalizedEvent.totalAmount,
+        deliveryAddress: newOrder?.deliveryAddress || normalizedEvent.deliveryAddress,
+        orderId: newOrder?.id || normalizedEvent.orderId || normalizedEvent.id,
       });
-
-      // Instantly insert into local state without waiting for F5
-      if (payload.order) {
-        setOrders((prev) => {
-          const exists = prev.some(
-            (o) => o.id === payload.order.id || o.orderNumber === payload.order.orderNumber
-          );
-          if (exists) return prev;
-          const safeOrder = {
-            ...payload.order,
-            items: Array.isArray(payload.order.items) ? payload.order.items : [],
-          };
-          return [safeOrder, ...prev];
-        });
-      }
 
       fetchOrders();
     };
@@ -277,6 +288,7 @@ export const StoreDashboard: React.FC = () => {
     };
 
     socket.on('ORDER_CREATED', handleOrderCreated);
+    socket.on('order:created', handleOrderCreated);
     socket.on('ORDER_STATUS_CHANGED', handleOrderUpdated);
     socket.on('ORDER_PAYMENT_CHANGED', handleOrderUpdated);
     socket.on('ORDER_PAYMENT_CONFIRMED', (payload: any) => {
@@ -302,6 +314,7 @@ export const StoreDashboard: React.FC = () => {
     return () => {
       clearInterval(pollTimer);
       socket.off('ORDER_CREATED', handleOrderCreated);
+      socket.off('order:created', handleOrderCreated);
       socket.off('ORDER_STATUS_CHANGED', handleOrderUpdated);
       socket.off('ORDER_PAYMENT_CHANGED', handleOrderUpdated);
       socket.off('ORDER_PAYMENT_CONFIRMED', handleOrderUpdated);

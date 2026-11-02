@@ -126,7 +126,17 @@ export const CustomerOrdersPage: React.FC = () => {
       loadOrders();
     };
 
-    const handleOrderCreated = () => {
+    const handleOrderCreated = (newOrderPayload?: any) => {
+      if (newOrderPayload && (newOrderPayload.order || newOrderPayload.id)) {
+        const normalized = normalizeOrder(newOrderPayload.order || newOrderPayload);
+        setOrders((prev) => {
+          const exists = prev.some((o) => o.id === normalized.id || o.orderNumber === normalized.orderNumber);
+          if (exists) return prev;
+          return [normalized, ...prev];
+        });
+        const code = normalized.orderCode || normalized.orderNumber || normalized.id;
+        toast.success(`Đã nhận đơn hàng mới #${code}!`);
+      }
       loadOrders();
     };
 

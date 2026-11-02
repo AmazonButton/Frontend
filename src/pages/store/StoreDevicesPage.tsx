@@ -3451,6 +3451,7 @@ export const StoreDevicesPage: React.FC = () => {
       <WhiteDeviceAirPodsModal
         isOpen={showAirPodsModal}
         onClose={() => setShowAirPodsModal(false)}
+        availableProducts={products}
         onDeviceBound={() => fetchData()}
       />
     </div>
