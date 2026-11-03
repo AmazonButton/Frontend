@@ -44,6 +44,7 @@ const storeLinks: NavigationItem[] = [
 const customerLinks: NavigationItem[] = [
   { to: '/shop', label: 'Mua sắm', icon: ShoppingCart },
   { to: '/customer/home', label: 'Nút của tôi', icon: Smartphone },
+  { to: '/customer/rentals', label: 'Thuê nút bấm', icon: Cpu },
   { to: '/customer/orders', label: 'Đơn hàng', icon: ReceiptText },
   { to: '/customer/verification', label: 'Xác minh eKYC', icon: BadgeCheck },
   { to: '/customer/profile', label: 'Tài khoản', icon: UserRound },
@@ -54,6 +55,7 @@ const adminLinks: NavigationItem[] = [
   { to: '/admin/dashboard', label: 'Tổng quan', icon: LayoutDashboard },
   { to: '/admin/dashboard?section=STORES', label: '1. Trạm cửa hàng', icon: Store },
   { to: '/admin/dashboard?section=PLANS', label: '2. Gói dịch vụ', icon: Wallet },
+  { to: '/admin/dashboard?section=RENTALS', label: '2.1 Gói thuê nút IoT', icon: Cpu },
   { to: '/admin/dashboard?section=CATALOG', label: '3. Danh mục gốc', icon: Layers },
   { to: '/admin/dashboard?section=DEVICES', label: '4. Kho nút bấm', icon: Cpu },
   { to: '/admin/dashboard?section=RBAC', label: '5. Tài khoản & phân quyền', icon: UserRound },

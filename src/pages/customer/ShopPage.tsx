@@ -1,11 +1,18 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { ArrowRight, CheckCircle2, Minus, PackageCheck, Plus, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
+import { ArrowRight, CheckCircle2, Minus, PackageCheck, Plus, RefreshCw, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
 import { api, isTokenExpired } from '../../services/api';
 import { getSocket } from '../../services/socket';
 import { toast } from '../../context/ToastContext';
 import { PayOSCancelRecoveryModal, PayOSRecoveryOrder } from '../../components/orders/PayOSCancelRecoveryModal';
+import { normalizeOrder, publishOrderEvent } from '../../services/order-events';
+import { StorefrontReceipt } from '../../components/orders/StorefrontReceipt';
+import { Order } from '../../types';
+import { getShippingContactErrors, normalizeShippingContact, ShippingContactField } from '../../services/shipping-contact-validation';
+
+import { DeliveryAddressMap } from '../../components/orders/DeliveryAddressMap';
+import type { DeliveryLocation } from '../../services/delivery-location';
 
 const deliveryHeroBackground = '/assets/products/delivery-hero-pastel.png';
 
@@ -48,9 +55,15 @@ export const ShopPage: React.FC = () => {
     deliveryAddress: '',
     paymentMethod: isCustomerLoggedIn ? 'PAYOS' : 'CASH_ON_DELIVERY',
   });
+  const [deliveryLocation, setDeliveryLocation] = useState<DeliveryLocation | null>(null);
   const [cartBump, setCartBump] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [recoveryOrder, setRecoveryOrder] = useState<PayOSRecoveryOrder | null>(null);
+  const [receipt, setReceipt] = useState<Order | null>(null);
+  const [contactTouched, setContactTouched] = useState<Record<ShippingContactField, boolean>>({ customerName: false, customerPhone: false, deliveryAddress: false });
+  const contactErrors = getShippingContactErrors(form);
+  const visibleContactError = (field: ShippingContactField) => contactTouched[field] ? contactErrors[field] : undefined;
+  const touchContact = (field: ShippingContactField) => setContactTouched((previous) => ({ ...previous, [field]: true }));
 
   useEffect(() => { localStorage.setItem(CART_KEY, JSON.stringify(cart)); }, [cart]);
 
@@ -228,6 +241,15 @@ export const ShopPage: React.FC = () => {
 
   const checkout = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (busy) return;
+    const contact = normalizeShippingContact(form);
+    setContactTouched({ customerName: true, customerPhone: true, deliveryAddress: true });
+    const invalidField = (Object.keys(contactErrors) as ShippingContactField[])[0];
+    if (invalidField) {
+      setNotice(contactErrors[invalidField] || 'Vui lòng kiểm tra thông tin người nhận.');
+      document.getElementById(`checkout-${invalidField}`)?.focus();
+      return;
+    }
     const cart = selectedCart;
     const cartStore = selectedStore;
     if (!selectedCart.length) { setNotice('Hãy chọn ít nhất một sản phẩm để thanh toán.'); return; }
@@ -246,19 +268,26 @@ export const ShopPage: React.FC = () => {
       return;
     }
 
-    setBusy(true); setNotice('');
+    setBusy(true); setNotice(''); setReceipt(null);
+    let placedOrder: Order | null = null;
     try {
       const orderIdempKey = `ord-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
       const response = await api.post('/storefront/orders', {
         storeId: selectedStore,
         items: selectedCart.map(({ product, quantity }) => ({ productId: product.id, quantity })),
         ...form,
+        ...contact,
       }, {
         headers: {
           'x-idempotency-key': orderIdempKey,
         }
       });
-      const order = response.data?.data || response.data;
+      const order = normalizeOrder(response.data?.data || response.data);
+      placedOrder = order;
+      setCart((old) => old.filter((line) => !line.selected));
+      setCheckoutOpen(false);
+      setCartOpen(false);
+      publishOrderEvent('ORDER_CREATED', { order });
       if (form.paymentMethod === 'PAYOS') {
         // The deployed API validates this DTO strictly. Customer information is
         // already stored on the order, so only send fields required to create
@@ -269,32 +298,25 @@ export const ShopPage: React.FC = () => {
           window.location.hostname.endsWith('.smartorder.vn');
 
         const paymentPayload: any = {
-          orderId: order.id || order.orderId,
+          orderId: order.id,
           amount: order.totalAmount,
-          description: `Thanh toan don ${order.orderNumber || order.orderCode || order.id}`.slice(0, 25),
+          description: `Thanh toan don ${order.orderNumber || order.id}`.slice(0, 25),
         };
 
         if (isAllowedDomain) {
-          paymentPayload.returnUrl = `${window.location.origin}/shop?payos_status=success&orderId=${encodeURIComponent(order.id || order.orderId)}`;
-          paymentPayload.cancelUrl = `${window.location.origin}/shop?payos_status=cancelled&orderId=${encodeURIComponent(order.id || order.orderId)}`;
+          paymentPayload.returnUrl = `${window.location.origin}/shop?payos_status=success&orderId=${encodeURIComponent(order.id)}`;
+          paymentPayload.cancelUrl = `${window.location.origin}/shop?payos_status=cancelled&orderId=${encodeURIComponent(order.id)}`;
         }
 
-        const payosIdempKey = `pay-${order.id || order.orderId}-${Date.now()}`;
-        const payment = await api.post('/payments/payos/create-link', paymentPayload, {
-          headers: {
-            'x-idempotency-key': payosIdempKey,
-          }
-        });
-        const checkoutUrl = payment.data?.data?.checkoutUrl;
-        if (checkoutUrl) {
-          try {
+        // Keep recovery information even if creating the payment link fails.
+        try {
             sessionStorage.setItem('pending_payos_order', JSON.stringify({
-              orderId: order.id || order.orderId,
-              orderNumber: order.orderNumber || order.orderCode,
+              orderId: order.id,
+              orderNumber: order.orderNumber,
               totalAmount: order.totalAmount,
-              customerName: form.customerName,
-              customerPhone: form.customerPhone,
-              deliveryAddress: form.deliveryAddress,
+              customerName: order.customerName || contact.customerName,
+              customerPhone: order.customerPhone || contact.customerPhone,
+              deliveryAddress: order.deliveryAddress || contact.deliveryAddress,
               items: cart.map((line) => ({
                 productName: line.product.name,
                 quantity: line.quantity,
@@ -302,21 +324,34 @@ export const ShopPage: React.FC = () => {
               })),
               createdAt: new Date().toISOString(),
             }));
-          } catch {}
-          setCart((old) => old.filter((line) => !line.selected));
+        } catch {}
+        const payosIdempKey = `pay-${order.id}-${Date.now()}`;
+        const payment = await api.post('/payments/payos/create-link', paymentPayload, {
+          headers: {
+            'x-idempotency-key': payosIdempKey,
+          }
+        });
+        const checkoutUrl = payment.data?.data?.checkoutUrl || payment.data?.checkoutUrl;
+        if (typeof checkoutUrl === 'string' && checkoutUrl.trim()) {
           window.location.assign(checkoutUrl);
           return;
         }
         throw new Error('PayOS chưa trả về liên kết thanh toán.');
       }
+      setReceipt(order);
       setCart((old) => old.filter((line) => !line.selected)); setCheckoutOpen(false); setCartOpen(false);
-      setNotice(`Đặt hàng thành công! Mã đơn ${order.orderNumber || order.orderCode}. Thanh toán tiền mặt khi nhận hàng.`);
+      setNotice(`Đặt hàng thành công! Mã đơn ${order.orderNumber}. Thanh toán tiền mặt khi nhận hàng.`);
     } catch (e: any) {
       const errorData = e?.response?.data;
       const message = Array.isArray(errorData?.errors) && errorData.errors.length
         ? errorData.errors.join('; ')
         : (errorData?.message || e?.message || 'Đặt hàng chưa thành công. Vui lòng thử lại.');
-      setNotice(message);
+      if (placedOrder && form.paymentMethod === 'PAYOS') {
+        setReceipt(placedOrder);
+        setNotice(`Đơn #${placedOrder.orderNumber} đã được tạo nhưng chưa mở được PayOS: ${message} Vui lòng tiếp tục thanh toán từ lịch sử đơn hàng, không đặt lại đơn.`);
+      } else {
+        setNotice(message);
+      }
     } finally { setBusy(false); }
   };
 
@@ -736,10 +771,11 @@ export const ShopPage: React.FC = () => {
             exit={{ opacity: 0, scale: 0.92, y: 16 }}
             transition={{ type: 'spring', damping: 26, stiffness: 300 }}
             onSubmit={checkout}
+            noValidate
             onClick={(e) => e.stopPropagation()}
-            className="relative z-10 my-auto w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl sm:p-7 border border-slate-100"
+            className="relative z-10 my-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl"
           >
-            <div className="mb-5 flex items-start justify-between">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-7">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">Thông tin giao hàng</h2>
                 <p className="mt-1 text-sm text-slate-500">Đơn hàng từ {selectedCart[0]?.product.store.name}</p>
@@ -757,36 +793,74 @@ export const ShopPage: React.FC = () => {
               </motion.button>
             </div>
 
-            <div className="space-y-3">
+            <div className="grid min-h-0 gap-6 overflow-y-auto p-5 sm:p-7 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)] lg:overflow-hidden">
+            <div className="grid min-w-0 content-start gap-4 sm:grid-cols-2 lg:overflow-y-auto lg:pr-2">
+              <div>
+              <label htmlFor="checkout-customerName" className="mb-1.5 block text-sm font-medium text-slate-800">Họ và tên người nhận <span className="text-rose-600">*</span></label>
               <input
+                id="checkout-customerName"
+                name="customerName"
+                autoComplete="shipping name"
                 required
                 maxLength={100}
                 value={form.customerName}
                 onChange={(e) => setForm({ ...form, customerName: e.target.value })}
+                onBlur={() => touchContact('customerName')}
+                aria-invalid={Boolean(visibleContactError('customerName'))}
+                aria-describedby="checkout-name-hint checkout-name-error"
                 placeholder="Họ và tên người nhận"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-600/10"
+                className={`w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:ring-2 ${visibleContactError('customerName') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/10' : 'border-slate-200 focus:border-teal-600 focus:ring-teal-600/10'}`}
               />
+              <p id="checkout-name-hint" className="mt-1 text-xs text-slate-500">Nhập đầy đủ họ và tên của người trực tiếp nhận hàng, có thể viết có dấu.</p>
+              {visibleContactError('customerName') && <p id="checkout-name-error" role="alert" className="mt-1 text-xs text-rose-600">{visibleContactError('customerName')}</p>}
+              </div>
+              <div>
+              <label htmlFor="checkout-customerPhone" className="mb-1.5 block text-sm font-medium text-slate-800">Số điện thoại người nhận <span className="text-rose-600">*</span></label>
               <input
+                id="checkout-customerPhone"
+                name="customerPhone"
+                autoComplete="shipping tel-national"
+                inputMode="numeric"
                 required
                 type="tel"
                 maxLength={20}
                 value={form.customerPhone}
                 onChange={(e) => setForm({ ...form, customerPhone: e.target.value })}
+                onBlur={() => touchContact('customerPhone')}
+                aria-invalid={Boolean(visibleContactError('customerPhone'))}
+                aria-describedby="checkout-phone-hint checkout-phone-error"
                 placeholder="Số điện thoại"
-                className="w-full rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-600/10"
+                className={`w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:ring-2 ${visibleContactError('customerPhone') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/10' : 'border-slate-200 focus:border-teal-600 focus:ring-teal-600/10'}`}
               />
+              <p id="checkout-phone-hint" className="mt-1 text-xs text-slate-500">Dùng số di động Việt Nam gồm 10 chữ số, đang liên lạc được. Không nhập chữ hoặc ký hiệu.</p>
+              {visibleContactError('customerPhone') && <p id="checkout-phone-error" role="alert" className="mt-1 text-xs text-rose-600">{visibleContactError('customerPhone')}</p>}
+              </div>
+              <div className="min-w-0 sm:col-span-2">
+              <label htmlFor="checkout-deliveryAddress" className="mb-1.5 block text-sm font-medium text-slate-800">Địa chỉ nhận hàng <span className="text-rose-600">*</span></label>
               <textarea
+                id="checkout-deliveryAddress"
+                name="deliveryAddress"
+                autoComplete="shipping street-address"
                 required
-                maxLength={500}
+                maxLength={255}
                 value={form.deliveryAddress}
-                onChange={(e) => setForm({ ...form, deliveryAddress: e.target.value })}
+                onChange={(e) => { setForm({ ...form, deliveryAddress: e.target.value }); setDeliveryLocation(null); }}
+                onBlur={() => touchContact('deliveryAddress')}
+                aria-invalid={Boolean(visibleContactError('deliveryAddress'))}
+                aria-describedby="checkout-address-hint checkout-address-error"
                 placeholder="Địa chỉ nhận hàng"
                 rows={3}
-                className="w-full resize-none rounded-xl border border-slate-200 px-4 py-3 text-sm outline-none transition focus:border-teal-600 focus:ring-2 focus:ring-teal-600/10"
+                className={`w-full resize-none rounded-xl border px-4 py-3 text-sm outline-none transition focus:ring-2 ${visibleContactError('deliveryAddress') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/10' : 'border-slate-200 focus:border-teal-600 focus:ring-teal-600/10'}`}
               />
+              <DeliveryAddressMap address={form.deliveryAddress} location={deliveryLocation} onSelect={(address, point) => { setForm((previous) => ({ ...previous, deliveryAddress: address })); setDeliveryLocation(point); }} />
+              <p id="checkout-address-hint" className="mt-1 text-xs text-slate-500">Ghi rõ số nhà/đường hoặc thôn/ấp, phường/xã và tỉnh/thành phố. Thêm tòa nhà, tầng, căn hộ nếu có.</p>
+              {visibleContactError('deliveryAddress') && <p id="checkout-address-error" role="alert" className="mt-1 text-xs text-rose-600">{visibleContactError('deliveryAddress')}</p>}
+              </div>
+              <p className="rounded-lg bg-sky-50 p-3 text-xs leading-relaxed text-slate-600 sm:col-span-2">Vui lòng kiểm tra chính xác họ tên, số điện thoại và địa chỉ của người nhận trước khi đặt hàng để cửa hàng liên hệ và giao đúng người.</p>
             </div>
 
-            <div className="mt-5">
+            <div className="flex min-w-0 flex-col rounded-2xl border border-slate-100 bg-slate-50/80 p-4 sm:p-5 lg:overflow-y-auto">
+            <div>
               <p className="mb-2 text-sm font-semibold text-slate-800">Phương thức thanh toán</p>
               <motion.label
                 whileHover={{ scale: 1.01 }}
@@ -840,7 +914,8 @@ export const ShopPage: React.FC = () => {
               </motion.label>
             </div>
 
-            <div className="mt-5 flex justify-between border-t pt-4 text-sm">
+            <div className="mt-5 border-t border-slate-200 pt-4 lg:mt-auto lg:pt-5">
+            <div className="flex items-center justify-between gap-3 text-sm">
               <span className="text-slate-600">Tổng thanh toán</span>
               <b className="text-lg text-[#287DA8]">{money(total)}</b>
             </div>
@@ -852,7 +927,7 @@ export const ShopPage: React.FC = () => {
               className="mt-4 w-full rounded-xl bg-[#287DA8] py-3 font-bold text-white shadow-sm transition hover:bg-[#206588] disabled:opacity-60"
             >
               {busy
-                ? 'Đang chuyển đến PayOS...'
+                ? form.paymentMethod === 'PAYOS' ? 'Đang chuyển đến PayOS...' : 'Đang đặt hàng...'
                 : form.paymentMethod === 'PAYOS'
                   ? 'Thanh toán PayOS'
                   : 'Xác nhận đặt hàng'}
@@ -861,6 +936,9 @@ export const ShopPage: React.FC = () => {
               <CheckCircle2 size={13} className="text-teal-600" />
               Thông tin đơn hàng được gửi an toàn đến cửa hàng
             </p>
+            </div>
+            </div>
+            </div>
           </motion.form>
         </div>
       )}
@@ -876,11 +954,21 @@ export const ShopPage: React.FC = () => {
         setNotice(`Đơn hàng #${recoveryOrder?.orderNumber || orderId} đã được chuyển sang thanh toán Tiền mặt khi nhận hàng (COD)!`);
       }}
       onCancelled={(orderId) => {
+        publishOrderEvent('ORDER_CANCELLED', { orderId, orderNumber: recoveryOrder?.orderNumber, status: 'CANCELLED', reason: 'Khách hàng hủy thanh toán PayOS' });
         try { sessionStorage.removeItem('pending_payos_order'); } catch {}
         setRecoveryOrder(null);
         setNotice(`Đơn hàng #${recoveryOrder?.orderNumber || orderId} đã được hủy theo yêu cầu của bạn.`);
       }}
     />
+    {receipt && <StorefrontReceipt order={receipt} loggedIn={isCustomerLoggedIn} paymentError={receipt.paymentMethod === 'PAYOS' ? notice : undefined} onClose={() => setReceipt(null)} />}
+    {busy && form.paymentMethod === 'PAYOS' && (
+      <div role="status" aria-live="polite" className="fixed inset-0 z-[110] grid place-items-center bg-slate-900/45 p-4">
+        <div className="flex items-center gap-3 rounded-2xl bg-white p-6 text-sm font-semibold text-slate-800 shadow-xl">
+          <RefreshCw aria-hidden="true" className="h-5 w-5 animate-spin text-[#287DA8]" />
+          Đang chuyển đến trang thanh toán PayOS…
+        </div>
+      </div>
+    )}
   </motion.main>
   );
 };

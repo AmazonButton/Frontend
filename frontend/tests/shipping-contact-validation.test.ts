@@ -32,6 +32,8 @@ const cases: Array<[ShippingContactField, string, boolean]> = [
       ['deliveryAddress', 'A '.repeat(129), false],
       ['deliveryAddress', 'Thôn Kiểm Thử, xã Kiểm Thử, tỉnh Kiểm Thử', true],
       ['deliveryAddress', 'Căn 2.03 (tầng 2), tòa A, 12/3 Đường Kiểm Thử', true],
+      ['deliveryAddress', 'Coffee & Tea, 12 Đường Kiểm Thử, Hồ Chí Minh', true],
+      ['deliveryAddress', 'QRFJ+23, Long Bình, Hồ Chí Minh', true],
       ['deliveryAddress', '  12/3 Đường Kiểm Thử\nphường Kiểm Thử, TP Hồ Chí Minh  ', true],
 ];
 for (const [field, value, valid] of cases) {

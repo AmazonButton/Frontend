@@ -18,6 +18,7 @@ import { StoreWalletPage } from './pages/store/StoreWalletPage';
 import { StoreAnalyticsPage } from './pages/store/StoreAnalyticsPage';
 import { CustomerHomePage } from './pages/customer/CustomerHomePage';
 import { CustomerOrdersPage } from './pages/customer/CustomerOrdersPage';
+import { CustomerRentalsPage } from './pages/customer/CustomerRentalsPage';
 import { ShopPage } from './pages/customer/ShopPage';
 import { AdminDashboard } from './pages/admin/AdminDashboard';
 import { AdminSecurityHubPage } from './pages/admin/AdminSecurityHubPage';
@@ -149,6 +150,7 @@ export const App: React.FC = () => {
             }
           >
             <Route path="/customer/home" element={<CustomerHomePage />} />
+            <Route path="/customer/rentals" element={<CustomerRentalsPage />} />
             <Route path="/customer/orders" element={<CustomerOrdersPage />} />
             <Route path="/customer/verification" element={<CustomerVerificationPage />} />
             <Route path="/customer/profile" element={<ProfilePage />} />

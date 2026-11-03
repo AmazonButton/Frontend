@@ -13,6 +13,9 @@ import {
   Cell,
 } from 'recharts';
 import { api } from '../../services/api';
+import { normalizeOrder } from '../../services/order-events';
+import { ShippingContact } from '../../components/orders/ShippingContact';
+import { toast } from '../../context/ToastContext';
 import { Order, Device, Product } from '../../types';
 import {
   TrendingUp,
@@ -36,8 +39,10 @@ import {
   FileSpreadsheet,
 } from 'lucide-react';
 import { useTheme } from '../../context/ThemeContext';
+import { useAuth } from '../../context/AuthContext';
 
 export const StoreAnalyticsPage: React.FC = () => {
+  const { token } = useAuth();
   const { theme } = useTheme();
   const isDark = theme === 'dark';
 
@@ -66,19 +71,26 @@ export const StoreAnalyticsPage: React.FC = () => {
       ]);
 
       if (orderRes.data?.success && Array.isArray(orderRes.data.data)) {
-        setOrders(orderRes.data.data);
+        setOrders(orderRes.data.data.map(normalizeOrder));
       }
       if (devRes.data?.success && Array.isArray(devRes.data.data)) {
         setDevices(devRes.data.data);
       }
       if (prodRes.data?.success && Array.isArray(prodRes.data.data)) {
-        setProducts(prodRes.data.data);
+        setProducts(
+          prodRes.data.data.map((p: any) => ({
+            ...p,
+            category: typeof p.category === 'object' && p.category !== null
+              ? (p.category.categoryName || p.category.name || 'Nhu yếu phẩm')
+              : (typeof p.category === 'string' ? p.category : 'Nhu yếu phẩm'),
+          }))
+        );
       }
       if (analyticsRes.data?.success && analyticsRes.data.data?.chartData) {
         setBackendChartData(analyticsRes.data.data.chartData);
       }
     } catch (err) {
-      console.error('Error fetching analytics data:', err);
+      toast.error('Không tải được dữ liệu thống kê. Vui lòng thử lại.');
     } finally {
       setLoading(false);
       setRefreshing(false);
@@ -86,8 +98,9 @@ export const StoreAnalyticsPage: React.FC = () => {
   };
 
   useEffect(() => {
+    if (!token) return;
     fetchData();
-  }, []);
+  }, [token]);
 
   const handleRefresh = () => {
     setRefreshing(true);
@@ -201,13 +214,19 @@ export const StoreAnalyticsPage: React.FC = () => {
       o.items?.forEach((item) => {
         // Try to match product category
         const prod = products.find((p) => p.name === item.productName || p.id === item.productId);
-        const cat = prod?.category || 'Nước uống';
-        if (!catMap[cat]) {
-          catMap[cat] = { name: cat, revenue: 0, quantity: 0 };
+        const rawCat = prod?.category;
+        const catName: string = typeof rawCat === 'string'
+          ? rawCat
+          : (rawCat && typeof rawCat === 'object' && ('categoryName' in (rawCat as any) ? (rawCat as any).categoryName : (rawCat as any).name))
+            ? String((rawCat as any).categoryName || (rawCat as any).name)
+            : 'Nước uống';
+
+        if (!catMap[catName]) {
+          catMap[catName] = { name: catName, revenue: 0, quantity: 0 };
         }
         const itemTotal = item.totalPrice || item.quantity * item.unitPrice || 0;
-        catMap[cat].revenue += itemTotal;
-        catMap[cat].quantity += item.quantity || 1;
+        catMap[catName].revenue += itemTotal;
+        catMap[catName].quantity += item.quantity || 1;
         totalCatRevenue += itemTotal;
       });
     });
@@ -320,9 +339,11 @@ export const StoreAnalyticsPage: React.FC = () => {
           const q = ledgerSearch.toLowerCase().trim();
           const matchNum = o.orderNumber?.toLowerCase().includes(q);
           const matchCust = o.customerName?.toLowerCase().includes(q);
+          const matchPhone = o.customerPhone?.toLowerCase().includes(q);
+          const matchAddress = o.deliveryAddress?.toLowerCase().includes(q);
           const matchDev = o.deviceId?.toLowerCase().includes(q);
           const matchItem = o.items?.some((it) => it.productName?.toLowerCase().includes(q));
-          return matchNum || matchCust || matchDev || matchItem;
+          return matchNum || matchCust || matchPhone || matchAddress || matchDev || matchItem;
         }
         return true;
       })
@@ -331,12 +352,12 @@ export const StoreAnalyticsPage: React.FC = () => {
 
   // Export CSV handler
   const handleExportCSV = () => {
-    const headers = ['Mã Đơn', 'Thời Gian', 'Khách Hàng', 'Số Điện Thoại', 'Địa Chỉ', 'Nút Bấm IoT', 'Sản Phẩm', 'Tổng Tiền (VNĐ)', 'Trạng Thái'];
+    const headers = ['Mã Đơn', 'Thời Gian', 'Người Nhận', 'Số Điện Thoại', 'Địa Chỉ', 'Nút Bấm IoT', 'Sản Phẩm', 'Tổng Tiền (VNĐ)', 'Trạng Thái'];
     const rows = filteredOrders.map((o) => [
       `"${o.orderNumber}"`,
       `"${new Date(o.createdAt).toLocaleString('vi-VN')}"`,
-      `"${o.customerName || 'Khách vãng lai'}"`,
-      `"${o.customerPhone || ''}"`,
+      `"${(o.customerName || 'Chưa có tên người nhận').replace(/"/g, '""')}"`,
+      `"${(o.customerPhone || '').replace(/"/g, '""')}"`,
       `"${(o.deliveryAddress || '').replace(/"/g, '""')}"`,
       `"${o.deviceId || 'Đặt trực tiếp'}"`,
       `"${(o.items?.map((it) => `${it.productName} (x${it.quantity})`).join(', ') || '').replace(/"/g, '""')}"`,
@@ -820,7 +841,7 @@ export const StoreAnalyticsPage: React.FC = () => {
               <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
               <input
                 type="text"
-                placeholder="Tìm mã đơn, khách hàng..."
+                placeholder="Tìm mã đơn, tên, SĐT, địa chỉ..."
                 value={ledgerSearch}
                 onChange={(e) => setLedgerSearch(e.target.value)}
                 className="w-full pl-8 pr-2 py-1 text-xs rounded-md bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-400 transition-colors"
@@ -845,7 +866,7 @@ export const StoreAnalyticsPage: React.FC = () => {
             <thead>
               <tr className="border-b border-zinc-200 dark:border-zinc-800 text-[10.5px] uppercase font-mono text-zinc-400 dark:text-zinc-500">
                 <th className="py-2.5 px-3">Mã Đơn & Thời Gian</th>
-                <th className="py-2.5 px-3">Khách Hàng</th>
+                <th className="py-2.5 px-3">Thông Tin Người Nhận</th>
                 <th className="py-2.5 px-3">Kênh Đặt (Nút IoT)</th>
                 <th className="py-2.5 px-3">Sản Phẩm Đặt</th>
                 <th className="py-2.5 px-3 text-right">Tổng Tiền</th>
@@ -879,13 +900,8 @@ export const StoreAnalyticsPage: React.FC = () => {
                           })}
                         </div>
                       </td>
-                      <td className="py-2.5 px-3">
-                        <div className="font-medium text-zinc-800 dark:text-zinc-200">
-                          {order.customerName || 'Khách vãng lai'}
-                        </div>
-                        <div className="text-[10px] text-zinc-400 truncate max-w-[160px]" title={order.deliveryAddress}>
-                          {order.deliveryAddress || 'Tại cửa hàng'}
-                        </div>
+                      <td className="py-2.5 px-3 min-w-[220px] max-w-[320px]">
+                        <ShippingContact order={order} />
                       </td>
                       <td className="py-2.5 px-3 font-mono">
                         {order.deviceId ? (

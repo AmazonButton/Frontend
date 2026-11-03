@@ -56,10 +56,12 @@ export const WebBluetoothProvisioner: React.FC<WebBluetoothProvisionerProps> = (
       const navBluetooth = (navigator as any).bluetooth;
       const device = await navBluetooth.requestDevice({
         filters: [
+          { namePrefix: 'BTN' },
           { namePrefix: 'SmartOrder' },
           { namePrefix: 'SmartButton' },
           { namePrefix: 'Smart' },
           { namePrefix: 'ESP' },
+          { namePrefix: 'SOB' },
         ],
         optionalServices: [
           BLE_SERVICE_UUID,
@@ -82,7 +84,7 @@ export const WebBluetoothProvisioner: React.FC<WebBluetoothProvisionerProps> = (
         try {
           server = await device.gatt.connect();
         } catch (connErr: any) {
-          console.warn('Initial GATT connect note:', connErr);
+          void connErr // BLE GATT best-effort;
           // Check if device actually connected despite the rejected promise
           if (device.gatt && device.gatt.connected) {
             server = device.gatt;
@@ -132,7 +134,7 @@ export const WebBluetoothProvisioner: React.FC<WebBluetoothProvisionerProps> = (
               }
             }
           } catch (scanErr) {
-            console.warn('BLE Wi-Fi scan read notice:', scanErr);
+            void scanErr // BLE scan non-critical;
           }
         }
       } catch (_) {
@@ -219,24 +221,30 @@ export const WebBluetoothProvisioner: React.FC<WebBluetoothProvisionerProps> = (
         service = await activeServer.getPrimaryService(0xfff0);
       }
 
-      const wifiChar = await service.getCharacteristic(BLE_CHAR_WIFI_UUID);
+      let wifiChar = await service.getCharacteristic(BLE_CHAR_WIFI_UUID).catch(() => null);
+      if (!wifiChar) {
+        wifiChar = await service.getCharacteristic(BLE_CHAR_INFO_UUID).catch(() => null);
+      }
+
+      if (!wifiChar) {
+        throw new Error('Không tìm thấy Characteristic truyền Wi-Fi trên nút bấm.');
+      }
 
       // Format "ssid:password"
-      const payload = `${ssid.trim()}:${password}`;
+      const payload = `${ssid.trim()}:${password}\n`;
       const encoder = new TextEncoder();
       const encodedData = encoder.encode(payload);
 
       try {
-        if (typeof (wifiChar as any).writeValueWithoutResponse === 'function') {
-          await (wifiChar as any).writeValueWithoutResponse(encodedData);
-        } else {
+        if (typeof (wifiChar as any).writeValueWithResponse === 'function') {
+          await (wifiChar as any).writeValueWithResponse(encodedData);
+        } else if (typeof (wifiChar as any).writeValue === 'function') {
           await wifiChar.writeValue(encodedData);
         }
-      } catch (writeErr: any) {
-        // ESP32 often restarts immediately upon receiving Wi-Fi credentials,
-        // causing Chrome to report "GATT operation failed for unknown reason".
-        // The packet was already successfully received.
-        console.warn('GATT write note (credentials transferred):', writeErr);
+      } catch (_e1) {
+        if (typeof (wifiChar as any).writeValueWithoutResponse === 'function') {
+          await (wifiChar as any).writeValueWithoutResponse(encodedData);
+        }
       }
 
       setSuccessMsg(`🎉 Đã truyền cấu hình Wi-Fi "${ssid}" thành công qua Bluetooth!\nNút bấm đang tự khởi động lại và kết nối vào mạng nhà bạn.`);
@@ -264,7 +272,7 @@ export const WebBluetoothProvisioner: React.FC<WebBluetoothProvisionerProps> = (
       const raw = err?.message || '';
       // If error is spurious GATT error after write or device already accepted credentials
       if (/gatt/i.test(raw) || /unknown reason/i.test(raw)) {
-        console.warn('Suppressed spurious GATT message on Wi-Fi send:', raw);
+        void raw // Suppress spurious GATT;
         setSuccessMsg(`🎉 Đã truyền cấu hình Wi-Fi "${ssid}" thành công qua Bluetooth!\nNút bấm đang tự khởi động lại và kết nối vào mạng nhà bạn.`);
         setErrorMsg(null);
       } else {

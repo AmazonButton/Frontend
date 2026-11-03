@@ -7,6 +7,7 @@ import {
   ChevronLeft,
   ChevronRight,
   CircleAlert,
+  CheckCircle2,
   Clock3,
   Banknote,
   CreditCard,
@@ -23,6 +24,7 @@ import { api } from '../../services/api';
 import { paymentsService } from '../../services/payments.service';
 import { toast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
+import { useSound } from '../../context/OrderSoundContext';
 import { getSocket, subscribeToCustomer } from '../../services/socket';
 import { Order } from '../../types';
 import { normalizeOrder, ORDER_EVENT, publishOrderEvent } from '../../services/order-events';
@@ -50,6 +52,7 @@ const formatDate = (value: string) =>
   new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
 
 export const CustomerOrdersPage: React.FC = () => {
+  const { playOrderChime } = useSound();
   const { user } = useAuth();
   const location = useLocation();
   const [orders, setOrders] = useState<Order[]>([]);
@@ -127,14 +130,20 @@ export const CustomerOrdersPage: React.FC = () => {
     };
 
     const handleOrderCreated = (newOrderPayload?: any) => {
-      if (newOrderPayload && (newOrderPayload.order || newOrderPayload.id)) {
-        const normalized = normalizeOrder(newOrderPayload.order || newOrderPayload);
+      // 1. Phát âm thanh chuông "Ting Ting" thông báo
+      playOrderChime(true);
+
+      const target = newOrderPayload?.order || newOrderPayload;
+      if (target && (target.id || target.orderId || target.orderNumber || target.orderCode)) {
+        const normalized = normalizeOrder(target);
+        // 2. Chèn ngay đơn hàng mới lên đầu danh sách mà KHÔNG CẦN F5 tải lại trang
         setOrders((prev) => {
           const exists = prev.some((o) => o.id === normalized.id || o.orderNumber === normalized.orderNumber);
           if (exists) return prev;
           return [normalized, ...prev];
         });
-        const code = normalized.orderCode || normalized.orderNumber || normalized.id;
+        // 3. Hiện toast thông báo góc màn hình
+        const code = (normalized as any).orderCode || normalized.orderNumber || normalized.id;
         toast.success(`Đã nhận đơn hàng mới #${code}!`);
       }
       loadOrders();
@@ -200,7 +209,13 @@ export const CustomerOrdersPage: React.FC = () => {
       setExpandedOrder(null);
       setOrderToCancel(null);
     } catch (requestError: any) {
-      toast.error(requestError.response?.data?.message || 'Không thể hủy đơn hàng lúc này.');
+      const errorMsg = requestError.response?.data?.message || requestError.message;
+      if (requestError.response?.status === 400 && /PENDING|CONFIRMED|xác nhận|tiếp nhận/i.test(errorMsg)) {
+        toast.warning(errorMsg || 'Cửa hàng đã tiếp nhận đơn hàng này, không thể tự hủy lúc này.');
+      } else {
+        toast.error(errorMsg || 'Không thể hủy đơn hàng lúc này.');
+      }
+      setOrderToCancel(null);
       await loadOrders();
     } finally {
       setIsCancelling(false);
@@ -362,9 +377,8 @@ export const CustomerOrdersPage: React.FC = () => {
 
                 const isCancelled = ['CANCELLED', 'REJECTED'].includes(currentStatus);
                 const isUnpaid = !isCancelled && (order.paymentStatus === 'UNPAID' || (order.paymentStatus !== 'PAID' && order.paymentMethod !== 'COD' && order.paymentMethod !== 'CASH_ON_DELIVERY'));
-                const canCancel = !isCancelled && (
-                  isUnpaid || ['PENDING', 'CONFIRMED'].includes(currentStatus)
-                );
+                // Khách hàng có thể tự hủy đơn khi đơn đang ở trạng thái PENDING (chờ cửa hàng tiếp nhận)
+                const canCancel = !isCancelled && currentStatus === 'PENDING';
                 const canPayNow = isUnpaid && order.paymentMethod === 'PAYOS';
                 const itemSummary = order.items.slice(0, 2).map((item) => `${item.quantity}× ${item.productName}`).join(', ');
                 return (
@@ -425,8 +439,10 @@ export const CustomerOrdersPage: React.FC = () => {
                             {(canCancel || canPayNow) && (
                               <div className="mt-4 pt-3 border-t border-slate-200/70 dark:border-zinc-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                                 <p className="text-[11px] text-slate-400">
-                                  {isUnpaid
-                                    ? 'Đơn hàng chưa hoàn tất thanh toán. Bạn có thể thanh toán ngay hoặc hủy đơn hàng.'
+                                  {canPayNow
+                                    ? canCancel
+                                      ? 'Đơn hàng chưa hoàn tất thanh toán. Bạn có thể thanh toán ngay hoặc hủy đơn hàng.'
+                                      : 'Đơn hàng chưa hoàn tất thanh toán. Bạn có thể thanh toán ngay. Nếu cần hủy, vui lòng liên hệ cửa hàng.'
                                     : 'Đơn hàng đang chờ xử lý, bạn vẫn có thể hủy đơn nếu muốn thay đổi.'}
                                 </p>
                                 <div className="flex items-center gap-2 self-end sm:self-auto">
@@ -499,6 +515,21 @@ export const CustomerOrdersPage: React.FC = () => {
                                     </button>
                                   )}
                                 </div>
+                              </div>
+                            )}
+                            {['CONFIRMED', 'PREPARING', 'SHIPPING'].includes(currentStatus) && (
+                              <div className="mt-4 pt-3 border-t border-slate-200/70 dark:border-zinc-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
+                                <span className="text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5">
+                                  <CheckCircle2 className="w-4 h-4 shrink-0 text-blue-500" />
+                                  {currentStatus === 'CONFIRMED'
+                                    ? 'Cửa hàng đã xác nhận đơn hàng và đang chuẩn bị giao.'
+                                    : currentStatus === 'PREPARING'
+                                    ? 'Đơn hàng đang được đóng gói chuẩn bị giao.'
+                                    : 'Đơn hàng đang trên đường giao đến bạn.'}
+                                </span>
+                                <span className="text-[11px] text-slate-400 dark:text-zinc-500">
+                                  Để hủy hoặc đổi địa chỉ, vui lòng liên hệ trực tiếp cửa hàng.
+                                </span>
                               </div>
                             )}
                           </div>

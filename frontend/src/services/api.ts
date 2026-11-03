@@ -95,15 +95,15 @@ let activeRefreshPromise: Promise<string | null> | null = null;
 /**
  * Proactively get a valid JWT, refreshing it if expired and refreshToken is present
  */
-export async function getOrRefreshValidToken(): Promise<string | null> {
+export async function getOrRefreshValidToken(forceRefresh = false): Promise<string | null> {
   const token = localStorage.getItem('smart_order_token');
   const refreshToken = localStorage.getItem('smart_order_refresh_token');
 
-  if (token && !isTokenExpired(token)) {
+  if (!forceRefresh && token && !isTokenExpired(token)) {
     return token;
   }
 
-  // Token is missing or expired, but we have a valid refreshToken
+  // Token is missing, expired, or force refresh requested, and we have a valid refreshToken
   if (refreshToken) {
     if (!activeRefreshPromise) {
       activeRefreshPromise = (async () => {
@@ -113,25 +113,34 @@ export async function getOrRefreshValidToken(): Promise<string | null> {
             refreshToken,
           });
 
-          if (res.data?.success && (res.data?.accessToken || res.data?.token)) {
-            const newToken = res.data.accessToken || res.data.token;
+          const newToken =
+            res.data?.accessToken ||
+            res.data?.token ||
+            res.data?.data?.accessToken ||
+            res.data?.data?.token;
+
+          if (newToken) {
             localStorage.setItem('smart_order_token', newToken);
-            if (res.data.refreshToken) {
-              localStorage.setItem('smart_order_refresh_token', res.data.refreshToken);
+            const newRefreshToken = res.data?.refreshToken || res.data?.data?.refreshToken;
+            if (newRefreshToken) {
+              localStorage.setItem('smart_order_refresh_token', newRefreshToken);
             }
             api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
             return newToken;
           }
         } catch (err: any) {
-          // If refresh token is rejected (401/400) or fails, wipe client auth storage immediately
-          // so we don't repeat failed refresh calls on every subsequent request.
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.removeItem('smart_order_token');
-              localStorage.removeItem('smart_order_refresh_token');
-              localStorage.removeItem('smart_order_user');
-              delete api.defaults.headers.common['Authorization'];
-            } catch (_) {}
+          const status = err?.response?.status;
+          // ONLY clear tokens if server explicitly rejected refresh token (401/403/400).
+          // Do not wipe credentials on transient network drops or 5xx cold-starts.
+          if (status === 401 || status === 403 || status === 400) {
+            if (typeof window !== 'undefined') {
+              try {
+                localStorage.removeItem('smart_order_token');
+                localStorage.removeItem('smart_order_refresh_token');
+                localStorage.removeItem('smart_order_user');
+                delete api.defaults.headers.common['Authorization'];
+              } catch (_) {}
+            }
           }
         } finally {
           activeRefreshPromise = null;

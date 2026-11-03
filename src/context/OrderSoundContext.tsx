@@ -29,6 +29,7 @@ const SoundContext = createContext<SoundContextType | undefined>(undefined);
 // Shared singleton AudioContext with user-gesture auto-resume
 let sharedAudioCtx: AudioContext | null = null;
 let currentPlayingAudio: HTMLAudioElement | null = null;
+let currentPlayPromise: Promise<void> | null = null;
 let lastAnnounceTimestamp = 0;
 
 const getAudioContext = (): AudioContext | null => {
@@ -43,7 +44,7 @@ const getAudioContext = (): AudioContext | null => {
     }
     return sharedAudioCtx;
   } catch (e) {
-    console.warn('Cannot init AudioContext:', e);
+    void e // AudioContext may be blocked by browser policy;
     return null;
   }
 };
@@ -134,59 +135,38 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
           osc.start(now);
           osc.stop(now + duration);
         } catch (err) {
-          console.warn('Audio tone play error:', err);
+          void err // Audio tone is non-critical;
         }
       }, delay);
     } catch (e) {
-      console.warn('Audio playback not permitted yet:', e);
+      void e // Autoplay policy;
+    }
+  };
+
+  // Helper phát giọng đọc tự nhiên qua Web SpeechSynthesis
+  const speakViaSynthesis = (textToSpeak: string) => {
+    if ('speechSynthesis' in window) {
+      try {
+        window.speechSynthesis.cancel();
+        const utterance = new SpeechSynthesisUtterance(textToSpeak);
+        utterance.lang = 'vi-VN';
+        utterance.rate = 1.0;
+        const voices = window.speechSynthesis.getVoices();
+        const viVoice = voices.find((v) => v.lang === 'vi-VN' || v.lang.includes('vi'));
+        if (viVoice) utterance.voice = viVoice;
+        window.speechSynthesis.speak(utterance);
+      } catch (e) {
+        void e // TTS is non-critical;
+      }
     }
   };
 
   // 🎙️ Phát giọng đọc tiếng Việt gốc (Chuẩn Google tự nhiên, trong trẻo, không bị méo/vang)
   const playVietnameseVoiceAudio = (text: string) => {
     if (!isVoiceEnabledRef.current) return;
-
-    // Dừng ngay lập tức bất kỳ âm thanh nào đang phát trước đó
-    if (currentPlayingAudio) {
-      try {
-        currentPlayingAudio.pause();
-        currentPlayingAudio.currentTime = 0;
-      } catch (e) {}
-      currentPlayingAudio = null;
-    }
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
-    }
-
-    try {
-      const audioUrl = `${API_URL}/api/tts?text=${encodeURIComponent(text)}`;
-      const audio = new Audio(audioUrl);
-      currentPlayingAudio = audio;
-
-      audio.onended = () => {
-        if (currentPlayingAudio === audio) {
-          currentPlayingAudio = null;
-        }
-      };
-
-      const playPromise = audio.play();
-      if (playPromise !== undefined) {
-        playPromise.catch((err) => {
-          console.warn('Audio stream failed, fallback to SpeechSynthesis:', err);
-          if ('speechSynthesis' in window) {
-            window.speechSynthesis.cancel();
-            const utterance = new SpeechSynthesisUtterance(text);
-            utterance.lang = 'vi-VN';
-            utterance.rate = 1.0;
-            const voices = window.speechSynthesis.getVoices();
-            const viVoice = voices.find((v) => v.lang === 'vi-VN' || v.lang.includes('vi'));
-            if (viVoice) utterance.voice = viVoice;
-            window.speechSynthesis.speak(utterance);
-          }
-        });
-      }
-    } catch (e) {
-      console.warn('TTS playback error:', e);
+      speakViaSynthesis(text);
     }
   };
 
@@ -237,7 +217,7 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       if (isVoiceEnabledRef.current) {
         setTimeout(() => {
-          playVietnameseVoiceAudio('Đơn hàng mới từ nút bấm đã được đặt thành công!');
+          playVietnameseVoiceAudio('Đơn hàng của bạn đã được tạo thành công!');
         }, 500);
       }
     } else {
@@ -254,7 +234,7 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
     if (isVoiceEnabledRef.current) {
       setTimeout(() => {
-        playVietnameseVoiceAudio('Đơn hàng đã được hủy qua nút bấm.');
+        playVietnameseVoiceAudio('Đơn hàng đã được hủy.');
       }, 400);
     }
   };
@@ -285,44 +265,13 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     });
   };
 
-  // WebSocket Live Real-time Listener
+  // Order sounds are owned by the notification bell, which deduplicates
+  // socket, HTTP and reconciliation events before announcing them.
   useEffect(() => {
     const socket = getSocket();
-
-    const handleOrderCreated = (payload: any) => {
-      console.log('🔔 [LIVE AUDIO] New order triggered! Payload:', payload);
-      const isStore = user && ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN'].includes(user.role);
-
-      if (isStore) {
-        announceStoreOrder({
-          customerName: payload?.customerName || payload?.order?.customerName,
-          productName: payload?.productName,
-          quantity: payload?.quantity,
-          totalAmount: payload?.order?.totalAmount,
-          orderNumber: payload?.order?.orderNumber,
-        });
-      } else {
-        playOrderChime(true);
-      }
-    };
-
-    const handleOrderCancelled = () => {
-      playCancelChime();
-    };
-
-    const handleButtonPressing = () => {
-      playButtonClickSound();
-    };
-
-    socket.on('ORDER_CREATED', handleOrderCreated);
-    socket.on('ORDER_CANCELLED', handleOrderCancelled);
+    const handleButtonPressing = () => playButtonClickSound();
     socket.on('BUTTON_PRESSING', handleButtonPressing);
-
-    return () => {
-      socket.off('ORDER_CREATED', handleOrderCreated);
-      socket.off('ORDER_CANCELLED', handleOrderCancelled);
-      socket.off('BUTTON_PRESSING', handleButtonPressing);
-    };
+    return () => { socket.off('BUTTON_PRESSING', handleButtonPressing); };
   }, [user]);
 
   return (

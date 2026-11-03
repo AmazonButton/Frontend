@@ -200,6 +200,8 @@ export interface Order {
   paidAt?: string | null;
   totalAmount: number;
   deliveryAddress: string;
+  shippingLatitude?: number | null;
+  shippingLongitude?: number | null;
   customerPhone: string;
   customerName: string;
   cancelExpiresAt?: string | null;

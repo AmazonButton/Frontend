@@ -83,7 +83,6 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
     }
 
     if (failedRequests.length > 0) {
-      console.error('Failed to load templates data:', failedRequests);
       setLoadError('Một phần dữ liệu chưa tải được. Hệ thống sẽ tự thử lại.');
       if (attempt < 2) {
         window.setTimeout(() => void fetchData(attempt + 1), 1000 * (attempt + 1));

@@ -1,6 +1,7 @@
-import React, { useState, useEffect, useMemo, useRef } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
+import { useSearchParams } from 'react-router-dom';
 
 const modalBackdropVariants: Variants = {
   hidden: { opacity: 0 },
@@ -36,6 +37,7 @@ const modalDialogVariants: Variants = {
 };
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { api } from '../../services/api';
+import { rentalsService, RentalPackageItem } from '../../services/rentals.service';
 import { toast } from '../../context/ToastContext';
 import { Store, AuditLog } from '../../types';
 import {
@@ -80,6 +82,11 @@ import {
   FileText,
   ArrowRight,
   Check,
+  ShieldAlert,
+  ShieldCheck,
+  Lock,
+  RotateCcw,
+  AlertTriangle,
 } from 'lucide-react';
 import { STORE_CATALOG_PRODUCTS, StoreCatalogItem } from '../../data/storeProductsData';
 import { AnalyticsChart } from '../../components/AnalyticsChart';
@@ -287,38 +294,132 @@ const renderAuditLogDetails = (log: AuditLog) => {
 };
 
 export const AdminDashboard: React.FC = () => {
+  const [searchParams, setSearchParams] = useSearchParams();
   // Navigation tabs organized sequentially by physical IoT operational lifecycle
   const [activeTab, setActiveTab] = useState<
-    'OVERVIEW' | 'STORES' | 'CATALOG' | 'DEVICES' | 'RBAC' | 'TELEMETRY' | 'ANALYTICS' | 'NOTIFICATIONS'
-  >('OVERVIEW');
-
-  // Ref for mouse wheel horizontal scrolling on the navigation tabs
-  const navTabsRef = useRef<HTMLElement | null>(null);
+    'OVERVIEW' | 'STORES' | 'PLANS' | 'RENTALS' | 'CATALOG' | 'DEVICES' | 'RBAC' | 'TELEMETRY' | 'ANALYTICS' | 'NOTIFICATIONS' | 'SECURITY'
+  >(() => {
+    const section = searchParams.get('section');
+    return ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS', 'SECURITY'].includes(section || '')
+      ? section as any
+      : 'OVERVIEW';
+  });
 
   useEffect(() => {
-    const el = navTabsRef.current;
-    if (!el) return;
+    const section = searchParams.get('section');
+    if (section && ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS', 'SECURITY'].includes(section)) {
+      setActiveTab(section as any);
+    } else if (!section) {
+      setActiveTab('OVERVIEW');
+    }
+  }, [searchParams]);
 
-    const onWheel = (e: WheelEvent) => {
-      if (e.deltaY !== 0) {
-        e.preventDefault();
-        el.scrollLeft += e.deltaY;
-      }
-    };
-
-    el.addEventListener('wheel', onWheel, { passive: false });
-    return () => {
-      el.removeEventListener('wheel', onWheel);
-    };
-  }, []);
+  const selectTab = (tab: typeof activeTab) => {
+    setActiveTab(tab);
+    setSearchParams(tab === 'OVERVIEW' ? {} : { section: tab });
+  };
 
   const [pendingStores, setPendingStores] = useState<Store[]>([]);
+  const [subscriptionPlans, setSubscriptionPlans] = useState<any[]>([]);
+  const [plansLoading, setPlansLoading] = useState(false);
+  const [planSaving, setPlanSaving] = useState(false);
+  const [plansSubTab, setPlansSubTab] = useState<'STORE_PLANS' | 'RENTAL_PACKAGES'>('STORE_PLANS');
+  const [rentalPackages, setRentalPackages] = useState<RentalPackageItem[]>([]);
+  const [rentalPackagesLoading, setRentalPackagesLoading] = useState(false);
+  const [rentalPackageSaving, setRentalPackageSaving] = useState(false);
+  const [newRentalPackage, setNewRentalPackage] = useState({
+    packageCode: '',
+    packageName: '',
+    description: '',
+    buttonQuantity: '1',
+    monthlyPrice: '30000',
+    depositFee: '100000',
+  });
+
+  const loadRentalPackages = async () => {
+    setRentalPackagesLoading(true);
+    try {
+      const data = await rentalsService.adminListPackages();
+      setRentalPackages(data || []);
+    } catch (err: any) {
+      toast.error('Không thể tải danh sách gói thuê nút.');
+    } finally {
+      setRentalPackagesLoading(false);
+    }
+  };
+
+  const handleCreateRentalPackage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRentalPackage.packageCode.trim() || !newRentalPackage.packageName.trim()) {
+      toast.warning('Vui lòng điền đầy đủ mã gói và tên gói thuê.');
+      return;
+    }
+    const btnQty = Number(newRentalPackage.buttonQuantity);
+    const mPrice = Number(newRentalPackage.monthlyPrice);
+    const dFee = Number(newRentalPackage.depositFee);
+    if (btnQty < 1 || mPrice < 0 || dFee < 0) {
+      toast.warning('Số lượng nút bấm và giá tiền phải hợp lệ (>= 0).');
+      return;
+    }
+    setRentalPackageSaving(true);
+    try {
+      await rentalsService.adminCreatePackage({
+        packageCode: newRentalPackage.packageCode.trim().toUpperCase(),
+        packageName: newRentalPackage.packageName.trim(),
+        description: newRentalPackage.description.trim() || undefined,
+        buttonQuantity: btnQty,
+        monthlyPrice: mPrice,
+        depositFee: dFee,
+      });
+      toast.success('Đã tạo gói thuê nút IoT thành công! Dữ liệu đã lưu trực tiếp vào cơ sở dữ liệu thật.');
+      setNewRentalPackage({
+        packageCode: '',
+        packageName: '',
+        description: '',
+        buttonQuantity: '1',
+        monthlyPrice: '30000',
+        depositFee: '100000',
+      });
+      await loadRentalPackages();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Không thể tạo gói thuê nút.');
+    } finally {
+      setRentalPackageSaving(false);
+    }
+  };
+
+  const handleRentalPackageActiveChange = async (pkg: RentalPackageItem) => {
+    const pkgId = pkg.packageId || (pkg as any).id;
+    if (!pkgId) return;
+    const nextActive = !Boolean(pkg.isActive);
+    try {
+      await rentalsService.adminUpdatePackage(pkgId, { isActive: nextActive });
+      setRentalPackages((current) =>
+        current.map((item) =>
+          String(item.packageId || item.id) === String(pkgId) ? { ...item, isActive: nextActive } : item
+        )
+      );
+      toast.success(nextActive ? 'Đã kích hoạt gói thuê nút.' : 'Đã tạm dừng gói thuê nút.');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không thể cập nhật trạng thái gói thuê.');
+    }
+  };
+
+  const [newPlan, setNewPlan] = useState({
+    planCode: '',
+    planName: '',
+    description: '',
+    price: '0',
+    durationDays: '30',
+    maxProducts: '50',
+  });
   const [stats, setStats] = useState<any>(null);
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(DEFAULT_AUDIT_LOGS);
   const [loading, setLoading] = useState(true);
 
   // Reject modal state
   const [rejectingStoreId, setRejectingStoreId] = useState<string | null>(null);
+  const [storeAction, setStoreAction] = useState<'REJECT' | 'SUSPEND'>('REJECT');
   const [rejectReason, setRejectReason] = useState('');
 
   // Device Batch Inventory & Allocation State
@@ -331,6 +432,15 @@ export const AdminDashboard: React.FC = () => {
   const [batchPrefix, setBatchPrefix] = useState('BTN');
   const [selectedStoreId, setSelectedStoreId] = useState('');
   const [isProcessingBatch, setIsProcessingBatch] = useState(false);
+
+  // Security Hub & Incidents State (GET /admin/security/devices)
+  const [securityIncidents, setSecurityIncidents] = useState<any[]>([]);
+
+  // Factory Reset Device Modal State (POST /devices/:id/factory-reset)
+  const [showFactoryResetModal, setShowFactoryResetModal] = useState(false);
+  const [resettingDevice, setResettingDevice] = useState<any | null>(null);
+  const [resetDeviceIdInput, setResetDeviceIdInput] = useState('');
+  const [isFactoryResetting, setIsFactoryResetting] = useState(false);
 
   // =========================================================================
   // 4.2.1 RBAC User Management State
@@ -414,7 +524,8 @@ export const AdminDashboard: React.FC = () => {
     rejectingStoreId ||
     showBatchModal ||
     showAllocateModal ||
-    showAddProductModal
+    showAddProductModal ||
+    showFactoryResetModal
   );
   useBodyScrollLock(isAnyAdminModalOpen);
 
@@ -528,13 +639,15 @@ export const AdminDashboard: React.FC = () => {
 
   const fetchAdminData = async () => {
     try {
-      const [pendingRes, statsRes, logsRes, unassignedRes, storesRes, usersRes] = await Promise.all([
+      const [pendingRes, statsRes, logsRes, unassignedRes, storesRes, usersRes, secRes, plansRes] = await Promise.all([
         api.get('/admin/stores/pending'),
         api.get('/admin/stats'),
         api.get('/admin/audit-logs'),
         api.get('/devices/unassigned'),
         api.get('/admin/stores'),
         api.get('/admin/users').catch(() => ({ data: { success: false, data: [] } })),
+        api.get('/admin/security/devices').catch(() => ({ data: { success: false, data: [] } })),
+        api.get('/admin/plans').catch(() => ({ data: { success: false, data: [] } })),
       ]);
 
       if (pendingRes.data.success) setPendingStores(pendingRes.data.data);
@@ -553,11 +666,23 @@ export const AdminDashboard: React.FC = () => {
       }
       if (unassignedRes.data.success) setUnassignedDevices(unassignedRes.data.data || []);
       if (storesRes.data.success) setAllStores(storesRes.data.data || []);
-      if (usersRes.data?.success && usersRes.data.data.length > 0) {
-        setUsersList(usersRes.data.data);
+      if (usersRes.data?.success && Array.isArray(usersRes.data.data) && usersRes.data.data.length > 0) {
+        const mapped = usersRes.data.data.map((u: any) => ({
+          ...u,
+          id: String(u.id || u.userId),
+          userId: String(u.userId || u.id),
+          isActive: u.isActive !== undefined ? Boolean(u.isActive) : u.status === 'ACTIVE',
+        }));
+        setUsersList(mapped);
+      }
+      if (secRes?.data?.success && Array.isArray(secRes.data.data)) {
+        setSecurityIncidents(secRes.data.data);
+      }
+      if (plansRes?.data?.success && Array.isArray(plansRes.data.data)) {
+        setSubscriptionPlans(plansRes.data.data);
       }
     } catch (e) {
-      console.error('Failed to load admin portal data:', e);
+      toast.error('Không tải được dữ liệu admin. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
@@ -588,13 +713,79 @@ export const AdminDashboard: React.FC = () => {
         reason: rejectReason,
       });
       if (res.data.success) {
-        toast.info('Đã từ chối đơn đăng ký cửa hàng');
+        toast.info(storeAction === 'SUSPEND' ? 'Đã ngừng hoạt động cửa hàng' : 'Đã từ chối đơn đăng ký cửa hàng');
         setRejectingStoreId(null);
         setRejectReason('');
+        setStoreAction('REJECT');
         fetchAdminData();
       }
     } catch (err: any) {
       toast.error(err.response?.data?.message || 'Không thể từ chối');
+    }
+  };
+
+  const openStoreActionModal = (storeId: string, action: 'REJECT' | 'SUSPEND') => {
+    setStoreAction(action);
+    setRejectReason('');
+    setRejectingStoreId(storeId);
+  };
+
+  const loadSubscriptionPlans = async () => {
+    setPlansLoading(true);
+    try {
+      const res = await api.get('/admin/plans');
+      if (res.data?.success && Array.isArray(res.data.data)) {
+        setSubscriptionPlans(res.data.data);
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không thể tải danh sách gói dịch vụ.');
+    } finally {
+      setPlansLoading(false);
+    }
+  };
+
+  const handleCreatePlan = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (planSaving) return;
+    const payload = {
+      planCode: newPlan.planCode.trim().toUpperCase(),
+      planName: newPlan.planName.trim(),
+      description: newPlan.description.trim() || undefined,
+      price: Number(newPlan.price),
+      durationDays: Number(newPlan.durationDays),
+      maxProducts: Number(newPlan.maxProducts),
+    };
+    if (!payload.planCode || !payload.planName || payload.price < 0 || payload.durationDays < 1 || payload.maxProducts < 1) {
+      toast.warning('Vui lòng nhập mã, tên, thời hạn và giới hạn sản phẩm hợp lệ.');
+      return;
+    }
+    setPlanSaving(true);
+    try {
+      const res = await api.post('/admin/plans', payload);
+      if (!res.data?.success) throw new Error(res.data?.message || 'Không thể tạo gói.');
+      setNewPlan({ planCode: '', planName: '', description: '', price: '0', durationDays: '30', maxProducts: '50' });
+      toast.success(res.data.message || 'Đã tạo gói dịch vụ. Gói mới đang hoạt động.');
+      await loadSubscriptionPlans();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Không thể tạo gói dịch vụ.');
+    } finally {
+      setPlanSaving(false);
+    }
+  };
+
+  const handlePlanActiveChange = async (plan: any) => {
+    const planId = plan.planId || plan.id;
+    if (!planId) return;
+    const nextActive = !Boolean(plan.isActive);
+    try {
+      const res = await api.put(`/admin/plans/${encodeURIComponent(String(planId))}`, { isActive: nextActive });
+      if (!res.data?.success) throw new Error(res.data?.message || 'Không thể cập nhật gói.');
+      setSubscriptionPlans((current) => current.map((item) =>
+        String(item.planId || item.id) === String(planId) ? { ...item, isActive: nextActive } : item
+      ));
+      toast.success(nextActive ? 'Đã bật gói dịch vụ.' : 'Đã tạm dừng gói dịch vụ.');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Không thể cập nhật trạng thái gói.');
     }
   };
 
@@ -629,6 +820,21 @@ export const AdminDashboard: React.FC = () => {
       return;
     }
 
+    const selectedStore = allStores.find((store) => String(store.id || store.storeId) === selectedStoreId);
+    if (!selectedStore || selectedStore.status !== 'ACTIVE') {
+      toast.warning('Chỉ có thể bàn giao thiết bị cho cửa hàng đang hoạt động.');
+      return;
+    }
+
+    const unavailableDeviceIds = unassignedDevices
+      .filter((device) => selectedDeviceIds.includes(device.deviceId) && device.storeId)
+      .map((device) => device.deviceId);
+    if (unavailableDeviceIds.length > 0) {
+      toast.warning(`Nút ${unavailableDeviceIds.join(', ')} đã được bàn giao cho cửa hàng khác. Vui lòng tải lại danh sách kho.`);
+      fetchAdminData();
+      return;
+    }
+
     setIsProcessingBatch(true);
     try {
       const res = await api.post('/devices/allocate-store', {
@@ -648,18 +854,52 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
+  // Factory Reset Device (POST /devices/:id/factory-reset)
+  const handleFactoryReset = async (e?: React.FormEvent) => {
+    if (e) e.preventDefault();
+    const targetId = resetDeviceIdInput.trim();
+    if (!targetId) {
+      toast.warning('Vui lòng nhập hoặc chọn mã thiết bị cần khôi phục xuất xưởng');
+      return;
+    }
+
+    setIsFactoryResetting(true);
+    try {
+      const res = await api.post(`/devices/${encodeURIComponent(targetId)}/factory-reset`);
+      if (res.data?.success) {
+        toast.success(res.data.message || `Đã khôi phục cài đặt gốc nút [${targetId}] thành công!`);
+        setShowFactoryResetModal(false);
+        setResettingDevice(null);
+        setResetDeviceIdInput('');
+        fetchAdminData();
+      }
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không thể khôi phục cài đặt gốc thiết bị');
+    } finally {
+      setIsFactoryResetting(false);
+    }
+  };
+
   // Toggle user status
   const handleToggleUserStatus = async (userId: string) => {
     try {
-      await api.post(`/admin/users/${encodeURIComponent(userId)}/toggle-status`).catch(() => {});
+      const res = await api.post(`/admin/users/${encodeURIComponent(userId)}/toggle-status`);
+      const nextActive =
+        res.data?.data?.isActive !== undefined
+          ? res.data.data.isActive
+          : res.data?.data?.status === 'ACTIVE';
+
       setUsersList((prev) =>
         prev.map((u) =>
           u.id === userId || String(u.id) === String(userId) || String(u.userId) === String(userId)
-            ? { ...u, isActive: !u.isActive, status: !u.isActive ? 'ACTIVE' : 'INACTIVE' }
+            ? { ...u, isActive: nextActive, status: nextActive ? 'ACTIVE' : 'INACTIVE' }
             : u
         )
       );
-    } catch (_) {}
+      toast.success(res.data?.message || 'Đã cập nhật trạng thái tài khoản');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không thể cập nhật trạng thái');
+    }
   };
 
   // Change user role
@@ -673,6 +913,7 @@ export const AdminDashboard: React.FC = () => {
             : u
         )
       );
+      toast.success(`Đã cập nhật vai trò người dùng thành ${newRole}`);
     } catch (_) {}
   };
 
@@ -801,63 +1042,6 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
 
-        {/* Navigation Tabs (Immediate, with layoutId physics-based bottom border underline) */}
-        <div>
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-            <nav
-              ref={navTabsRef}
-              className="flex items-center gap-1 sm:gap-2 -mb-px overflow-x-auto scrollbar-none"
-              aria-label="Tabs"
-            >
-              {[
-                { key: 'OVERVIEW', label: 'Tổng Quan', icon: Boxes },
-                { key: 'STORES', label: '1. Trạm Cửa Hàng', icon: StoreIcon, badge: pendingStores.length > 0 ? pendingStores.length : null },
-                { key: 'CATALOG', label: '2. Danh Mục Gốc', icon: Layers },
-                { key: 'DEVICES', label: '3. Kho Nút Bấm', icon: Cpu, badge: unassignedDevices.length > 0 ? unassignedDevices.length : null },
-                { key: 'RBAC', label: '4. Tài Khoản & Phân Quyền', icon: Users },
-                { key: 'TELEMETRY', label: '5. Giám Sát IoT & Pin', icon: Battery, alert: telemetryDevices.filter(d => d.battery < 20).length > 0 },
-                { key: 'ANALYTICS', label: '6. Báo Cáo & Doanh Thu', icon: TrendingUp },
-                { key: 'NOTIFICATIONS', label: '7. Cấu Hình FCM', icon: Bell },
-              ].map((tab) => {
-                const Icon = tab.icon;
-                const isActive = activeTab === tab.key;
-                return (
-                  <button
-                    key={tab.key}
-                    onClick={() => setActiveTab(tab.key as any)}
-                    className={`relative flex items-center gap-1.5 py-2.5 px-3 text-xs whitespace-nowrap transition-colors cursor-pointer ${
-                      isActive
-                        ? 'text-[#0E6BA8] dark:text-[#38a5da] font-medium'
-                        : 'text-slate-500 hover:text-slate-800 dark:text-zinc-400 dark:hover:text-zinc-200'
-                    }`}
-                  >
-                    <Icon className={`w-3.5 h-3.5 ${isActive ? 'text-[#0E6BA8] dark:text-[#38a5da]' : 'text-slate-400 dark:text-zinc-500'}`} />
-                    <span>{tab.label}</span>
-                    {tab.badge !== null && tab.badge !== undefined && (
-                      <span className={`px-1.5 py-0.2 rounded-full text-[10px] font-medium tabular-nums ${
-                        isActive
-                          ? 'bg-[#0E6BA8] text-white dark:bg-[#0E6BA8]'
-                          : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'
-                      }`}>
-                        {tab.badge}
-                      </span>
-                    )}
-                    {tab.alert && (
-                      <span className="w-1.5 h-1.5 rounded-full bg-rose-500"></span>
-                    )}
-                    {isActive && (
-                      <motion.div
-                        layoutId="activeAdminTabUnderline"
-                        className="absolute bottom-0 left-0 right-0 h-[2px] bg-[#0E6BA8] dark:bg-[#38a5da]"
-                        transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-                      />
-                    )}
-                  </button>
-                );
-              })}
-            </nav>
-          </div>
-        </div>
       </div>
 
       {/* Main Content Area */}
@@ -910,7 +1094,7 @@ export const AdminDashboard: React.FC = () => {
             <div className="flex items-center gap-2 flex-wrap">
               <button
                 onClick={() => {
-                  setActiveTab('DEVICES');
+                  selectTab('DEVICES');
                   setShowBatchModal(true);
                 }}
                 className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
@@ -920,17 +1104,17 @@ export const AdminDashboard: React.FC = () => {
               </button>
               <button
                 onClick={() => {
-                  setActiveTab('CATALOG');
+                  selectTab('CATALOG');
                   setShowAddProductModal(true);
                 }}
                 className="px-3.5 py-2 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 font-medium text-xs flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
-                <span>+ Thêm Hàng Gốc</span>
+                <span>Thêm Hàng Gốc</span>
               </button>
               {pendingStores.length > 0 && (
                 <button
-                  onClick={() => setActiveTab('STORES')}
+                  onClick={() => selectTab('STORES')}
                   className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm active:scale-[0.97] transition-all cursor-pointer"
                 >
                   <Clock className="w-4 h-4" />
@@ -1046,42 +1230,45 @@ export const AdminDashboard: React.FC = () => {
               </div>
             ) : (
               <div className="space-y-2">
-                {pendingStores.map((store) => (
-                  <div
-                    key={store.id}
-                    className="p-3.5 border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900 flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-2xs"
-                  >
-                    <div className="space-y-1 text-xs">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-zinc-900 dark:text-white">{store.name}</span>
-                        <span className="font-mono text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.2 rounded border border-zinc-200 dark:border-zinc-700">
-                          {store.code}
-                        </span>
+                {pendingStores.map((store) => {
+                  const sId = String(store.id || store.storeId || '');
+                  return (
+                    <div
+                      key={sId}
+                      className="p-3.5 border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900 flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-2xs"
+                    >
+                      <div className="space-y-1 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span className="font-semibold text-zinc-900 dark:text-white">{store.name}</span>
+                          <span className="font-mono text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.2 rounded border border-zinc-200 dark:border-zinc-700">
+                            {store.code}
+                          </span>
+                        </div>
+                        <p className="text-zinc-500 dark:text-zinc-400 text-[11px]">
+                          Chủ: <strong className="text-zinc-700 dark:text-zinc-200">{store.ownerName || store.owner?.fullName || 'Chủ shop'}</strong> • {store.phone} • {store.email}
+                        </p>
+                        <p className="text-zinc-400 dark:text-zinc-500 text-[11px]">Kho: {store.address}</p>
                       </div>
-                      <p className="text-zinc-500 dark:text-zinc-400 text-[11px]">
-                        Chủ: <strong className="text-zinc-700 dark:text-zinc-200">{store.ownerName}</strong> • {store.phone} • {store.email}
-                      </p>
-                      <p className="text-zinc-400 dark:text-zinc-500 text-[11px]">Kho: {store.address}</p>
-                    </div>
 
-                    <div className="flex items-center gap-2 shrink-0">
-                      <button
-                        onClick={() => handleApprove(store.id)}
-                        className="px-3 py-1.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-medium shadow-sm flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer"
-                      >
-                        <CheckCircle2 className="w-3.5 h-3.5" />
-                        <span>Phê Duyệt</span>
-                      </button>
-                      <button
-                        onClick={() => setRejectingStoreId(store.id)}
-                        className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 flex items-center gap-1.5 active:scale-[0.97] transition-all shadow-2xs cursor-pointer"
-                      >
-                        <XCircle className="w-3.5 h-3.5" />
-                        <span>Từ Chối</span>
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => handleApprove(sId)}
+                          className="px-3 py-1.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-medium shadow-sm flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer"
+                        >
+                          <CheckCircle2 className="w-3.5 h-3.5" />
+                          <span>Phê Duyệt</span>
+                        </button>
+                        <button
+                          onClick={() => openStoreActionModal(sId, 'REJECT')}
+                          className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 flex items-center gap-1.5 active:scale-[0.97] transition-all shadow-2xs cursor-pointer"
+                        >
+                          <XCircle className="w-3.5 h-3.5" />
+                          <span>Từ Chối</span>
+                        </button>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             )}
           </div>
@@ -1111,6 +1298,7 @@ export const AdminDashboard: React.FC = () => {
                       <th className="py-2 px-3">Liên Hệ</th>
                       <th className="py-2 px-3">Địa Chỉ Kho</th>
                       <th className="py-2 px-3">Trạng Thái</th>
+                      <th className="py-2 px-3 text-right">Thao Tác</th>
                     </tr>
                   </thead>
                   <motion.tbody
@@ -1119,19 +1307,23 @@ export const AdminDashboard: React.FC = () => {
                     animate="visible"
                     className="divide-y divide-zinc-200 dark:divide-zinc-800"
                   >
-                    {allStores.map((s) => (
-                      <motion.tr
-                        variants={tableRowVariants}
-                        key={s.id}
-                        className="hover:bg-zinc-50 dark:hover:bg-zinc-850/60 transition-colors"
-                      >
-                        <td className="py-2 px-3 font-semibold text-zinc-900 dark:text-white">{s.name}</td>
-                        <td className="py-2 px-3 font-mono font-medium text-xs text-zinc-700 dark:text-zinc-300">
-                          <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
-                            {s.code}
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 text-zinc-700 dark:text-zinc-300">{s.ownerName}</td>
+                    {allStores.map((s) => {
+                      const sId = s.id || s.storeId;
+                      return (
+                        <motion.tr
+                          variants={tableRowVariants}
+                          key={sId}
+                          className="hover:bg-zinc-50 dark:hover:bg-zinc-850/60 transition-colors"
+                        >
+                          <td className="py-2 px-3 font-semibold text-zinc-900 dark:text-white">{s.name}</td>
+                          <td className="py-2 px-3 font-mono font-medium text-xs text-zinc-700 dark:text-zinc-300">
+                            <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
+                              {s.code}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-zinc-700 dark:text-zinc-300">
+                            {s.ownerName || s.owner?.fullName || 'Chưa cập nhật'}
+                          </td>
                         <td className="py-2 px-3 font-mono text-zinc-500 dark:text-zinc-400 text-[11px]">
                           <div>{s.phone}</div>
                           <div className="text-[10px] text-zinc-400">{s.email}</div>
@@ -1139,12 +1331,26 @@ export const AdminDashboard: React.FC = () => {
                         <td className="py-2 px-3 text-zinc-500 dark:text-zinc-400 text-[11px] max-w-xs truncate">{s.address}</td>
                         <td className="py-2 px-3">
                           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500"></span>
-                            <span>Hoạt động</span>
+                            <span className={`w-1.5 h-1.5 rounded-full ${s.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
+                            <span>{s.status === 'ACTIVE' ? 'Hoạt động' : 'Đã ngừng'}</span>
                           </span>
                         </td>
+                        <td className="py-2 px-3 text-right">
+                          {s.status === 'ACTIVE' ? (
+                            <button
+                              type="button"
+                              onClick={() => openStoreActionModal(String(sId), 'SUSPEND')}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300"
+                            >
+                              <ShieldAlert className="h-3.5 w-3.5" /> Ngừng hoạt động
+                            </button>
+                          ) : (
+                            <span className="text-[11px] text-zinc-400">Đã ngừng</span>
+                          )}
+                        </td>
                       </motion.tr>
-                    ))}
+                    );
+                  })}
                   </motion.tbody>
                 </table>
               </div>
@@ -1196,6 +1402,18 @@ export const AdminDashboard: React.FC = () => {
                 <Send className="w-4 h-4" />
                 <span>Cấp Phát Cho Cửa Hàng ({selectedDeviceIds.length})</span>
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setResettingDevice(null);
+                  setResetDeviceIdInput('');
+                  setShowFactoryResetModal(true);
+                }}
+                className="px-3.5 py-2 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-medium flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer shadow-xs"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>Đặt Lại Cài Đặt Gốc (Factory Reset)</span>
+              </button>
             </div>
           </div>
 
@@ -1231,6 +1449,7 @@ export const AdminDashboard: React.FC = () => {
                     <th className="py-2.5 px-3">Mã PIN Ghép Nối</th>
                     <th className="py-2.5 px-3">Tên Bluetooth Phát Sóng</th>
                     <th className="py-2.5 px-3">Trạng Thái</th>
+                    <th className="py-2.5 px-3 text-right">Thao Tác</th>
                   </tr>
                 </thead>
                 <motion.tbody
@@ -1277,6 +1496,21 @@ export const AdminDashboard: React.FC = () => {
                           <span className="px-2 py-0.5 rounded-full text-[10px] font-mono font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
                             Trong Kho Trống
                           </span>
+                        </td>
+                        <td className="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setResettingDevice(dev);
+                              setResetDeviceIdInput(dev.deviceId);
+                              setShowFactoryResetModal(true);
+                            }}
+                            className="px-2 py-1 rounded text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 border border-rose-200/60 dark:border-rose-900/50 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                            title="Khôi phục xuất xưởng"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Factory Reset</span>
+                          </button>
                         </td>
                       </motion.tr>
                     );
@@ -1380,20 +1614,20 @@ export const AdminDashboard: React.FC = () => {
                     </td>
                     <td className="py-2 px-3">
                       <span className="inline-flex items-center gap-1.5 text-xs font-medium">
-                        <span className={`w-1.5 h-1.5 rounded-full ${u.isActive ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                        <span className="text-zinc-700 dark:text-zinc-300">{u.isActive ? 'Hoạt động' : 'Đã khóa'}</span>
+                        <span className={`w-1.5 h-1.5 rounded-full ${(u.isActive ?? (u.status === 'ACTIVE')) ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                        <span className="text-zinc-700 dark:text-zinc-300">{(u.isActive ?? (u.status === 'ACTIVE')) ? 'Hoạt động' : 'Đã khóa'}</span>
                       </span>
                     </td>
                     <td className="py-2 px-3 text-right">
                       <button
                         onClick={() => handleToggleUserStatus(u.id)}
                         className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-all cursor-pointer active:scale-[0.97] ${
-                          u.isActive
+                          (u.isActive ?? (u.status === 'ACTIVE'))
                             ? 'border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-rose-950/40'
                             : 'border-[#0E6BA8] bg-[#0E6BA8] text-white hover:bg-[#0B5586] shadow-sm'
                         }`}
                       >
-                        {u.isActive ? 'Khóa TK' : 'Mở Khóa'}
+                        {(u.isActive ?? (u.status === 'ACTIVE')) ? 'Khóa TK' : 'Mở Khóa'}
                       </button>
                     </td>
                   </motion.tr>
@@ -1407,6 +1641,263 @@ export const AdminDashboard: React.FC = () => {
       {/* ========================================================================= */}
       {/* MODULE 3: 4.2.2 MASTER PRODUCT CATALOG (CRUD & BUTTON BINDING)            */}
       {/* ========================================================================= */}
+      {(activeTab === 'PLANS' || activeTab === 'RENTALS') && (
+        <div className="space-y-5">
+          {/* Sub-tab Navigation Switcher */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-3">
+            <button
+              type="button"
+              onClick={() => {
+                setPlansSubTab('STORE_PLANS');
+                selectTab('PLANS');
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                plansSubTab === 'STORE_PLANS' && activeTab === 'PLANS'
+                  ? 'bg-[#0E6BA8] text-white shadow-xs'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>1. Gói Dịch Vụ Cửa Hàng (Store Plans)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPlansSubTab('RENTAL_PACKAGES');
+                selectTab('RENTALS');
+                loadRentalPackages();
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                plansSubTab === 'RENTAL_PACKAGES' || activeTab === 'RENTALS'
+                  ? 'bg-[#0E6BA8] text-white shadow-xs'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>2. Gói Thuê Nút Bấm IoT (Dành cho Cư Dân)</span>
+            </button>
+          </div>
+
+          {(plansSubTab === 'STORE_PLANS' && activeTab !== 'RENTALS') ? (
+            <div className="space-y-5">
+              <div className="flex flex-col gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-5 dark:border-sky-900/50 dark:from-sky-950/30 dark:to-zinc-900 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Layers className="h-5 w-5 text-[#0E6BA8]" />
+                    <h2 className="text-base font-bold text-zinc-900 dark:text-white">Gói dịch vụ cửa hàng</h2>
+                  </div>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                    Tạo ít nhất một gói đang hoạt động. Khi chủ cửa hàng thêm sản phẩm lần đầu, hệ thống sẽ tự tạo gói dùng thử 30 ngày từ gói hoạt động đầu tiên.
+                  </p>
+                </div>
+                <button onClick={loadSubscriptionPlans} disabled={plansLoading} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer">
+                  <RefreshCw className={`h-3.5 w-3.5 ${plansLoading ? 'animate-spin' : ''}`} /> Làm mới
+                </button>
+              </div>
+
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+                  <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+                    <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Danh sách gói</h3><p className="mt-0.5 text-xs text-zinc-500">Dữ liệu trực tiếp từ API Admin.</p></div>
+                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{subscriptionPlans.length} gói</span>
+                  </div>
+                  {plansLoading ? <div className="p-8 text-center text-sm text-zinc-500">Đang tải gói dịch vụ…</div> : subscriptionPlans.length === 0 ? <div className="p-8 text-center text-sm text-zinc-500">Chưa có gói nào. Tạo gói đầu tiên ở biểu mẫu bên phải.</div> : <div className="divide-y divide-zinc-100 dark:divide-zinc-800">{subscriptionPlans.map((plan) => {
+                    const planId = String(plan.planId || plan.id || '');
+                    return <div key={planId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{plan.planName}</p><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${plan.isActive ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>{plan.isActive ? 'ĐANG HOẠT ĐỘNG' : 'TẠM DỪNG'}</span></div><p className="mt-1 text-xs text-zinc-500">{plan.planCode} · {Number(plan.price || 0).toLocaleString('vi-VN')} ₫ · {plan.durationDays} ngày · tối đa {plan.maxProducts} sản phẩm</p>{plan.description && <p className="mt-1 text-xs text-zinc-500">{plan.description}</p>}</div>
+                      <button type="button" onClick={() => handlePlanActiveChange(plan)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${plan.isActive ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{plan.isActive ? 'Tạm dừng' : 'Kích hoạt'}</button>
+                    </div>;
+                  })}</div>}
+                </section>
+
+                <form onSubmit={handleCreatePlan} className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+                  <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo gói mới</h3><p className="mt-0.5 text-xs text-zinc-500">Gói mới được API tạo ở trạng thái hoạt động.</p></div>
+                  <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mã gói</label><input required value={newPlan.planCode} onChange={(e) => setNewPlan({ ...newPlan, planCode: e.target.value.toUpperCase() })} placeholder="VD: TRIAL-30" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-mono outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+                  <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tên gói</label><input required value={newPlan.planName} onChange={(e) => setNewPlan({ ...newPlan, planName: e.target.value })} placeholder="VD: Dùng thử 30 ngày" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+                  <div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giá (₫)</label><input required min="0" type="number" value={newPlan.price} onChange={(e) => setNewPlan({ ...newPlan, price: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Thời hạn</label><input required min="1" type="number" value={newPlan.durationDays} onChange={(e) => setNewPlan({ ...newPlan, durationDays: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div></div>
+                  <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giới hạn sản phẩm</label><input required min="1" type="number" value={newPlan.maxProducts} onChange={(e) => setNewPlan({ ...newPlan, maxProducts: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+                  <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mô tả</label><textarea rows={2} value={newPlan.description} onChange={(e) => setNewPlan({ ...newPlan, description: e.target.value })} className="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+                  <button disabled={planSaving} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50 cursor-pointer"><Plus className="h-3.5 w-3.5" /> {planSaving ? 'Đang tạo…' : 'Tạo gói đang hoạt động'}</button>
+                </form>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div className="flex flex-col gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-5 dark:border-sky-900/50 dark:from-sky-950/30 dark:to-zinc-900 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Cpu className="h-5 w-5 text-[#0E6BA8]" />
+                    <h2 className="text-base font-bold text-zinc-900 dark:text-white">Gói thuê nút bấm IoT (Dành cho Cư dân)</h2>
+                  </div>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                    Quản lý danh mục gói thuê nút thông minh. Các gói đang hoạt động được lưu trực tiếp vào cơ sở dữ liệu và hiển thị ngay lập tức trên trang Thuê Nút Bấm của cư dân.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadRentalPackages}
+                  disabled={rentalPackagesLoading}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${rentalPackagesLoading ? 'animate-spin' : ''}`} /> Làm mới
+                </button>
+              </div>
+
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+                {/* List of rental packages */}
+                <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+                  <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+                    <div>
+                      <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Danh sách gói thuê nút</h3>
+                      <p className="mt-0.5 text-xs text-zinc-500">Dữ liệu thật trực tiếp từ API PostgreSQL.</p>
+                    </div>
+                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      {rentalPackages.length} gói
+                    </span>
+                  </div>
+
+                  {rentalPackagesLoading ? (
+                    <div className="p-8 text-center text-sm text-zinc-500">Đang tải gói thuê nút…</div>
+                  ) : rentalPackages.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-zinc-500">
+                      Chưa có gói thuê nút nào. Hãy tạo gói đầu tiên ở biểu mẫu bên phải!
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                      {rentalPackages.map((pkg) => {
+                        const pkgId = String(pkg.packageId || pkg.id || '');
+                        const mPrice = Number(pkg.monthlyPrice || pkg.monthlyFee || 0);
+                        const dFee = Number(pkg.depositFee || 0);
+                        return (
+                          <div key={pkgId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">
+                                  {pkg.packageName || pkg.name}
+                                </p>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                    pkg.isActive
+                                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                      : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
+                                  }`}
+                                >
+                                  {pkg.isActive ? 'ĐANG HOẠT ĐỘNG' : 'TẠM DỪNG'}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-zinc-500 font-mono">
+                                {pkg.packageCode} · {pkg.buttonQuantity} nút IoT · {mPrice.toLocaleString('vi-VN')} ₫/tháng · Cọc: {dFee.toLocaleString('vi-VN')} ₫
+                              </p>
+                              {pkg.description && <p className="mt-1 text-xs text-zinc-500 line-clamp-2">{pkg.description}</p>}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRentalPackageActiveChange(pkg)}
+                              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer shrink-0 ${
+                                pkg.isActive
+                                  ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300'
+                                  : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                              }`}
+                            >
+                              {pkg.isActive ? 'Tạm dừng' : 'Kích hoạt'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                {/* Create rental package form */}
+                <form
+                  onSubmit={handleCreateRentalPackage}
+                  className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo gói thuê nút mới</h3>
+                    <p className="mt-0.5 text-xs text-zinc-500">Gói được lưu vào API và hiển thị ngay cho khách hàng.</p>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mã gói *</label>
+                    <input
+                      required
+                      value={newRentalPackage.packageCode}
+                      onChange={(e) => setNewRentalPackage({ ...newRentalPackage, packageCode: e.target.value.toUpperCase() })}
+                      placeholder="VD: PKG-KIT3, PKG-BASIC"
+                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-mono outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tên gói thuê *</label>
+                    <input
+                      required
+                      value={newRentalPackage.packageName}
+                      onChange={(e) => setNewRentalPackage({ ...newRentalPackage, packageName: e.target.value })}
+                      placeholder="VD: Bộ Kit 3 Nút Bấm Thông Minh"
+                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Số lượng nút *</label>
+                      <input
+                        required
+                        min="1"
+                        type="number"
+                        value={newRentalPackage.buttonQuantity}
+                        onChange={(e) => setNewRentalPackage({ ...newRentalPackage, buttonQuantity: e.target.value })}
+                        className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giá thuê / tháng (₫) *</label>
+                      <input
+                        required
+                        min="0"
+                        type="number"
+                        value={newRentalPackage.monthlyPrice}
+                        onChange={(e) => setNewRentalPackage({ ...newRentalPackage, monthlyPrice: e.target.value })}
+                        className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tiền cọc thiết bị (₫) *</label>
+                    <input
+                      required
+                      min="0"
+                      type="number"
+                      value={newRentalPackage.depositFee}
+                      onChange={(e) => setNewRentalPackage({ ...newRentalPackage, depositFee: e.target.value })}
+                      placeholder="VD: 300000 (Hoàn lại khi trả nút)"
+                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mô tả gói thuê</label>
+                    <textarea
+                      rows={2}
+                      value={newRentalPackage.description}
+                      onChange={(e) => setNewRentalPackage({ ...newRentalPackage, description: e.target.value })}
+                      placeholder="VD: Trọn bộ 3 nút bấm thông minh dành cho căn hộ..."
+                      className="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={rentalPackageSaving}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50 cursor-pointer"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {rentalPackageSaving ? 'Đang tạo…' : 'Tạo gói thuê hoạt động ngay'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {activeTab === 'CATALOG' && (
         <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xs p-5 space-y-4">
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1426,7 +1917,7 @@ export const AdminDashboard: React.FC = () => {
                 className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm active:scale-[0.97] transition-all cursor-pointer"
               >
                 <Plus className="w-4 h-4" />
-                <span>+ Thêm Mặt Hàng Gốc Mới</span>
+                <span>Thêm Mặt Hàng Gốc Mới</span>
               </button>
             </div>
           </div>
@@ -1866,6 +2357,162 @@ export const AdminDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* ========================================================================= */}
+      {/* MODULE 7: SUPER ADMIN ZERO-TRUST SECURITY HUB (GET /admin/security/devices) */}
+      {/* ========================================================================= */}
+      {activeTab === 'SECURITY' && (
+        <div className="space-y-6">
+          {/* Header */}
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 p-5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-2xl shadow-2xs">
+            <div className="flex items-center space-x-3.5">
+              <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-500/10 text-rose-600 dark:text-rose-400 flex items-center justify-center border border-rose-500/20 shadow-inner">
+                <ShieldAlert className="w-5 h-5 stroke-[2]" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h2 className="text-base font-bold text-slate-900 dark:text-white tracking-tight">
+                    Trung Tâm Giám Sát An Ninh Thiết Bị (Security Hub)
+                  </h2>
+                  <span className="px-2 py-0.5 rounded text-[10px] font-mono font-bold bg-rose-500/10 text-rose-600 dark:text-rose-400 border border-rose-500/20">
+                    ZERO-TRUST MONITOR
+                  </span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                  Phát hiện tấn công Replay, vi phạm độ lệch NTP, sai chữ ký HMAC-SHA256 & can thiệp firmware trái phép
+                </p>
+              </div>
+            </div>
+
+            <button
+              onClick={fetchAdminData}
+              className="px-3.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-zinc-200 text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer"
+            >
+              <RefreshCw className="w-3.5 h-3.5" />
+              <span>Làm Mới</span>
+            </button>
+          </div>
+
+          {/* 4 Status Badges */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5">
+            <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xs">
+              <div className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">
+                Chữ Ký HMAC-SHA256
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-500 shrink-0" />
+                <span className="text-xs font-bold text-slate-900 dark:text-white">Active (Hardware Crypto)</span>
+              </div>
+            </div>
+
+            <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xs">
+              <div className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">
+                Chống Tấn Công Replay
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <Lock className="w-4 h-4 text-cyan-500 shrink-0" />
+                <span className="text-xs font-bold text-slate-900 dark:text-white">Enforced (Nonce Cache)</span>
+              </div>
+            </div>
+
+            <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xs">
+              <div className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">
+                Độ Lệch Đồng Hồ NTP
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <Clock className="w-4 h-4 text-indigo-500 shrink-0" />
+                <span className="text-xs font-bold text-slate-900 dark:text-white">Dung Sai ±300s</span>
+              </div>
+            </div>
+
+            <div className="p-4 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xs">
+              <div className="text-[10px] font-bold text-slate-400 uppercase font-mono tracking-wider">
+                Sự Kiện Cảnh Báo
+              </div>
+              <div className="flex items-center gap-2 mt-2">
+                <AlertTriangle className={`w-4 h-4 shrink-0 ${securityIncidents.length > 0 ? 'text-rose-500 animate-pulse' : 'text-amber-500'}`} />
+                <span className="text-xs font-bold text-slate-900 dark:text-white">
+                  {securityIncidents.length} cảnh báo gần nhất
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Incident Feed */}
+          <div className="p-5 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xs space-y-3.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <Terminal className="w-4 h-4 text-cyan-500" />
+                <h3 className="text-xs font-bold uppercase text-slate-900 dark:text-white tracking-wider font-mono">
+                  Nhật Ký Sự Kiện An Ninh Thiết Bị Thời Gian Thực
+                </h3>
+              </div>
+              <span className="text-[11px] text-slate-400 font-mono">
+                API: GET /admin/security/devices
+              </span>
+            </div>
+
+            {securityIncidents.length === 0 ? (
+              <div className="py-12 text-center text-slate-400 space-y-2">
+                <ShieldCheck className="w-10 h-10 text-emerald-500 mx-auto" />
+                <p className="text-xs font-bold text-slate-700 dark:text-zinc-300">
+                  Hệ thống an toàn tuyệt đối
+                </p>
+                <p className="text-[11px] text-slate-400">
+                  Chưa phát hiện hành vi tấn công Replay hay sai chữ ký HMAC nào trên toàn bộ mạng lưới nút bấm.
+                </p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg">
+                <table className="w-full text-left text-xs font-mono">
+                  <thead className="bg-zinc-50 dark:bg-zinc-800/60 text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800 text-[10px] uppercase tracking-wider">
+                    <tr>
+                      <th className="py-2.5 px-3">Thời Gian</th>
+                      <th className="py-2.5 px-3">Loại Sự Kiện</th>
+                      <th className="py-2.5 px-3">Mã Thiết Bị (ID)</th>
+                      <th className="py-2.5 px-3">Chi Tiết Cảnh Báo</th>
+                      <th className="py-2.5 px-3 text-right">Xử Lý Khẩn Cấp</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
+                    {securityIncidents.map((inc, i) => (
+                      <tr key={i} className="hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors">
+                        <td className="py-2.5 px-3 text-slate-500">
+                          {new Date(inc.timestamp).toLocaleTimeString('vi-VN')}
+                        </td>
+                        <td className="py-2.5 px-3 font-bold text-rose-500">
+                          <span className="px-2 py-0.5 rounded bg-rose-500/10 border border-rose-500/20 text-[11px]">
+                            {inc.type}
+                          </span>
+                        </td>
+                        <td className="py-2.5 px-3 font-bold text-cyan-600 dark:text-cyan-400">
+                          {inc.deviceId}
+                        </td>
+                        <td className="py-2.5 px-3 text-slate-700 dark:text-zinc-300 text-[11px]">
+                          {inc.reason}
+                        </td>
+                        <td className="py-2.5 px-3 text-right">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setResetDeviceIdInput(inc.deviceId);
+                              setShowFactoryResetModal(true);
+                            }}
+                            className="px-2.5 py-1 rounded-md text-[11px] font-semibold text-rose-700 dark:text-rose-300 bg-rose-50 dark:bg-rose-950/50 hover:bg-rose-100 border border-rose-200 dark:border-rose-900 transition-colors cursor-pointer inline-flex items-center gap-1"
+                          >
+                            <RotateCcw className="w-3 h-3" />
+                            <span>Factory Reset</span>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
       </main>
 
       {/* ========================================================================= */}
@@ -1891,22 +2538,24 @@ export const AdminDashboard: React.FC = () => {
                 exit="exit"
                 className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl max-w-md w-full p-5 shadow-2xl border border-zinc-200 dark:border-zinc-800"
               >
-                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Từ Chối Phê Duyệt Cửa Hàng</h3>
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">{storeAction === 'SUSPEND' ? 'Ngừng Hoạt Động Cửa Hàng' : 'Từ Chối Phê Duyệt Cửa Hàng'}</h3>
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-1">
-                  Bắt buộc phải nhập lý do từ chối để hệ thống gửi thông báo cho chủ cơ sở.
+                  {storeAction === 'SUSPEND'
+                    ? 'Cửa hàng sẽ chuyển sang trạng thái ngừng hoạt động. Hãy nhập lý do để lưu lại quyết định này.'
+                    : 'Bắt buộc phải nhập lý do từ chối để hệ thống gửi thông báo cho chủ cơ sở.'}
                 </p>
 
                 <form onSubmit={handleReject} className="space-y-3 mt-4">
                   <div>
                     <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                      Lý do từ chối
+                      {storeAction === 'SUSPEND' ? 'Lý do ngừng hoạt động' : 'Lý do từ chối'}
                     </label>
                     <textarea
                       required
                       rows={3}
                       value={rejectReason}
                       onChange={(e) => setRejectReason(e.target.value)}
-                      placeholder="VD: Không cung cấp được giấy phép kinh doanh..."
+                      placeholder={storeAction === 'SUSPEND' ? 'VD: Tạm ngừng kinh doanh theo yêu cầu quản trị...' : 'VD: Không cung cấp được giấy phép kinh doanh...'}
                       className="w-full px-3 py-2 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-900"
                     />
                   </div>
@@ -1914,7 +2563,7 @@ export const AdminDashboard: React.FC = () => {
                   <div className="flex justify-end gap-2 pt-1">
                     <button
                       type="button"
-                      onClick={() => setRejectingStoreId(null)}
+                      onClick={() => { setRejectingStoreId(null); setRejectReason(''); setStoreAction('REJECT'); }}
                       className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
                     >
                       Hủy
@@ -1923,7 +2572,7 @@ export const AdminDashboard: React.FC = () => {
                       type="submit"
                       className="px-4 py-1.5 text-xs font-medium text-white bg-rose-600 hover:bg-rose-700 active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
                     >
-                      Xác Nhận Từ Chối
+                      {storeAction === 'SUSPEND' ? 'Xác Nhận Ngừng Hoạt Động' : 'Xác Nhận Từ Chối'}
                     </button>
                   </div>
                 </form>
@@ -2059,7 +2708,7 @@ export const AdminDashboard: React.FC = () => {
                       className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-900"
                     >
                       <option value="">-- Chọn Cửa Hàng --</option>
-                      {allStores.map((store) => {
+                      {allStores.filter((store) => store.status === 'ACTIVE').map((store) => {
                         const sId = store.id || store.storeId;
                         return (
                           <option key={sId} value={sId}>
@@ -2237,6 +2886,104 @@ export const AdminDashboard: React.FC = () => {
                       className="px-4 py-1.5 text-xs font-medium text-white bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
                     >
                       Lưu Vào Danh Mục Gốc
+                    </button>
+                  </div>
+                </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {/* 5. Factory Reset Device Modal (POST /devices/:id/factory-reset) */}
+      {createPortal(
+        <AnimatePresence>
+          {showFactoryResetModal && (
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+              <motion.div
+                variants={modalBackdropVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                onClick={() => !isFactoryResetting && setShowFactoryResetModal(false)}
+                className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm cursor-pointer"
+              />
+              <motion.div
+                variants={modalDialogVariants}
+                initial="hidden"
+                animate="visible"
+                exit="exit"
+                className="relative z-10 bg-white dark:bg-zinc-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-zinc-200 dark:border-zinc-800 space-y-4"
+              >
+                <div className="flex items-center space-x-3 pb-3 border-b border-zinc-100 dark:border-zinc-800">
+                  <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center border border-rose-200 dark:border-rose-800 shrink-0">
+                    <RotateCcw className="w-5 h-5 stroke-[2]" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                      Khôi Phục Cài Đặt Gốc (Factory Reset)
+                    </h3>
+                    <p className="text-xs text-slate-500 dark:text-zinc-400">
+                      Thu hồi thiết bị về trạng thái xuất xưởng
+                    </p>
+                  </div>
+                </div>
+
+                <form onSubmit={handleFactoryReset} className="space-y-3.5">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                      Mã Thiết Bị (Device ID)
+                    </label>
+                    <input
+                      type="text"
+                      required
+                      placeholder="VD: BTN-1891001 hoặc SOB-WHITE-PRO-01"
+                      value={resetDeviceIdInput}
+                      onChange={(e) => setResetDeviceIdInput(e.target.value.toUpperCase())}
+                      className="w-full px-3 py-2 text-xs font-mono font-bold border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-slate-900 dark:text-white focus:outline-none focus:border-[#0E6BA8]"
+                    />
+                  </div>
+
+                  {/* Safety Warning Card */}
+                  <div className="p-3 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 rounded-xl space-y-1.5 text-xs text-amber-900 dark:text-amber-200">
+                    <div className="font-semibold flex items-center gap-1.5 text-[11px] text-amber-800 dark:text-amber-300">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                      <span>Tác vụ xóa cấu hình phần cứng:</span>
+                    </div>
+                    <ul className="text-[11px] list-disc list-inside space-y-0.5 text-amber-800/90 dark:text-amber-300/80 pl-1">
+                      <li>Hủy liên kết tài khoản khách hàng sở hữu (Unclaim).</li>
+                      <li>Đưa trạng thái về READY_FOR_CUSTOMER để phân phối lại.</li>
+                      <li>Tự động tạo mới Pairing Token và mã QR kích hoạt.</li>
+                      <li>Bảo toàn mã phần cứng Device ID và HMAC Secret gốc.</li>
+                    </ul>
+                  </div>
+
+                  <div className="flex items-center justify-end gap-2.5 pt-2">
+                    <button
+                      type="button"
+                      disabled={isFactoryResetting}
+                      onClick={() => setShowFactoryResetModal(false)}
+                      className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
+                    >
+                      Hủy Bỏ
+                    </button>
+                    <button
+                      type="submit"
+                      disabled={isFactoryResetting || !resetDeviceIdInput.trim()}
+                      className="px-4.5 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 active:scale-[0.98] rounded-lg transition-all cursor-pointer shadow-xs disabled:opacity-50 flex items-center gap-1.5"
+                    >
+                      {isFactoryResetting ? (
+                        <>
+                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                          <span>Đang khôi phục...</span>
+                        </>
+                      ) : (
+                        <>
+                          <RotateCcw className="w-3.5 h-3.5" />
+                          <span>Xác Nhận Factory Reset</span>
+                        </>
+                      )}
                     </button>
                   </div>
                 </form>

@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import { deliveryMapUrl } from '../../services/delivery-location';
+import React, { useState, useEffect, useRef } from 'react';
+import { Link, useLocation } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
@@ -6,9 +8,15 @@ import { api } from '../../services/api';
 import { subscribeToStore, getSocket } from '../../services/socket';
 import { useAuth } from '../../context/AuthContext';
 import { useSound } from '../../context/OrderSoundContext';
+import { toast } from '../../context/ToastContext';
 import { AnalyticsChart } from '../../components/AnalyticsChart';
 import { Order } from '../../types';
+import { mergeOrderUpdate, normalizeOrder, normalizeOrderEvent, ORDER_EVENT, publishOrderEvent } from '../../services/order-events';
+import { ShippingContact } from '../../components/orders/ShippingContact';
+import { subscribeRentalChannelEvents } from '../../services/rental-notifications';
+import { getUserStoreId } from '../../services/order-reconciliation';
 import {
+  Wallet,
   ShoppingBag,
   Clock,
   CheckCircle2,
@@ -32,19 +40,60 @@ import {
   ExternalLink,
   ChevronDown,
   ChevronUp,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { StoreCatalogItem, getStoreCatalog, saveStoreCatalog } from '../../data/storeProductsData';
 
+const buildChartDataFromOrders = (orders: Order[]) => {
+  const byDay = new Map<string, { date: string; rawDate: Date; revenue: number }>();
+
+  orders.forEach((order) => {
+    if (order.status === 'CANCELLED' || order.status === 'REJECTED') return;
+    const rawDate = new Date(order.createdAt);
+    if (Number.isNaN(rawDate.getTime())) return;
+    const key = rawDate.toISOString().slice(0, 10);
+    const current = byDay.get(key) || {
+      date: new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: '2-digit' }).format(rawDate),
+      rawDate,
+      revenue: 0,
+    };
+    current.revenue += Number((order as any).totalAmount || 0);
+    byDay.set(key, current);
+  });
+
+  return Array.from(byDay.values())
+    .sort((a, b) => a.rawDate.getTime() - b.rawDate.getTime())
+    .slice(-14)
+    .map(({ date, revenue }) => ({ date, revenue }));
+};
+
 export const StoreDashboard: React.FC = () => {
-  const { user } = useAuth();
-  const { announceStoreOrder, testStoreBankSpeaker } = useSound();
+  const location = useLocation();
+  const { user, token } = useAuth();
+  const storeId = getUserStoreId(user);
+  const { playOrderChime, announceStoreOrder, testStoreBankSpeaker } = useSound();
 
   const [orders, setOrders] = useState<Order[]>([]);
+  const latestOrdersRef = useRef(orders);
+  latestOrdersRef.current = orders;
+  const [pendingStatusUpdates, setPendingStatusUpdates] = useState<Record<string, string>>({});
+  const statusUpdatesRef = useRef(new Map<string, { previous: Order; displayStatus: string }>());
+  const orderListRevision = useRef(0);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  useEffect(() => {
+    const orderNumber = new URLSearchParams(location.search).get('order');
+    if (orderNumber) { setSearchQuery(orderNumber); setStatusFilter('ALL'); }
+  }, [location.search]);
   const [sortBy, setSortBy] = useState<'PRIORITY' | 'NEWEST' | 'OLDEST'>('PRIORITY');
   const [showChart, setShowChart] = useState(false);
+
+  // Pagination state (15 orders per page)
+  const PAGE_SIZE = 15;
+  const [currentPage, setCurrentPage] = useState<number>(1);
+  const tableTopRef = useRef<HTMLDivElement>(null);
 
   // Inventory state with exact number input & image upload
   const [showInventoryModal, setShowInventoryModal] = useState<boolean>(false);
@@ -66,74 +115,122 @@ export const StoreDashboard: React.FC = () => {
 
   const [newOrderAlert, setNewOrderAlert] = useState<any | null>(null);
   const [chartData, setChartData] = useState<any[]>([]);
+  const cancelAlertTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchOrders = async () => {
+    const revision = orderListRevision.current;
     try {
-      const [orderRes, analyticsRes] = await Promise.all([
-        api.get('/orders'),
-        api.get('/analytics/dashboard').catch(() => ({ data: { success: false } })),
-      ]);
+      const orderRes = await api.get('/orders');
+      if (revision !== orderListRevision.current) return;
       if (orderRes.data.success) {
-        setOrders(orderRes.data.data);
+        const fetchedOrders: Order[] = orderRes.data.data.map((raw: any) => {
+          const order = normalizeOrder(raw);
+          const pending = statusUpdatesRef.current.get(order.id);
+          return pending ? { ...order, status: pending.displayStatus as Order['status'], orderStatus: pending.displayStatus } : order;
+        });
+        setOrders(fetchedOrders);
+        setChartData(buildChartDataFromOrders(fetchedOrders));
+
+        // Auto-dismiss newOrderAlert if the order has already been accepted (status !== 'PENDING')
+        setNewOrderAlert((currentAlert: any) => {
+          if (!currentAlert || currentAlert.type !== 'CREATE') return currentAlert;
+          const matched = fetchedOrders.find(
+            (o) =>
+              (currentAlert.orderId && o.id === currentAlert.orderId) ||
+              (currentAlert.orderNumber &&
+                String(o.orderNumber || '').replace(/^#/, '') === String(currentAlert.orderNumber).replace(/^#/, ''))
+          );
+          if (matched && matched.status !== 'PENDING') {
+            return null; // ALREADY ACCEPTED -> DISMISS IMMEDIATELY
+          }
+          return currentAlert;
+        });
       }
-      if (analyticsRes.data?.success && analyticsRes.data.data?.chartData) {
-        setChartData(analyticsRes.data.data.chartData);
-      }
-    } catch (e) {
-      console.error('Failed to fetch store orders:', e);
+    } catch (_) {
+      toast.error('Không tải được dữ liệu đơn hàng. Vui lòng thử lại.');
     } finally {
       setLoading(false);
     }
   };
 
   useEffect(() => {
+    if (!token) return;
+    setPendingStatusUpdates({});
     fetchOrders();
 
-    if (user?.storeId) {
-      subscribeToStore(user.storeId);
-    } else {
-      subscribeToStore('1');
+    if (storeId) {
+      subscribeToStore(storeId);
     }
 
     const socket = getSocket();
 
-    const handleOrderCreated = (payload: any) => {
-      console.log('⚡ [Store Live Feed] Order Created:', payload);
-      setNewOrderAlert({
-        type: 'CREATE',
-        orderNumber: payload.order?.orderNumber,
-        customerName: payload.customerName || payload.order?.customerName,
-        productName: payload.productName || payload.order?.items?.[0]?.productName,
-        quantity: payload.quantity || payload.order?.items?.[0]?.quantity || 1,
-        totalAmount: payload.order?.totalAmount,
-        deliveryAddress: payload.order?.deliveryAddress || payload.order?.shippingAddress,
-        orderId: payload.order?.id,
+    const handleOrderCreated = (newOrderPayload: any) => {
+      const normalizedEvent = normalizeOrderEvent(newOrderPayload);
+      const newOrder = normalizedEvent.order || newOrderPayload;
+      if (storeId && newOrder?.storeId && String(newOrder.storeId) !== storeId) return;
+
+      // 1. Phát âm thanh chuông "Ting Ting" thông báo
+      playOrderChime();
+
+      // 2. Chèn ngay đơn hàng mới lên đầu danh sách mà KHÔNG CẦN F5 tải lại trang
+      setOrders((prevOrders) => {
+        const orderId = String(newOrder.id || newOrder.orderId || '');
+        const exists = prevOrders.some(
+          (o) => (orderId && o.id === orderId) || (newOrder.orderNumber && o.orderNumber === newOrder.orderNumber)
+        );
+        if (exists) return prevOrders;
+        const safeOrder = {
+          ...newOrder,
+          items: Array.isArray(newOrder.items) ? newOrder.items : [],
+        };
+        return [safeOrder, ...prevOrders];
       });
 
-      // Instantly insert into local state without waiting for F5 or network roundtrip
-      if (payload.order) {
-        setOrders((prev) => {
-          const exists = prev.some(
-            (o) => o.id === payload.order.id || o.orderNumber === payload.order.orderNumber
-          );
-          if (exists) return prev;
-          const safeOrder = {
-            ...payload.order,
-            items: Array.isArray(payload.order.items) ? payload.order.items : [],
-          };
-          return [safeOrder, ...prev];
-        });
-      }
+      // 3. Hiện toast thông báo góc màn hình
+      const code = (newOrder as any).orderCode || newOrder.orderNumber || newOrder.id;
+      // 3. Hiện toast thông báo góc màn hình
+      toast.success(`Đã nhận đơn hàng mới #${code}!`);
+
+      const rawNum =
+        newOrder?.orderNumber ||
+        newOrder?.orderCode ||
+        (newOrder?.id ? String(newOrder.id).slice(-6) : 'SOB');
+      const orderNumber = String(rawNum).replace(/^#/, '');
+
+      if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
+      statusUpdatesRef.current.clear();
+      ++orderListRevision.current;
+      setNewOrderAlert({
+        type: 'CREATE',
+        orderNumber,
+        customerName: normalizedEvent.customerName || newOrder?.customerName || newOrder?.customer?.user?.fullName || 'Khách hàng',
+        customerPhone: newOrder?.customerPhone || normalizedEvent.customerPhone,
+        productName: normalizedEvent.productName || newOrder?.items?.[0]?.product?.name || newOrder?.items?.[0]?.productName || 'Nhu yếu phẩm',
+        quantity: normalizedEvent.quantity || newOrder?.items?.[0]?.quantity || 1,
+        totalAmount: newOrder?.totalAmount ?? normalizedEvent.totalAmount,
+        deliveryAddress: newOrder?.deliveryAddress || normalizedEvent.deliveryAddress,
+        orderId: newOrder?.id || normalizedEvent.orderId || normalizedEvent.id,
+      });
 
       fetchOrders();
     };
 
     const handleOrderCancelled = (payload: any) => {
-      console.log('❌ [Store Live Feed] Order Cancelled:', payload);
+      payload = normalizeOrderEvent(payload, 'ORDER_CANCELLED');
+      if (storeId && payload.order.storeId && String(payload.order.storeId) !== storeId) return;
+      const rawNum =
+        payload.order?.orderNumber ||
+        payload.orderNumber ||
+        (payload.orderId ? String(payload.orderId).slice(-6) : (payload.id ? String(payload.id).slice(-6) : 'SOB'));
+      const orderNumber = String(rawNum).replace(/^#/, '');
+
       setNewOrderAlert({
+        customerName: payload.order.customerName,
+        customerPhone: payload.order.customerPhone,
+        deliveryAddress: payload.order.deliveryAddress,
         type: 'CANCEL',
-        orderNumber: payload.order?.orderNumber,
-        reason: payload.reason || 'Khách bấm nút hủy đơn trên ESP32',
+        orderNumber,
+        reason: payload.reason || payload.cancellationReason || 'Đơn hàng đã được hủy',
       });
       if (payload.order?.id) {
         setOrders((prev) =>
@@ -141,47 +238,197 @@ export const StoreDashboard: React.FC = () => {
         );
       }
       fetchOrders();
-      setTimeout(() => {
+
+      if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
+      cancelAlertTimerRef.current = setTimeout(() => {
         setNewOrderAlert(null);
-      }, 8000);
+      }, 4000);
     };
 
-    const handleOrderUpdated = (payload?: any) => {
-      if (payload?.order?.id) {
+    const handleOrderUpdated = (data?: any) => {
+      if (['CANCELLED', 'REJECTED'].includes(normalizeOrderEvent(data).status)) {
+        handleOrderCancelled(data);
+        return;
+      }
+      const updated = data?.order || data;
+      if (storeId && updated?.storeId && String(updated.storeId) !== storeId) return;
+      const updatedId = String(updated?.id || updated?.orderId || '');
+      if (updatedId) {
         setOrders((prev) =>
-          prev.map((o) => (o.id === payload.order.id ? { ...o, ...payload.order } : o))
+          prev.map((o) => (o.id === updatedId ? mergeOrderUpdate(o, { ...updated, id: updatedId }) : o))
         );
       }
       fetchOrders();
+
+      if (updated && updated.status && updated.status !== 'PENDING') {
+        setNewOrderAlert((currentAlert: any) => {
+          // A cancellation alert must remain visible for its timer. A status
+          // event normally follows ORDER_CANCELLED and previously cleared it
+          // immediately before the user could see it.
+          if (!currentAlert || currentAlert.type !== 'CREATE') return currentAlert;
+          const matchId =
+            currentAlert.orderId &&
+            (currentAlert.orderId === updated.id || currentAlert.orderId === updated.orderId);
+          const matchNum =
+            currentAlert.orderNumber &&
+            String(currentAlert.orderNumber).replace(/^#/, '') ===
+              String(updated.orderNumber || '').replace(/^#/, '');
+          if (matchId || matchNum) {
+            return null; // DISMISS IMMEDIATELY WHEN STORE OR ANYONE ACCEPTS
+          }
+          return currentAlert;
+        });
+      }
+    };
+
+    const handleLocalEvent = (event: Event) => {
+      const { type, payload } = (event as CustomEvent).detail;
+      if (type === 'ORDER_CREATED') handleOrderCreated(payload);
+      else if (type === 'ORDER_CANCELLED') handleOrderCancelled(payload);
+      else handleOrderUpdated(payload);
+    };
+    window.addEventListener(ORDER_EVENT, handleLocalEvent);
+    window.addEventListener('focus', fetchOrders);
+
+    const unsubRentals = subscribeRentalChannelEvents({
+      onRentalPurchased: (data) => {
+        playOrderChime();
+        toast.success(
+          `Khách hàng ${data.customerName || 'Khách'} vừa đăng ký gói thuê ${data.packageName} (${data.buttonQuantity || 1} nút IoT)!`,
+          { title: '📦 Đăng ký thuê nút mới!', duration: 7000 }
+        );
+      },
+    });
+
+    const handleDevicesAllocated = (payload: any) => {
+      if (user?.storeId && payload?.storeId && String(user.storeId) !== String(payload.storeId)) {
+        return;
+      }
+      fetchOrders();
+      toast.success(
+        payload.message || `Cửa hàng vừa nhận bàn giao ${payload.allocatedCount || ''} nút bấm mới vào kho!`,
+        { title: '📦 Thiết bị mới về kho 🎉', duration: 7000 }
+      );
     };
 
     socket.on('ORDER_CREATED', handleOrderCreated);
+    socket.on('order:created', handleOrderCreated);
     socket.on('ORDER_STATUS_CHANGED', handleOrderUpdated);
+    socket.on('ORDER_PAYMENT_CHANGED', handleOrderUpdated);
+    socket.on('ORDER_PAYMENT_CONFIRMED', (payload: any) => {
+      handleOrderUpdated(payload);
+      const rawNum = payload?.order?.orderNumber || payload?.orderCode || payload?.orderId || '';
+      const amount = payload?.amount ? Number(payload.amount).toLocaleString('vi-VN') + ' ₫' : '';
+      toast.success(
+        `Đơn hàng #${rawNum} đã thanh toán PayOS thành công ${amount ? `(${amount})` : ''}!`,
+        { title: '💰 Khách đã thanh toán PayOS 🎉', duration: 6000 }
+      );
+    });
+    socket.on('order:status_changed', handleOrderUpdated);
+    socket.on('order:updated', handleOrderUpdated);
     socket.on('ORDER_CANCELLED', handleOrderCancelled);
+    socket.on('DEVICES_ALLOCATED', handleDevicesAllocated);
+    socket.on('devices:allocated', handleDevicesAllocated);
 
-    // Continuous 3.5s background polling ensures real-time parity even if WebSocket drops
+    // Socket.IO provides immediate updates; this is a low-frequency fallback if it disconnects.
     const pollTimer = setInterval(() => {
       fetchOrders();
-    }, 3500);
+    }, 15000);
 
     return () => {
       clearInterval(pollTimer);
       socket.off('ORDER_CREATED', handleOrderCreated);
+      socket.off('order:created', handleOrderCreated);
       socket.off('ORDER_STATUS_CHANGED', handleOrderUpdated);
+      socket.off('ORDER_PAYMENT_CHANGED', handleOrderUpdated);
+      socket.off('ORDER_PAYMENT_CONFIRMED', handleOrderUpdated);
+      socket.off('order:status_changed', handleOrderUpdated);
+      socket.off('order:updated', handleOrderUpdated);
       socket.off('ORDER_CANCELLED', handleOrderCancelled);
+      socket.off('DEVICES_ALLOCATED', handleDevicesAllocated);
+      socket.off('devices:allocated', handleDevicesAllocated);
+      window.removeEventListener(ORDER_EVENT, handleLocalEvent);
+      window.removeEventListener('focus', fetchOrders);
+      unsubRentals();
+      if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
     };
   }, [user]);
 
   const handleUpdateStatus = async (orderId: string, nextStatus: string) => {
+    if (statusUpdatesRef.current.has(orderId)) return;
+    const previous = orders.find((order) => order.id === orderId);
+    if (!previous) return;
+    // Completing an order can settle money: show success only after the API.
+    const displayStatus = nextStatus === 'COMPLETED' ? String(previous.orderStatus || previous.status) : nextStatus;
+    const operation = { previous, displayStatus };
+    statusUpdatesRef.current.set(orderId, operation);
+    ++orderListRevision.current;
+    setPendingStatusUpdates((current) => ({ ...current, [orderId]: nextStatus }));
+    // The row reads orderStatus first, so both aliases must change together.
+    setOrders((prev) =>
+      prev.map((o) => (o.id === orderId ? { ...o, status: displayStatus as Order['status'], orderStatus: displayStatus } : o))
+    );
+
+    setNewOrderAlert((currentAlert: any) => {
+      if (!currentAlert) return null;
+      const targetOrder = orders.find((o) => o.id === orderId);
+      const matchId = currentAlert.orderId === orderId;
+      const matchNum =
+        targetOrder &&
+        currentAlert.orderNumber &&
+        String(targetOrder.orderNumber || '').replace(/^#/, '') === String(currentAlert.orderNumber).replace(/^#/, '');
+      if (matchId || matchNum) {
+        return null; // DISMISS IMMEDIATELY UPON ACCEPTING
+      }
+      return currentAlert;
+    });
+
     try {
       const res = await api.patch(`/orders/${orderId}/status`, { status: nextStatus });
+      if (statusUpdatesRef.current.get(orderId) !== operation) return;
+      ++orderListRevision.current;
       if (res.data.success) {
-        setOrders((prev) =>
-          prev.map((o) => (o.id === orderId ? { ...o, status: nextStatus as any } : o))
-        );
+        const existingOrder = latestOrdersRef.current.find((order) => order.id === orderId) || previous;
+        const returnedOrder = res.data.data || { id: orderId, status: nextStatus };
+        const updatedOrder = existingOrder ? mergeOrderUpdate(existingOrder, returnedOrder) : normalizeOrder(returnedOrder);
+        setOrders((current) => current.map((order) => order.id === orderId ? mergeOrderUpdate(order, returnedOrder) : order));
+        publishOrderEvent(['CANCELLED', 'REJECTED'].includes(nextStatus) ? 'ORDER_CANCELLED' : 'ORDER_STATUS_CHANGED', { order: updatedOrder });
+        if (nextStatus === 'CONFIRMED') {
+          toast.success('Đơn hàng đã được tiếp nhận.', { title: 'Đã nhận đơn', duration: 4000 });
+        } else if (nextStatus === 'PREPARING') {
+          toast.success('Đang chuẩn bị sản phẩm.', { title: 'Chuẩn bị hàng', duration: 4000 });
+        } else if (nextStatus === 'READY_FOR_DELIVERY') {
+          toast.success('Đơn hàng sẵn sàng để bắt đầu giao.', { title: 'Sẵn sàng giao', duration: 4000 });
+        } else if (nextStatus === 'SHIPPING') {
+          toast.success('Đơn hàng đang được giao đến khách hàng.', { title: 'Bắt đầu giao', duration: 4000 });
+        } else if (nextStatus === 'DELIVERED') {
+          toast.success('Đã xác nhận giao hàng. Hãy hoàn tất đơn để cộng tiền vào ví.', { title: 'Đã giao', duration: 5000 });
+        } else if (nextStatus === 'COMPLETED') {
+          toast.success('Đã giao thành công! Tiền đã cộng vào Ví Cửa Hàng.', { title: 'Giao thành công 🎉', duration: 5000 });
+        }
+      } else {
+        throw new Error(res.data.message || 'Không thể cập nhật trạng thái');
       }
     } catch (e: any) {
-      alert(e.response?.data?.message || 'Không thể cập nhật trạng thái');
+      if (statusUpdatesRef.current.get(orderId) !== operation) return;
+      statusUpdatesRef.current.delete(orderId);
+      ++orderListRevision.current;
+      // Restore status only; keep newer payment/contact data from socket events.
+      setOrders((current) => current.map((order) => order.id === orderId && String(order.orderStatus || order.status) === displayStatus
+        ? { ...order, status: previous.status, orderStatus: previous.orderStatus || previous.status }
+        : order));
+      toast.error(e.response?.data?.message || e.message || 'Không thể cập nhật trạng thái');
+      void fetchOrders();
+    } finally {
+      // A response from an old page/session must not unlock a newer request.
+      const activeOperation = statusUpdatesRef.current.get(orderId);
+      if (activeOperation && activeOperation !== operation) return;
+      if (statusUpdatesRef.current.get(orderId) === operation) statusUpdatesRef.current.delete(orderId);
+      setPendingStatusUpdates((current) => {
+        const next = { ...current };
+        delete next[orderId];
+        return next;
+      });
     }
   };
 
@@ -297,7 +544,7 @@ export const StoreDashboard: React.FC = () => {
 
   const pendingCount = orders.filter((o) => o.status === 'PENDING').length;
   const inProgressCount = orders.filter((o) => ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY', 'SHIPPING', 'READY_FOR_DELIVERY'].includes(o.status)).length;
-  const completedCount = orders.filter((o) => o.status === 'COMPLETED' || (o.status as string) === 'DELIVERED').length;
+  const completedCount = orders.filter((o) => ['COMPLETED', 'DELIVERED'].includes(o.status as string)).length;
 
   const priorityMap: Record<string, number> = {
     PENDING: 1,
@@ -342,6 +589,51 @@ export const StoreDashboard: React.FC = () => {
       return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
     });
 
+  // Reset pagination to page 1 on filter or search changes
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [statusFilter, searchQuery, sortBy]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
+
+  useEffect(() => {
+    if (currentPage > totalPages) {
+      setCurrentPage(totalPages);
+    }
+  }, [totalPages, currentPage]);
+
+  const startIndex = (currentPage - 1) * PAGE_SIZE;
+  const endIndex = Math.min(startIndex + PAGE_SIZE, filteredOrders.length);
+  const paginatedOrders = filteredOrders.slice(startIndex, startIndex + PAGE_SIZE);
+
+  const handlePageChange = (newPage: number) => {
+    if (newPage < 1 || newPage > totalPages || newPage === currentPage) return;
+    setCurrentPage(newPage);
+    if (tableTopRef.current) {
+      tableTopRef.current.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+  };
+
+  const getPageNumbers = () => {
+    if (totalPages <= 7) {
+      return Array.from({ length: totalPages }, (_, i) => i + 1);
+    }
+    const pages: (number | string)[] = [1];
+    if (currentPage > 3) {
+      pages.push('...');
+    }
+    const start = Math.max(2, currentPage - 1);
+    const end = Math.min(totalPages - 1, currentPage + 1);
+    for (let i = start; i <= end; i++) {
+      pages.push(i);
+    }
+    if (currentPage < totalPages - 2) {
+      pages.push('...');
+    }
+    pages.push(totalPages);
+    return pages;
+  };
+
   // Strict 6px solid dot + Sentence case text (Vercel / Linear system)
   const renderStatus = (status: string) => {
     switch (status) {
@@ -366,8 +658,14 @@ export const StoreDashboard: React.FC = () => {
             Đang chuẩn bị
           </span>
         );
-      case 'OUT_FOR_DELIVERY':
       case 'READY_FOR_DELIVERY':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0"></span>
+            Sẵn sàng giao
+          </span>
+        );
+      case 'OUT_FOR_DELIVERY':
       case 'SHIPPING':
         return (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
@@ -376,6 +674,12 @@ export const StoreDashboard: React.FC = () => {
           </span>
         );
       case 'DELIVERED':
+        return (
+          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
+            Đã giao · Chờ hoàn tất
+          </span>
+        );
       case 'COMPLETED':
         return (
           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
@@ -421,92 +725,43 @@ export const StoreDashboard: React.FC = () => {
     },
   };
 
+  const getOrderShortCode = (num?: string | null): string => {
+    if (!num) return '';
+    const clean = String(num).trim().replace(/^Đơn\s*#?/i, '').replace(/^#/, '');
+    if (clean.includes('-')) {
+      const parts = clean.split('-');
+      return parts[parts.length - 1];
+    }
+    return clean.length > 6 ? clean.slice(-4) : clean;
+  };
+
+  const cleanOrderNumber = String(newOrderAlert?.orderNumber || '')
+    .trim()
+    .replace(/^Đơn\s*#?/i, '')
+    .replace(/^#/, '');
+
+  const alertShortCode = getOrderShortCode(cleanOrderNumber);
+
+  // Look up if this order exists in current orders list and check its status
+  const matchedAlertOrder = newOrderAlert?.type === 'CREATE'
+    ? orders.find(
+        (o) =>
+          (newOrderAlert.orderId && o.id === newOrderAlert.orderId) ||
+          (cleanOrderNumber && String(o.orderNumber || '').replace(/^#/, '') === cleanOrderNumber)
+      )
+    : undefined;
+
+  // Strict rule: new order alert is ONLY visible while the order is PENDING (chưa tiếp nhận)
+  const isAlertVisible = Boolean(
+    newOrderAlert &&
+    (newOrderAlert.type === 'CANCEL' || !matchedAlertOrder || matchedAlertOrder.status === 'PENDING')
+  );
+
   return (
     <div className="w-full space-y-3.5 text-zinc-900 dark:text-zinc-100">
 
       {/* ── Page Header ── */}
       <div className="w-full">
-
-        {/* Live Alert Strip */}
-        {newOrderAlert && (
-          <div
-            className={`mb-3 px-3.5 py-2.5 rounded-lg border flex flex-col sm:flex-row sm:items-center justify-between gap-2.5 ${
-              newOrderAlert.type === 'CREATE'
-                ? 'bg-zinc-900 text-white border-zinc-800'
-                : 'bg-rose-950 text-rose-100 border-rose-900'
-            }`}
-            style={{ animation: 'slideDown 0.2s ease-out' }}
-          >
-            <div className="flex items-center gap-2.5 min-w-0">
-              <span className="flex h-2 w-2 relative shrink-0">
-                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
-                <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500"></span>
-              </span>
-              <div className="min-w-0">
-                <div className="flex items-center gap-2">
-                  <span className="font-mono text-[11px] font-bold text-emerald-400">
-                    #{newOrderAlert.orderNumber}
-                  </span>
-                  <span className="text-xs font-medium truncate">
-                    {newOrderAlert.type === 'CREATE'
-                      ? `${newOrderAlert.customerName || 'Khách hàng'} · ${newOrderAlert.quantity || 1}× ${newOrderAlert.productName || 'Sản phẩm'} · ${Number(newOrderAlert.totalAmount || 0).toLocaleString()} ₫`
-                      : `Đơn #${newOrderAlert.orderNumber} đã hủy qua nút bấm — Đã hoàn kho`}
-                  </span>
-                </div>
-                {newOrderAlert.deliveryAddress && (
-                  <p className="text-[10.5px] text-zinc-400 truncate mt-0.5">
-                    📍 {newOrderAlert.deliveryAddress}
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0 self-end sm:self-center">
-              {newOrderAlert.type === 'CREATE' && (
-                <>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      announceStoreOrder({
-                        customerName: newOrderAlert.customerName,
-                        productName: newOrderAlert.productName,
-                        quantity: newOrderAlert.quantity,
-                        totalAmount: newOrderAlert.totalAmount,
-                        orderNumber: newOrderAlert.orderNumber,
-                      });
-                    }}
-                    className="px-2 py-1 bg-white/10 hover:bg-white/20 text-white text-xs font-medium rounded-md flex items-center gap-1.5 transition-colors"
-                  >
-                    <Volume2 className="w-3.5 h-3.5" />
-                    Nghe lại
-                  </button>
-
-                  <motion.button
-                    type="button"
-                    whileTap={{ scale: 0.96 }}
-                    onClick={() => {
-                      if (newOrderAlert.orderId) {
-                        handleUpdateStatus(newOrderAlert.orderId, 'CONFIRMED');
-                      }
-                      setNewOrderAlert(null);
-                    }}
-                    className="px-3 py-1 bg-emerald-500 hover:bg-emerald-400 text-zinc-950 text-xs font-bold rounded-md shadow-xs transition-colors"
-                  >
-                    Tiếp Nhận Đơn
-                  </motion.button>
-                </>
-              )}
-              <button
-                type="button"
-                onClick={() => setNewOrderAlert(null)}
-                className="p-1 text-zinc-400 hover:text-white transition-colors"
-              >
-                <X className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          </div>
-        )}
-
         {/* Page Title Row */}
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-zinc-200 dark:border-zinc-800">
           <div>
@@ -522,43 +777,6 @@ export const StoreDashboard: React.FC = () => {
             <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
               Luồng sự kiện tức thì từ Smart Order Button trong mạng lưới khách hàng
             </p>
-          </div>
-
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <button
-              type="button"
-              onClick={() => setShowChart(!showChart)}
-              className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-md border text-xs font-medium transition-all cursor-pointer ${
-                showChart
-                  ? 'bg-[#287DA8] text-white border-[#287DA8] shadow-[0_2px_8px_rgba(40,125,168,0.25)]'
-                  : 'bg-white dark:bg-zinc-900 border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:border-[#287DA8] hover:text-[#287DA8]'
-              }`}
-            >
-              <TrendingUp className="w-3.5 h-3.5" />
-              Biểu đồ 7 ngày
-              {showChart ? <ChevronUp className="w-3 h-3" /> : <ChevronDown className="w-3 h-3" />}
-            </button>
-
-            <motion.button
-              type="button"
-              whileTap={{ scale: 0.95 }}
-              onClick={() => setShowInventoryModal(true)}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 hover:bg-[#287DA8]/5 text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] border border-zinc-200 dark:border-zinc-700 hover:border-[#287DA8]/40 text-xs font-medium transition-all cursor-pointer shadow-2xs"
-            >
-              <Boxes className="w-3.5 h-3.5" />
-              Kho Hàng
-              <span className="font-mono text-zinc-400 dark:text-zinc-600">({inventoryList.length})</span>
-            </motion.button>
-
-            <button
-              type="button"
-              onClick={() => testStoreBankSpeaker()}
-              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 hover:bg-[#287DA8]/5 text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] border border-zinc-200 dark:border-zinc-700 hover:border-[#287DA8]/40 text-xs font-medium transition-all cursor-pointer"
-              title="Nghe thử âm lượng loa thông báo"
-            >
-              <Volume2 className="w-3.5 h-3.5" />
-              Thử Loa
-            </button>
           </div>
         </div>
       </div>
@@ -715,7 +933,7 @@ export const StoreDashboard: React.FC = () => {
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Tìm mã đơn, tên, SĐT..."
+                placeholder="Tìm mã đơn, tên, SĐT, địa chỉ..."
                 className="w-full pl-8 pr-7 py-1 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-[#287DA8] focus:ring-1 focus:ring-[#287DA8]/20 transition-colors"
               />
               {searchQuery && (
@@ -742,7 +960,7 @@ export const StoreDashboard: React.FC = () => {
         </div>
 
         {/* Table */}
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden">
+        <div ref={tableTopRef} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden scroll-mt-20">
           {loading ? (
             <div className="py-16 text-center">
               <div className="inline-flex items-center gap-2 text-xs font-mono text-zinc-400">
@@ -758,12 +976,13 @@ export const StoreDashboard: React.FC = () => {
               </p>
             </div>
           ) : (
-            <div className="overflow-x-auto">
+            <>
+              <div className="overflow-x-auto">
               <table className="w-full text-left border-collapse">
                 <thead>
                   <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-800/40 text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
                     <th className="py-2 px-3.5 font-semibold">Mã Đơn</th>
-                    <th className="py-2 px-3.5 font-semibold">Khách Hàng</th>
+                    <th className="py-2 px-3.5 font-semibold">Người nhận</th>
                     <th className="py-2 px-3.5 font-semibold">Địa Chỉ</th>
                     <th className="py-2 px-3.5 font-semibold">Mặt Hàng</th>
                     <th className="py-2 px-3.5 font-semibold">Trạng Thái</th>
@@ -776,10 +995,15 @@ export const StoreDashboard: React.FC = () => {
                   animate="show"
                   className="divide-y divide-zinc-100 dark:divide-zinc-800/60 text-xs"
                 >
-                  {filteredOrders.map((order) => {
+                  {paginatedOrders.map((order) => {
                     const items = Array.isArray(order.items) ? order.items : [];
                     const firstItem = items[0];
                     const otherCount = Math.max(0, items.length - 1);
+                    const confirmedStatus = String((order as any).orderStatus || order.status || '').toUpperCase();
+                    const pendingStatus = pendingStatusUpdates[order.id];
+                    const orderStatus = pendingStatus && pendingStatus !== 'COMPLETED' && !['COMPLETED', 'CANCELLED', 'REJECTED'].includes(confirmedStatus)
+                      ? pendingStatus : confirmedStatus;
+                    const isCancelled = ['CANCELLED', 'REJECTED'].includes(orderStatus);
                     return (
                       <motion.tr
                         key={order.id}
@@ -788,8 +1012,18 @@ export const StoreDashboard: React.FC = () => {
                       >
                         {/* Mã Đơn / Giờ */}
                         <td className="py-2.5 px-3.5 whitespace-nowrap">
-                          <div className="font-mono font-bold text-[11.5px] text-zinc-900 dark:text-zinc-100">
-                            #{order.orderNumber}
+                          <div
+                            className="font-mono text-[11.5px] flex items-baseline gap-1"
+                            title={`Mã đầy đủ: #${order.orderNumber}`}
+                          >
+                            <span className="font-bold text-slate-900 dark:text-zinc-100">
+                              #{getOrderShortCode(order.orderNumber)}
+                            </span>
+                            {order.orderNumber.includes('-') && (
+                              <span className="text-[9.5px] text-slate-400 dark:text-zinc-500 font-normal truncate max-w-[110px]">
+                                · {order.orderNumber.slice(0, order.orderNumber.lastIndexOf('-'))}
+                              </span>
+                            )}
                           </div>
                           <div className="text-[9.5px] font-mono text-zinc-400 mt-0.5">
                             {new Date(order.createdAt).toLocaleTimeString('vi-VN', {
@@ -804,25 +1038,26 @@ export const StoreDashboard: React.FC = () => {
                           </div>
                         </td>
 
-                        {/* Khách Hàng */}
-                        <td className="py-2.5 px-3.5 whitespace-nowrap">
-                          <div className="font-semibold text-[11.5px] text-zinc-900 dark:text-zinc-100">
-                            {order.customerName}
+                        {/* Người nhận ghi trên đơn hàng */}
+                        <td className="py-2.5 px-3.5 min-w-[160px] max-w-[240px]">
+                          <div className="font-semibold text-[11.5px] text-zinc-900 dark:text-zinc-100 whitespace-normal break-words">
+                            {order.customerName || 'Chưa có tên người nhận'}
                           </div>
                           <div className="text-[10px] font-mono text-zinc-400 flex items-center gap-1 mt-0.5">
                             <Phone className="w-2.5 h-2.5" />
-                            {order.customerPhone || '—'}
+                            {order.customerPhone ? <a href={`tel:${order.customerPhone}`} className="break-all hover:underline">{order.customerPhone}</a> : 'Chưa có số điện thoại'}
                           </div>
                         </td>
 
                         {/* Địa Chỉ */}
                         <td className="py-2.5 px-3.5 max-w-[240px]">
                           <div
-                            className="truncate text-[11.5px] text-zinc-700 dark:text-zinc-300 font-medium"
+                            className="whitespace-pre-line break-words text-[11.5px] text-zinc-700 dark:text-zinc-300 font-medium"
                             title={order.deliveryAddress}
                           >
-                            {order.deliveryAddress}
+                            {order.deliveryAddress || 'Chưa có địa chỉ giao hàng'}
                           </div>
+                          {deliveryMapUrl(order) && <a href={deliveryMapUrl(order)!} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs text-sky-600 hover:underline">Xem vị trí giao hàng</a>}
                           {order.device && (
                             <div className="text-[9.5px] font-mono text-zinc-400 flex items-center gap-1 mt-0.5">
                               <Radio className="w-2.5 h-2.5 text-emerald-500" />
@@ -839,19 +1074,38 @@ export const StoreDashboard: React.FC = () => {
                               <span className="text-[10px] text-zinc-400 ml-1">+{otherCount} món</span>
                             )}
                           </div>
-                          <div className="text-[10.5px] font-mono font-semibold text-zinc-500 dark:text-zinc-400 mt-0.5">
-                            {Number(order.totalAmount || (order as any).total_amount || 0).toLocaleString()} ₫ · COD
+                          <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[10.5px] font-mono font-semibold">
+                            <span className="text-zinc-500 dark:text-zinc-400">
+                              {Number(order.totalAmount || (order as any).total_amount || 0).toLocaleString()} ₫ ·
+                            </span>
+                            {isCancelled ? (
+                              <span className="text-zinc-400 dark:text-zinc-500">Đơn đã hủy · Không cần thanh toán</span>
+                            ) : order.paymentStatus === 'REFUND_PENDING' ? (
+                              <span className="text-rose-600 dark:text-rose-400">Đã nhận tiền · Chờ hoàn PayOS</span>
+                            ) : order.paymentStatus === 'PAID' ? (
+                              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold">
+                                <Check className="w-3 h-3" />
+                                {['CASH_ON_DELIVERY', 'COD'].includes(order.paymentMethod as string) ? 'Đã thu tiền mặt' : 'Đã thanh toán (PayOS)'}
+                              </span>
+                            ) : ['CASH_ON_DELIVERY', 'COD'].includes(order.paymentMethod as string) ? (
+                              <span className="text-amber-600 dark:text-amber-400 font-medium">COD · Chờ thu tiền khi giao</span>
+                            ) : order.paymentMethod === 'PAYOS' ? (
+                              <span className="text-amber-600 dark:text-amber-400 font-medium">Chờ thanh toán PayOS</span>
+                            ) : (
+                              <span className="text-zinc-400">Chờ thanh toán</span>
+                            )}
                           </div>
                         </td>
 
                         {/* Trạng Thái */}
                         <td className="py-2.5 px-3.5 whitespace-nowrap">
-                          {renderStatus(order.status)}
+                          {renderStatus(orderStatus)}
                         </td>
 
                         {/* Thao Tác */}
                         <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
-                          {order.status === 'PENDING' && (
+                          <fieldset disabled={Boolean(pendingStatusUpdates[order.id])} aria-busy={Boolean(pendingStatusUpdates[order.id])} className="m-0 min-w-0 border-0 p-0 disabled:opacity-60">
+                          {orderStatus === 'PENDING' && (
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
@@ -861,7 +1115,7 @@ export const StoreDashboard: React.FC = () => {
                               Tiếp Nhận
                             </motion.button>
                           )}
-                          {order.status === 'CONFIRMED' && (
+                          {orderStatus === 'CONFIRMED' && (
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
@@ -871,7 +1125,7 @@ export const StoreDashboard: React.FC = () => {
                               Chuẩn Bị
                             </motion.button>
                           )}
-                          {order.status === 'PREPARING' && (
+                          {orderStatus === 'PREPARING' && (
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
@@ -881,25 +1135,47 @@ export const StoreDashboard: React.FC = () => {
                               Xuất Giao
                             </motion.button>
                           )}
-                          {(order.status === 'OUT_FOR_DELIVERY' || order.status === 'SHIPPING' || order.status === 'READY_FOR_DELIVERY') && (
+                          {orderStatus === 'READY_FOR_DELIVERY' && (
+                            <motion.button
+                              type="button"
+                              whileTap={{ scale: 0.96 }}
+                              onClick={() => handleUpdateStatus(order.id, 'SHIPPING')}
+                              className="px-2.5 py-1 bg-[#287DA8] hover:bg-[#206588] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
+                            >
+                              Bắt Đầu Giao
+                            </motion.button>
+                          )}
+                          {(orderStatus === 'OUT_FOR_DELIVERY' || orderStatus === 'SHIPPING') && (
+                            <motion.button
+                              type="button"
+                              whileTap={{ scale: 0.96 }}
+                              onClick={() => handleUpdateStatus(order.id, 'DELIVERED')}
+                              className="px-2.5 py-1 bg-[#4AA785] hover:bg-[#3d9173] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(74,167,133,0.25)] transition-all cursor-pointer"
+                            >
+                              Đã Giao ✓
+                            </motion.button>
+                          )}
+                          {orderStatus === 'DELIVERED' && (
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
                               onClick={() => handleUpdateStatus(order.id, 'COMPLETED')}
                               className="px-2.5 py-1 bg-[#4AA785] hover:bg-[#3d9173] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(74,167,133,0.25)] transition-all cursor-pointer"
                             >
-                              Đã Giao ✓
+                              Hoàn Tất & Cộng Ví
                             </motion.button>
                           )}
-                          {(order.status === 'COMPLETED' || (order.status as string) === 'DELIVERED') && (
+                          {orderStatus === 'COMPLETED' && (
                             <span className="text-[10.5px] font-mono text-[#4AA785] dark:text-[#5ec29e] flex items-center justify-end gap-1 font-semibold">
                               <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                               Đã giao
                             </span>
                           )}
-                          {(order.status === 'CANCELLED' || order.status === 'REJECTED') && (
+                          {isCancelled && (
                             <span className="text-[10.5px] font-mono text-zinc-400">Đã hủy</span>
                           )}
+                          </fieldset>
+                          {pendingStatusUpdates[order.id] && <span role="status" className="mt-1 block text-[10px] text-slate-500">Đang xác nhận…</span>}
                         </td>
                       </motion.tr>
                     );
@@ -907,7 +1183,82 @@ export const StoreDashboard: React.FC = () => {
                 </motion.tbody>
               </table>
             </div>
-          )}
+
+            {/* Pagination Bar */}
+            <div className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-col sm:flex-row items-center justify-between gap-3">
+              <div className="text-xs text-slate-500 dark:text-zinc-400 tabular-nums">
+                Hiển thị{' '}
+                <span className="font-semibold text-slate-700 dark:text-zinc-200">
+                  {filteredOrders.length === 0 ? 0 : startIndex + 1}–{endIndex}
+                </span>{' '}
+                trong tổng số{' '}
+                <span className="font-semibold text-slate-700 dark:text-zinc-200">
+                  {filteredOrders.length}
+                </span>{' '}
+                đơn hàng
+              </div>
+
+              {totalPages > 1 && (
+                <div className="flex items-center gap-1.5 ml-auto">
+                  {/* Nút Trước */}
+                  <button
+                    type="button"
+                    disabled={currentPage === 1}
+                    onClick={() => handlePageChange(currentPage - 1)}
+                    className="px-2.5 py-1 text-xs font-medium rounded-lg text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center gap-1 select-none"
+                    title="Trang trước"
+                  >
+                    <ChevronLeft className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">Trước</span>
+                  </button>
+
+                  {/* Các nút số trang */}
+                  <div className="flex items-center gap-1">
+                    {getPageNumbers().map((page, idx) => {
+                      if (page === '...') {
+                        return (
+                          <span
+                            key={`ellipsis-${idx}`}
+                            className="w-7 h-7 flex items-center justify-center text-xs text-slate-400 select-none"
+                          >
+                            …
+                          </span>
+                        );
+                      }
+                      const isCurrent = page === currentPage;
+                      return (
+                        <button
+                          key={`page-${page}`}
+                          type="button"
+                          onClick={() => handlePageChange(Number(page))}
+                          className={`min-w-7 h-7 px-2 text-xs font-medium rounded-lg transition-colors cursor-pointer tabular-nums flex items-center justify-center select-none ${
+                            isCurrent
+                              ? 'bg-[#0E6BA8] text-white shadow-xs font-semibold'
+                              : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white'
+                          }`}
+                        >
+                          {page}
+                        </button>
+                      );
+                    })}
+                  </div>
+
+                  {/* Nút Sau */}
+                  <button
+                    type="button"
+                    disabled={currentPage === totalPages}
+                    onClick={() => handlePageChange(currentPage + 1)}
+                    className="px-2.5 py-1 text-xs font-medium rounded-lg text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center gap-1 select-none"
+                    title="Trang sau"
+                  >
+                    <span className="hidden sm:inline">Sau</span>
+                    <ChevronRight className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+            </div>
+          </>
+        )}
         </div>
       </div>
 
@@ -1195,7 +1546,7 @@ export const StoreDashboard: React.FC = () => {
                         </h4>
                         <div className="text-[12px] text-[#64748B] dark:text-zinc-400 font-normal flex items-center gap-1.5 mt-0.5 flex-wrap">
                           <span className="font-semibold text-[#0F172A] dark:text-white tabular-nums">
-                            {Number(item.price || (item as any).unitPrice || 0).toLocaleString('vi-VN')} ₫
+                            {item.price.toLocaleString('vi-VN')} ₫
                           </span>
                           <span className="text-slate-300 dark:text-zinc-600">·</span>
                           <span>{item.unit}</span>
@@ -1303,6 +1654,7 @@ export const StoreDashboard: React.FC = () => {
     </AnimatePresence>,
     document.body
   )}
+
     </div>
   );
 };

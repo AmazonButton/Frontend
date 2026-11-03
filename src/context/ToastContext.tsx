@@ -57,7 +57,7 @@ function dispatchGlobalToast(type: ToastType, message: string, options?: ToastOp
       type === 'error' ? 'Đã có lỗi xảy ra' :
       type === 'warning' ? 'Cảnh báo' : 'Thông báo'
     ),
-    duration: options?.duration ?? 4000,
+    duration: options?.duration ?? 5000,
   };
   listeners.forEach((fn) => fn(item));
 }
@@ -74,17 +74,17 @@ const ToastCard = React.forwardRef<
 
   useEffect(() => {
     const startTime = Date.now();
+    const timeout = setTimeout(() => onClose(item.id), item.duration);
     const interval = setInterval(() => {
       const elapsed = Date.now() - startTime;
       const remaining = Math.max(0, 100 - (elapsed / item.duration) * 100);
       setProgress(remaining);
       if (remaining <= 0) {
         clearInterval(interval);
-        onClose(item.id);
       }
     }, 25);
 
-    return () => clearInterval(interval);
+    return () => { clearInterval(interval); clearTimeout(timeout); };
   }, [item, onClose]);
 
   const config = {
@@ -143,7 +143,7 @@ const ToastCard = React.forwardRef<
           <h4 className="text-sm font-semibold text-slate-900 dark:text-white leading-tight">
             {item.title}
           </h4>
-          <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed break-words">
+          <p className="text-xs text-slate-600 dark:text-slate-300 mt-1 leading-relaxed whitespace-pre-line break-words">
             {item.message}
           </p>
         </div>
@@ -195,7 +195,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
         type === 'error' ? 'Đã có lỗi xảy ra' :
         type === 'warning' ? 'Cảnh báo' : 'Thông báo'
       ),
-      duration: options?.duration ?? 4000,
+      duration: options?.duration ?? 5000,
     };
     addToast(item);
   }, [addToast]);
@@ -227,7 +227,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       {/* Floating single status message. Full event history belongs in the notification bell. */}
       <div className="fixed bottom-5 right-5 z-[9999] flex flex-col-reverse items-end gap-2.5 pointer-events-none w-full max-w-sm sm:max-w-md px-4 sm:px-0">
-        <AnimatePresence>
+        <AnimatePresence mode="wait">
           {toasts.map((item) => (
             <ToastCard key={item.id} item={item} onClose={removeToast} />
           ))}

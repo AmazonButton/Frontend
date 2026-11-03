@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
+import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../services/api';
 import { mergeOrderUpdate, normalizeOrder } from '../../services/order-events';
@@ -8,7 +9,7 @@ import { toast } from '../../context/ToastContext';
 import { useSound } from '../../context/OrderSoundContext';
 import { subscribeToCustomer, getSocket } from '../../services/socket';
 import { Device, Order, Product } from '../../types';
-import { Radio, ShoppingBag, ShoppingCart, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3, Settings, ChevronDown, RotateCcw, Store, Unlink2, Trash2, Volume2, VolumeX } from 'lucide-react';
+import { Radio, ShoppingBag, ShoppingCart, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3, Settings, ChevronDown, RotateCcw, Store, Unlink2, Trash2, Volume2, VolumeX, Cpu } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Floating3DCard } from '../../components/3d/Floating3DCard';
 import { WebBluetoothProvisioner } from '../../components/devices/WebBluetoothProvisioner';
@@ -217,6 +218,7 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
 
 export const CustomerHomePage: React.FC = () => {
   const { user } = useAuth();
+  const navigate = useNavigate();
   const { playOrderChime, playCancelChime, isSoundEnabled, toggleSound } = useSound();
   const [devices, setDevices] = useState<Device[]>([]);
   const [orders, setOrders] = useState<Order[]>([]);
@@ -361,6 +363,9 @@ export const CustomerHomePage: React.FC = () => {
     const socket = getSocket();
 
     const handleOrderCreated = (data: any) => {
+      // 1. Phát âm thanh chuông Ting Ting thông báo
+      playOrderChime(true);
+
       // Keep visual feedback active on the button card for 2.5s
       setIsPressing(true);
       if (data.order?.deviceId || data.deviceId) {
@@ -1094,7 +1099,7 @@ export const CustomerHomePage: React.FC = () => {
         transition={{ duration: 0.45, delay: 0.1, ease: [0.25, 0.46, 0.45, 0.94] }}
         className="pt-2"
       >
-        <div className="flex items-center justify-between mb-4">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
           <div className="flex items-baseline gap-2">
             <h2 className="text-base font-semibold text-slate-900 tracking-tight">
               Nút Đặt Hàng
@@ -1104,6 +1109,24 @@ export const CustomerHomePage: React.FC = () => {
                 ({devices.length} thiết bị)
               </span>
             )}
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => navigate('/customer/rentals')}
+              className="text-xs text-[#0E6BA8] hover:text-[#0b5586] font-semibold flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 dark:bg-sky-950/40 dark:hover:bg-sky-900/50 transition-colors cursor-pointer"
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>Thuê nút bấm mới</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setShowAirPodsModal(true)}
+              className="text-xs text-slate-700 dark:text-zinc-300 hover:text-slate-900 dark:hover:text-white font-medium flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
+            >
+              <Bluetooth className="w-3.5 h-3.5 text-blue-500" />
+              <span>Ghép nối Bluetooth</span>
+            </button>
           </div>
         </div>
 
@@ -1122,15 +1145,27 @@ export const CustomerHomePage: React.FC = () => {
               <Radio className="w-5 h-5" />
             </div>
             <p className="text-sm font-medium text-slate-700 mb-1">Chưa có nút bấm nào</p>
-            <p className="text-xs text-slate-400 mb-4 max-w-xs mx-auto">Kết nối nút đặt hàng thông minh của bạn để bắt đầu.</p>
-            <motion.button
-              whileTap={{ scale: 0.98 }}
-              onClick={() => setShowAirPodsModal(true)}
-              className="px-4 py-2 bg-[#0E6BA8] hover:bg-[#0B5586] text-white rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-all duration-150 active:scale-[0.98] shadow-xs cursor-pointer"
-            >
-              <Bluetooth className="w-3.5 h-3.5" />
-              Ghép nối nút bấm
-            </motion.button>
+            <p className="text-xs text-slate-400 mb-4 max-w-sm mx-auto">
+              Đăng ký gói thuê nút bấm thông minh giao tận nhà hoặc kết nối nút hiện có qua Bluetooth.
+            </p>
+            <div className="flex items-center justify-center gap-2.5 flex-wrap">
+              <motion.button
+                whileTap={{ scale: 0.98 }}
+                onClick={() => navigate('/customer/rentals')}
+                className="px-4 py-2 bg-[#0E6BA8] hover:bg-[#0B5586] text-white rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-all duration-150 active:scale-[0.98] shadow-xs cursor-pointer"
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                Đăng ký thuê nút mới
+              </motion.button>
+              <motion.button
+                whileTap={{ scale: 0.98 }}
+                onClick={() => setShowAirPodsModal(true)}
+                className="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-xs font-semibold inline-flex items-center gap-2 transition-all duration-150 active:scale-[0.98] shadow-xs cursor-pointer"
+              >
+                <Bluetooth className="w-3.5 h-3.5 text-blue-500" />
+                Ghép nối Bluetooth
+              </motion.button>
+            </div>
           </motion.div>
         ) : (
           <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">

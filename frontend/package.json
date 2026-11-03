@@ -4,6 +4,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
+    "test:maps": "node --experimental-strip-types --test tests/delivery-location.test.mjs tests/goong-maps.test.mjs",
+    "test:store-status": "node --experimental-strip-types --test tests/store-status-update.test.mjs",
     "dev": "vite",
     "build": "tsc && vite build",
     "test:hooks": "node --test tests/hooks-fast-refresh.test.mjs",

@@ -1,4 +1,5 @@
 import type { Order } from '../types';
+import { readDeliveryLocation } from './delivery-location.ts';
 
 export const ORDER_EVENT = 'smart-order:order-event';
 export type OrderEventType = 'ORDER_CREATED' | 'ORDER_CANCELLED' | 'ORDER_STATUS_CHANGED' | 'ORDER_PAYMENT_CHANGED';
@@ -24,18 +25,36 @@ export function getOrderRecipient(raw: any) {
 // the top level, while current events wrap them in `order`.
 export function normalizeOrder(raw: any): Order {
   const id = String(raw?.id ?? raw?.orderId ?? '');
+  const point = readDeliveryLocation(raw?.shippingLatitude ?? raw?.shipping_latitude, raw?.shippingLongitude ?? raw?.shipping_longitude);
   return {
     ...raw,
     id,
     orderNumber: raw?.orderNumber || raw?.orderCode || id,
     status: raw?.status || raw?.orderStatus || 'PENDING',
     ...getOrderRecipient(raw),
+    shippingLatitude: point?.lat ?? null,
+    shippingLongitude: point?.lng ?? null,
     items: Array.isArray(raw?.items) ? raw.items : [],
   };
 }
 
 export function mergeOrderUpdate(current: Order, incoming: any): Order {
   const merged = { ...current, ...incoming };
+  const point = readDeliveryLocation(incoming?.shippingLatitude ?? incoming?.shipping_latitude, incoming?.shippingLongitude ?? incoming?.shipping_longitude);
+  const address = getOrderRecipient(incoming).deliveryAddress;
+  if (address) merged.shippingAddress = address;
+  // Clear legacy aliases so they cannot resurrect an invalidated pin.
+  delete merged.shipping_latitude;
+  delete merged.shipping_longitude;
+  if (!point) {
+    // Partial payment/status events must preserve the saved pin. A changed
+    // address without coordinates must never keep the previous address's pin.
+    merged.shippingLatitude = address && address !== current.deliveryAddress ? null : current.shippingLatitude;
+    merged.shippingLongitude = address && address !== current.deliveryAddress ? null : current.shippingLongitude;
+  } else {
+    merged.shippingLatitude = point.lat;
+    merged.shippingLongitude = point.lng;
+  }
   // Status/payment events can omit contact details or normalize them to empty
   // strings. Such an event must not erase the recipient already shown.
   for (const field of ['customerName', 'customerPhone', 'deliveryAddress', 'shippingRecipientName', 'shippingPhone', 'shippingAddress', 'shipping_recipient_name', 'shipping_phone', 'shipping_address']) {
