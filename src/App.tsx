@@ -124,6 +124,7 @@ export const App: React.FC = () => {
             <Route path="/store" element={<Navigate to="/store/dashboard" replace />} />
             <Route path="/store/dashboard" element={<StoreDashboard />} />
             <Route path="/store/devices" element={<StoreDevicesPage />} />
+            <Route path="/store/rentals" element={<CustomerRentalsPage />} />
             <Route path="/store/device-templates" element={<StoreDeviceTemplatesPage />} />
             <Route path="/store/products" element={<StoreProductsPage />} />
             <Route path="/store/analytics" element={<StoreAnalyticsPage />} />

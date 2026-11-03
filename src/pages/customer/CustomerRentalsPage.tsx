@@ -28,6 +28,7 @@ import {
   ChevronDown,
   Banknote,
   Zap,
+  Plus,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { useAuth } from '../../context/AuthContext';
@@ -70,9 +71,10 @@ export const CustomerRentalsPage: React.FC = () => {
   // Fetch packages and my rentals
   const fetchData = useCallback(async () => {
     try {
+      const isCust = user?.role === 'CUSTOMER' || Boolean(user?.customerProfileId);
       const [pkgs, rentals] = await Promise.all([
-        rentalsService.listPackages(),
-        rentalsService.getMyRentals(),
+        rentalsService.listPackages().catch(() => []),
+        isCust ? rentalsService.getMyRentals().catch(() => []) : Promise.resolve([]),
       ]);
       setPackages(pkgs || []);
       setMyRentals(rentals || []);
@@ -82,7 +84,7 @@ export const CustomerRentalsPage: React.FC = () => {
       setIsLoading(false);
       setIsRefreshing(false);
     }
-  }, []);
+  }, [user?.role, user?.customerProfileId]);
 
   useEffect(() => {
     fetchData();
@@ -248,24 +250,32 @@ export const CustomerRentalsPage: React.FC = () => {
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
               <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-zinc-400 mb-1.5 font-medium">
-                <span className="hover:text-[#0E6BA8] cursor-pointer" onClick={() => navigate('/customer/home')}>
-                  Khách hàng
+                <span
+                  className="hover:text-[#0E6BA8] cursor-pointer"
+                  onClick={() => navigate(user?.role === 'CUSTOMER' ? '/customer/home' : '/store/dashboard')}
+                >
+                  {user?.role === 'CUSTOMER' ? 'Khách hàng' : 'Cửa hàng'}
                 </span>
                 <span>/</span>
-                <span className="text-slate-800 dark:text-zinc-200 font-semibold">Thuê nút bấm IoT</span>
+                <span className="text-slate-800 dark:text-zinc-200 font-semibold">Gói thuê nút bấm IoT</span>
               </div>
               <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900 dark:text-white flex items-center gap-2.5">
                 <Cpu className="w-6 h-6 text-[#0E6BA8] dark:text-[#38a5da]" />
-                <span>Dịch Vụ Thuê Nút Bấm Đặt Hàng Thông Minh</span>
+                <span>
+                  {user?.role === 'CUSTOMER'
+                    ? 'Dịch Vụ Thuê Nút Bấm Đặt Hàng Thông Minh'
+                    : 'Danh Mục Gói Thuê Nút Bấm IoT'}
+                </span>
               </h1>
               <p className="text-xs sm:text-sm text-slate-500 dark:text-zinc-400 mt-1 max-w-2xl leading-relaxed">
-                Trải nghiệm tiện ích đặt nước, gas & nhu yếu phẩm chỉ bằng 1-chạm. Không cần chi phí mua đứt thiết bị,
-                đổi mới miễn phí trọn đời, hỗ trợ giao và lắp đặt tận nhà.
+                {user?.role === 'CUSTOMER'
+                  ? 'Trải nghiệm tiện ích đặt nước, gas & nhu yếu phẩm chỉ bằng 1-chạm. Không cần chi phí mua đứt thiết bị, đổi mới miễn phí trọn đời, hỗ trợ giao và lắp đặt tận nhà.'
+                  : 'Bảng cước thuê và thông số các gói nút bấm IoT được phát hành trên hệ thống để khách hàng đăng ký sử dụng.'}
               </p>
             </div>
 
             {/* Quick Actions */}
-            <div className="flex items-center gap-2.5 shrink-0">
+            <div className="flex flex-wrap items-center gap-2.5 shrink-0">
               <button
                 type="button"
                 onClick={handleRefresh}
@@ -275,14 +285,35 @@ export const CustomerRentalsPage: React.FC = () => {
                 <RefreshCw className={`w-3.5 h-3.5 ${isRefreshing ? 'animate-spin' : ''}`} />
                 <span>Làm mới</span>
               </button>
-              <button
-                type="button"
-                onClick={() => navigate('/customer/home')}
-                className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-[#0E6BA8] hover:bg-[#0c598c] text-white transition-colors cursor-pointer shadow-xs"
-              >
-                <Smartphone className="w-3.5 h-3.5" />
-                <span>Nút của tôi</span>
-              </button>
+              {user?.role === 'CUSTOMER' ? (
+                <button
+                  type="button"
+                  onClick={() => navigate('/customer/home')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-[#0E6BA8] hover:bg-[#0c598c] text-white transition-colors cursor-pointer shadow-xs"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>Nút của tôi</span>
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => navigate('/store/devices')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-[#0E6BA8] hover:bg-[#0c598c] text-white transition-colors cursor-pointer shadow-xs"
+                >
+                  <Smartphone className="w-3.5 h-3.5" />
+                  <span>Kho thiết bị</span>
+                </button>
+              )}
+              {['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '') && (
+                <button
+                  type="button"
+                  onClick={() => navigate('/admin/dashboard?section=RENTALS')}
+                  className="inline-flex items-center gap-1.5 px-3.5 py-2 text-xs font-semibold rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white transition-colors cursor-pointer shadow-xs"
+                >
+                  <Plus className="w-3.5 h-3.5" />
+                  <span>Quản lý / Thêm gói thuê</span>
+                </button>
+              )}
             </div>
           </div>
 
