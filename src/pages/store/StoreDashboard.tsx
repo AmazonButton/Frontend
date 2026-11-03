@@ -1,3 +1,4 @@
+import { deliveryMapUrl } from '../../services/delivery-location';
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { createPortal } from 'react-dom';
@@ -12,6 +13,7 @@ import { AnalyticsChart } from '../../components/AnalyticsChart';
 import { Order } from '../../types';
 import { mergeOrderUpdate, normalizeOrder, normalizeOrderEvent, ORDER_EVENT, publishOrderEvent } from '../../services/order-events';
 import { ShippingContact } from '../../components/orders/ShippingContact';
+import { subscribeRentalChannelEvents } from '../../services/rental-notifications';
 import { getUserStoreId } from '../../services/order-reconciliation';
 import {
   Wallet,
@@ -73,6 +75,11 @@ export const StoreDashboard: React.FC = () => {
   const { playOrderChime, announceStoreOrder, testStoreBankSpeaker } = useSound();
 
   const [orders, setOrders] = useState<Order[]>([]);
+  const latestOrdersRef = useRef(orders);
+  latestOrdersRef.current = orders;
+  const [pendingStatusUpdates, setPendingStatusUpdates] = useState<Record<string, string>>({});
+  const statusUpdatesRef = useRef(new Map<string, { previous: Order; displayStatus: string }>());
+  const orderListRevision = useRef(0);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -111,10 +118,16 @@ export const StoreDashboard: React.FC = () => {
   const cancelAlertTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const fetchOrders = async () => {
+    const revision = orderListRevision.current;
     try {
       const orderRes = await api.get('/orders');
+      if (revision !== orderListRevision.current) return;
       if (orderRes.data.success) {
-        const fetchedOrders: Order[] = orderRes.data.data.map(normalizeOrder);
+        const fetchedOrders: Order[] = orderRes.data.data.map((raw: any) => {
+          const order = normalizeOrder(raw);
+          const pending = statusUpdatesRef.current.get(order.id);
+          return pending ? { ...order, status: pending.displayStatus as Order['status'], orderStatus: pending.displayStatus } : order;
+        });
         setOrders(fetchedOrders);
         setChartData(buildChartDataFromOrders(fetchedOrders));
 
@@ -142,6 +155,7 @@ export const StoreDashboard: React.FC = () => {
 
   useEffect(() => {
     if (!token) return;
+    setPendingStatusUpdates({});
     fetchOrders();
 
     if (storeId) {
@@ -173,11 +187,9 @@ export const StoreDashboard: React.FC = () => {
       });
 
       // 3. Hiện toast thông báo góc màn hình
-      const code = newOrder.orderCode || newOrder.orderNumber || newOrder.id;
-      toast.success(`Đã nhận đơn hàng mới #${code}!`, {
-        title: '🔔 Đơn hàng mới 1-Chạm!',
-        duration: 5000,
-      });
+      const code = (newOrder as any).orderCode || newOrder.orderNumber || newOrder.id;
+      // 3. Hiện toast thông báo góc màn hình
+      toast.success(`Đã nhận đơn hàng mới #${code}!`);
 
       const rawNum =
         newOrder?.orderNumber ||
@@ -186,6 +198,8 @@ export const StoreDashboard: React.FC = () => {
       const orderNumber = String(rawNum).replace(/^#/, '');
 
       if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
+      statusUpdatesRef.current.clear();
+      ++orderListRevision.current;
       setNewOrderAlert({
         type: 'CREATE',
         orderNumber,
@@ -276,6 +290,16 @@ export const StoreDashboard: React.FC = () => {
     window.addEventListener(ORDER_EVENT, handleLocalEvent);
     window.addEventListener('focus', fetchOrders);
 
+    const unsubRentals = subscribeRentalChannelEvents({
+      onRentalPurchased: (data) => {
+        playOrderChime();
+        toast.success(
+          `Khách hàng ${data.customerName || 'Khách'} vừa đăng ký gói thuê ${data.packageName} (${data.buttonQuantity || 1} nút IoT)!`,
+          { title: '📦 Đăng ký thuê nút mới!', duration: 7000 }
+        );
+      },
+    });
+
     const handleDevicesAllocated = (payload: any) => {
       if (user?.storeId && payload?.storeId && String(user.storeId) !== String(payload.storeId)) {
         return;
@@ -325,14 +349,24 @@ export const StoreDashboard: React.FC = () => {
       socket.off('devices:allocated', handleDevicesAllocated);
       window.removeEventListener(ORDER_EVENT, handleLocalEvent);
       window.removeEventListener('focus', fetchOrders);
+      unsubRentals();
       if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
     };
   }, [user]);
 
   const handleUpdateStatus = async (orderId: string, nextStatus: string) => {
-    // Optimistically update orders and clear any alert matching this order
+    if (statusUpdatesRef.current.has(orderId)) return;
+    const previous = orders.find((order) => order.id === orderId);
+    if (!previous) return;
+    // Completing an order can settle money: show success only after the API.
+    const displayStatus = nextStatus === 'COMPLETED' ? String(previous.orderStatus || previous.status) : nextStatus;
+    const operation = { previous, displayStatus };
+    statusUpdatesRef.current.set(orderId, operation);
+    ++orderListRevision.current;
+    setPendingStatusUpdates((current) => ({ ...current, [orderId]: nextStatus }));
+    // The row reads orderStatus first, so both aliases must change together.
     setOrders((prev) =>
-      prev.map((o) => (o.id === orderId ? { ...o, status: nextStatus as any } : o))
+      prev.map((o) => (o.id === orderId ? { ...o, status: displayStatus as Order['status'], orderStatus: displayStatus } : o))
     );
 
     setNewOrderAlert((currentAlert: any) => {
@@ -351,11 +385,13 @@ export const StoreDashboard: React.FC = () => {
 
     try {
       const res = await api.patch(`/orders/${orderId}/status`, { status: nextStatus });
+      if (statusUpdatesRef.current.get(orderId) !== operation) return;
+      ++orderListRevision.current;
       if (res.data.success) {
-        const existingOrder = orders.find((order) => order.id === orderId);
+        const existingOrder = latestOrdersRef.current.find((order) => order.id === orderId) || previous;
         const returnedOrder = res.data.data || { id: orderId, status: nextStatus };
         const updatedOrder = existingOrder ? mergeOrderUpdate(existingOrder, returnedOrder) : normalizeOrder(returnedOrder);
-        setOrders((current) => current.map((order) => order.id === orderId ? updatedOrder : order));
+        setOrders((current) => current.map((order) => order.id === orderId ? mergeOrderUpdate(order, returnedOrder) : order));
         publishOrderEvent(['CANCELLED', 'REJECTED'].includes(nextStatus) ? 'ORDER_CANCELLED' : 'ORDER_STATUS_CHANGED', { order: updatedOrder });
         if (nextStatus === 'CONFIRMED') {
           toast.success('Đơn hàng đã được tiếp nhận.', { title: 'Đã nhận đơn', duration: 4000 });
@@ -371,11 +407,28 @@ export const StoreDashboard: React.FC = () => {
           toast.success('Đã giao thành công! Tiền đã cộng vào Ví Cửa Hàng.', { title: 'Giao thành công 🎉', duration: 5000 });
         }
       } else {
-        fetchOrders();
+        throw new Error(res.data.message || 'Không thể cập nhật trạng thái');
       }
     } catch (e: any) {
-      toast.error(e.response?.data?.message || 'Không thể cập nhật trạng thái');
-      fetchOrders();
+      if (statusUpdatesRef.current.get(orderId) !== operation) return;
+      statusUpdatesRef.current.delete(orderId);
+      ++orderListRevision.current;
+      // Restore status only; keep newer payment/contact data from socket events.
+      setOrders((current) => current.map((order) => order.id === orderId && String(order.orderStatus || order.status) === displayStatus
+        ? { ...order, status: previous.status, orderStatus: previous.orderStatus || previous.status }
+        : order));
+      toast.error(e.response?.data?.message || e.message || 'Không thể cập nhật trạng thái');
+      void fetchOrders();
+    } finally {
+      // A response from an old page/session must not unlock a newer request.
+      const activeOperation = statusUpdatesRef.current.get(orderId);
+      if (activeOperation && activeOperation !== operation) return;
+      if (statusUpdatesRef.current.get(orderId) === operation) statusUpdatesRef.current.delete(orderId);
+      setPendingStatusUpdates((current) => {
+        const next = { ...current };
+        delete next[orderId];
+        return next;
+      });
     }
   };
 
@@ -946,7 +999,10 @@ export const StoreDashboard: React.FC = () => {
                     const items = Array.isArray(order.items) ? order.items : [];
                     const firstItem = items[0];
                     const otherCount = Math.max(0, items.length - 1);
-                    const orderStatus = String((order as any).orderStatus || order.status || '').toUpperCase();
+                    const confirmedStatus = String((order as any).orderStatus || order.status || '').toUpperCase();
+                    const pendingStatus = pendingStatusUpdates[order.id];
+                    const orderStatus = pendingStatus && pendingStatus !== 'COMPLETED' && !['COMPLETED', 'CANCELLED', 'REJECTED'].includes(confirmedStatus)
+                      ? pendingStatus : confirmedStatus;
                     const isCancelled = ['CANCELLED', 'REJECTED'].includes(orderStatus);
                     return (
                       <motion.tr
@@ -1001,6 +1057,7 @@ export const StoreDashboard: React.FC = () => {
                           >
                             {order.deliveryAddress || 'Chưa có địa chỉ giao hàng'}
                           </div>
+                          {deliveryMapUrl(order) && <a href={deliveryMapUrl(order)!} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs text-sky-600 hover:underline">Xem vị trí giao hàng</a>}
                           {order.device && (
                             <div className="text-[9.5px] font-mono text-zinc-400 flex items-center gap-1 mt-0.5">
                               <Radio className="w-2.5 h-2.5 text-emerald-500" />
@@ -1047,6 +1104,7 @@ export const StoreDashboard: React.FC = () => {
 
                         {/* Thao Tác */}
                         <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
+                          <fieldset disabled={Boolean(pendingStatusUpdates[order.id])} aria-busy={Boolean(pendingStatusUpdates[order.id])} className="m-0 min-w-0 border-0 p-0 disabled:opacity-60">
                           {orderStatus === 'PENDING' && (
                             <motion.button
                               type="button"
@@ -1116,6 +1174,8 @@ export const StoreDashboard: React.FC = () => {
                           {isCancelled && (
                             <span className="text-[10.5px] font-mono text-zinc-400">Đã hủy</span>
                           )}
+                          </fieldset>
+                          {pendingStatusUpdates[order.id] && <span role="status" className="mt-1 block text-[10px] text-slate-500">Đang xác nhận…</span>}
                         </td>
                       </motion.tr>
                     );

@@ -5,7 +5,7 @@ export type ShippingContact = Record<ShippingContactField, string>;
 // contact fields; backend source and validation contracts remain read-only.
 const fullNamePattern = /^\p{L}[\p{L}\p{M}]*(?:['’-]\p{L}[\p{L}\p{M}]*)*(?: \p{L}[\p{L}\p{M}]*(?:['’-]\p{L}[\p{L}\p{M}]*)*)+$/u;
 const mobilePattern = /^0[35789]\d{8}$/;
-const addressPattern = /^[\p{L}\p{M}\p{N} ,./()#:'’-]+$/u;
+const addressPattern = /^[\p{L}\p{M}\p{N} ,./()#:'’&+–—-]+$/u;
 
 export function normalizeShippingContact(contact: ShippingContact): ShippingContact {
   return {

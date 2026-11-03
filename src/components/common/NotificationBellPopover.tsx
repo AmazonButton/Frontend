@@ -24,6 +24,7 @@ import { normalizeOrder, normalizeOrderEvent, ORDER_EVENT, orderEventKey } from 
 import { useOrderSync } from '../../hooks/useOrderSync';
 import { getUserStoreId } from '../../services/order-reconciliation';
 import { getOrderItemsSummary, getOrderNotificationMessage, ORDER_NOTIFICATION_DURATION } from '../../services/order-notifications';
+import { subscribeRentalChannelEvents } from '../../services/rental-notifications';
 
 export interface AppNotification {
   id: string;
@@ -391,6 +392,62 @@ export const NotificationBellPopover: React.FC = () => {
     if (!user) return;
     const socket = getSocket();
 
+    let unsubRentals = () => {};
+    try {
+      if (typeof subscribeRentalChannelEvents === 'function') {
+        unsubRentals = subscribeRentalChannelEvents({
+      onRentalPurchased: (data) => {
+        if (isStore || isAdmin) {
+          const newNotif: AppNotification = {
+            id: `notif_rental_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            type: 'SYSTEM',
+            roleScope: isStore ? 'STORE' : 'ADMIN',
+            title: `Khách hàng vừa thuê ${data.packageName}!`,
+            productName: `${data.buttonQuantity || 1} nút IoT thông minh`,
+            itemsSummary: `${data.customerName || 'Khách'} · ${data.monthsRented || 1} tháng · ${Number(data.totalAmount || 0).toLocaleString('vi-VN')} ₫`,
+            customerName: data.customerName,
+            customerPhone: data.customerPhone,
+            deliveryAddress: data.deliveryAddress,
+            status: 'PENDING',
+            isRead: false,
+            timestamp: data.timestamp || new Date().toISOString(),
+          };
+          setNotifications((prev) => [newNotif, ...prev]);
+          try {
+            playOrderChime();
+          } catch (_) {}
+          toast.success(
+            `Khách hàng ${data.customerName || 'Khách'} vừa đăng ký gói thuê ${data.packageName} (${data.buttonQuantity || 1} nút IoT)!`,
+            { title: '📦 Đăng ký thuê nút mới!', duration: 7000 }
+          );
+        }
+      },
+      onRentalPackageCreated: (data) => {
+        if (isCustomer) {
+          const newNotif: AppNotification = {
+            id: `notif_pkg_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+            type: 'SYSTEM',
+            roleScope: 'CUSTOMER',
+            title: `Gói thuê nút bấm mới: ${data.packageName}`,
+            productName: `${data.buttonQuantity || 1} nút bấm thông minh · Chỉ ${Number(data.monthlyPrice || 0).toLocaleString('vi-VN')} ₫/tháng`,
+            status: 'ACTIVE',
+            isRead: false,
+            timestamp: data.timestamp || new Date().toISOString(),
+          };
+          setNotifications((prev) => [newNotif, ...prev]);
+          try {
+            playOrderChime(true);
+          } catch (_) {}
+          toast.success(
+            `Hệ thống vừa có gói thuê nút mới: ${data.packageName} - Chỉ ${Number(data.monthlyPrice || 0).toLocaleString('vi-VN')} ₫/tháng!`,
+            { title: '🎉 Gói thuê nút mới!', duration: 7000 }
+          );
+        }
+      },
+    });
+      }
+    } catch (_) {}
+
     const resolveItemsSummary = (ord: any) => {
       try {
         if (typeof getOrderItemsSummary === 'function') return getOrderItemsSummary(ord);
@@ -544,6 +601,7 @@ export const NotificationBellPopover: React.FC = () => {
       socket.on('devices:allocated', handleDevicesAllocated);
 
       return () => {
+        try { if (typeof unsubRentals === "function") unsubRentals(); } catch (_) {}
         window.removeEventListener(ORDER_EVENT, handleLocalEvent);
         socket.off('ORDER_STATUS_CHANGED', handleStoreStatus);
         socket.off('ORDER_CREATED', handleStoreOrderCreated);
@@ -702,6 +760,7 @@ export const NotificationBellPopover: React.FC = () => {
       socket.on('order:cancelled', handleCancelled);
 
       return () => {
+        try { if (typeof unsubRentals === "function") unsubRentals(); } catch (_) {}
         window.removeEventListener(ORDER_EVENT, handleLocalEvent);
         socket.off('ORDER_CREATED', handleCustomerOrderCreated);
         socket.off('order:created', handleCustomerOrderCreated);
@@ -766,6 +825,7 @@ export const NotificationBellPopover: React.FC = () => {
       socket.on('withdrawal:requested', handleWithdrawalRequested);
 
       return () => {
+        try { if (typeof unsubRentals === "function") unsubRentals(); } catch (_) {}
         socket.off('STORE_REGISTERED', handleStoreRegistered);
         socket.off('store:registered', handleStoreRegistered);
         socket.off('WITHDRAWAL_REQUESTED', handleWithdrawalRequested);

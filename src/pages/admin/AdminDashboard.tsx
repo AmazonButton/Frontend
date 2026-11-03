@@ -37,6 +37,7 @@ const modalDialogVariants: Variants = {
 };
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { api } from '../../services/api';
+import { rentalsService, RentalPackageItem } from '../../services/rentals.service';
 import { toast } from '../../context/ToastContext';
 import { Store, AuditLog } from '../../types';
 import {
@@ -296,17 +297,17 @@ export const AdminDashboard: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   // Navigation tabs organized sequentially by physical IoT operational lifecycle
   const [activeTab, setActiveTab] = useState<
-    'OVERVIEW' | 'STORES' | 'PLANS' | 'CATALOG' | 'DEVICES' | 'RBAC' | 'TELEMETRY' | 'ANALYTICS' | 'NOTIFICATIONS' | 'SECURITY'
+    'OVERVIEW' | 'STORES' | 'PLANS' | 'RENTALS' | 'CATALOG' | 'DEVICES' | 'RBAC' | 'TELEMETRY' | 'ANALYTICS' | 'NOTIFICATIONS' | 'SECURITY'
   >(() => {
     const section = searchParams.get('section');
-    return ['OVERVIEW', 'STORES', 'PLANS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS', 'SECURITY'].includes(section || '')
+    return ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS', 'SECURITY'].includes(section || '')
       ? section as any
       : 'OVERVIEW';
   });
 
   useEffect(() => {
     const section = searchParams.get('section');
-    if (section && ['OVERVIEW', 'STORES', 'PLANS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS', 'SECURITY'].includes(section)) {
+    if (section && ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS', 'SECURITY'].includes(section)) {
       setActiveTab(section as any);
     } else if (!section) {
       setActiveTab('OVERVIEW');
@@ -322,6 +323,88 @@ export const AdminDashboard: React.FC = () => {
   const [subscriptionPlans, setSubscriptionPlans] = useState<any[]>([]);
   const [plansLoading, setPlansLoading] = useState(false);
   const [planSaving, setPlanSaving] = useState(false);
+  const [plansSubTab, setPlansSubTab] = useState<'STORE_PLANS' | 'RENTAL_PACKAGES'>('STORE_PLANS');
+  const [rentalPackages, setRentalPackages] = useState<RentalPackageItem[]>([]);
+  const [rentalPackagesLoading, setRentalPackagesLoading] = useState(false);
+  const [rentalPackageSaving, setRentalPackageSaving] = useState(false);
+  const [newRentalPackage, setNewRentalPackage] = useState({
+    packageCode: '',
+    packageName: '',
+    description: '',
+    buttonQuantity: '1',
+    monthlyPrice: '30000',
+    depositFee: '100000',
+  });
+
+  const loadRentalPackages = async () => {
+    setRentalPackagesLoading(true);
+    try {
+      const data = await rentalsService.adminListPackages();
+      setRentalPackages(data || []);
+    } catch (err: any) {
+      toast.error('Không thể tải danh sách gói thuê nút.');
+    } finally {
+      setRentalPackagesLoading(false);
+    }
+  };
+
+  const handleCreateRentalPackage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newRentalPackage.packageCode.trim() || !newRentalPackage.packageName.trim()) {
+      toast.warning('Vui lòng điền đầy đủ mã gói và tên gói thuê.');
+      return;
+    }
+    const btnQty = Number(newRentalPackage.buttonQuantity);
+    const mPrice = Number(newRentalPackage.monthlyPrice);
+    const dFee = Number(newRentalPackage.depositFee);
+    if (btnQty < 1 || mPrice < 0 || dFee < 0) {
+      toast.warning('Số lượng nút bấm và giá tiền phải hợp lệ (>= 0).');
+      return;
+    }
+    setRentalPackageSaving(true);
+    try {
+      await rentalsService.adminCreatePackage({
+        packageCode: newRentalPackage.packageCode.trim().toUpperCase(),
+        packageName: newRentalPackage.packageName.trim(),
+        description: newRentalPackage.description.trim() || undefined,
+        buttonQuantity: btnQty,
+        monthlyPrice: mPrice,
+        depositFee: dFee,
+      });
+      toast.success('Đã tạo gói thuê nút IoT thành công! Dữ liệu đã lưu trực tiếp vào cơ sở dữ liệu thật.');
+      setNewRentalPackage({
+        packageCode: '',
+        packageName: '',
+        description: '',
+        buttonQuantity: '1',
+        monthlyPrice: '30000',
+        depositFee: '100000',
+      });
+      await loadRentalPackages();
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || err.message || 'Không thể tạo gói thuê nút.');
+    } finally {
+      setRentalPackageSaving(false);
+    }
+  };
+
+  const handleRentalPackageActiveChange = async (pkg: RentalPackageItem) => {
+    const pkgId = pkg.packageId || (pkg as any).id;
+    if (!pkgId) return;
+    const nextActive = !Boolean(pkg.isActive);
+    try {
+      await rentalsService.adminUpdatePackage(pkgId, { isActive: nextActive });
+      setRentalPackages((current) =>
+        current.map((item) =>
+          String(item.packageId || item.id) === String(pkgId) ? { ...item, isActive: nextActive } : item
+        )
+      );
+      toast.success(nextActive ? 'Đã kích hoạt gói thuê nút.' : 'Đã tạm dừng gói thuê nút.');
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không thể cập nhật trạng thái gói thuê.');
+    }
+  };
+
   const [newPlan, setNewPlan] = useState({
     planCode: '',
     planName: '',
@@ -1558,48 +1641,260 @@ export const AdminDashboard: React.FC = () => {
       {/* ========================================================================= */}
       {/* MODULE 3: 4.2.2 MASTER PRODUCT CATALOG (CRUD & BUTTON BINDING)            */}
       {/* ========================================================================= */}
-      {activeTab === 'PLANS' && (
+      {(activeTab === 'PLANS' || activeTab === 'RENTALS') && (
         <div className="space-y-5">
-          <div className="flex flex-col gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-5 dark:border-sky-900/50 dark:from-sky-950/30 dark:to-zinc-900 sm:flex-row sm:items-start sm:justify-between">
-            <div>
-              <div className="flex items-center gap-2">
-                <Layers className="h-5 w-5 text-[#0E6BA8]" />
-                <h2 className="text-base font-bold text-zinc-900 dark:text-white">Gói dịch vụ cửa hàng</h2>
-              </div>
-              <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-                Tạo ít nhất một gói đang hoạt động. Khi chủ cửa hàng thêm sản phẩm lần đầu, hệ thống sẽ tự tạo gói dùng thử 30 ngày từ gói hoạt động đầu tiên.
-              </p>
-            </div>
-            <button onClick={loadSubscriptionPlans} disabled={plansLoading} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700">
-              <RefreshCw className={`h-3.5 w-3.5 ${plansLoading ? 'animate-spin' : ''}`} /> Làm mới
+          {/* Sub-tab Navigation Switcher */}
+          <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-3">
+            <button
+              type="button"
+              onClick={() => {
+                setPlansSubTab('STORE_PLANS');
+                selectTab('PLANS');
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                plansSubTab === 'STORE_PLANS' && activeTab === 'PLANS'
+                  ? 'bg-[#0E6BA8] text-white shadow-xs'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>1. Gói Dịch Vụ Cửa Hàng (Store Plans)</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setPlansSubTab('RENTAL_PACKAGES');
+                selectTab('RENTALS');
+                loadRentalPackages();
+              }}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
+                plansSubTab === 'RENTAL_PACKAGES' || activeTab === 'RENTALS'
+                  ? 'bg-[#0E6BA8] text-white shadow-xs'
+                  : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
+              }`}
+            >
+              <Cpu className="w-3.5 h-3.5" />
+              <span>2. Gói Thuê Nút Bấm IoT (Dành cho Cư Dân)</span>
             </button>
           </div>
 
-          <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
-            <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
-              <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
-                <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Danh sách gói</h3><p className="mt-0.5 text-xs text-zinc-500">Dữ liệu trực tiếp từ API Admin.</p></div>
-                <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{subscriptionPlans.length} gói</span>
+          {(plansSubTab === 'STORE_PLANS' && activeTab !== 'RENTALS') ? (
+            <div className="space-y-5">
+              <div className="flex flex-col gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-5 dark:border-sky-900/50 dark:from-sky-950/30 dark:to-zinc-900 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Layers className="h-5 w-5 text-[#0E6BA8]" />
+                    <h2 className="text-base font-bold text-zinc-900 dark:text-white">Gói dịch vụ cửa hàng</h2>
+                  </div>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                    Tạo ít nhất một gói đang hoạt động. Khi chủ cửa hàng thêm sản phẩm lần đầu, hệ thống sẽ tự tạo gói dùng thử 30 ngày từ gói hoạt động đầu tiên.
+                  </p>
+                </div>
+                <button onClick={loadSubscriptionPlans} disabled={plansLoading} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer">
+                  <RefreshCw className={`h-3.5 w-3.5 ${plansLoading ? 'animate-spin' : ''}`} /> Làm mới
+                </button>
               </div>
-              {plansLoading ? <div className="p-8 text-center text-sm text-zinc-500">Đang tải gói dịch vụ…</div> : subscriptionPlans.length === 0 ? <div className="p-8 text-center text-sm text-zinc-500">Chưa có gói nào. Tạo gói đầu tiên ở biểu mẫu bên phải.</div> : <div className="divide-y divide-zinc-100 dark:divide-zinc-800">{subscriptionPlans.map((plan) => {
-                const planId = String(plan.planId || plan.id || '');
-                return <div key={planId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                  <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{plan.planName}</p><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${plan.isActive ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>{plan.isActive ? 'ĐANG HOẠT ĐỘNG' : 'TẠM DỪNG'}</span></div><p className="mt-1 text-xs text-zinc-500">{plan.planCode} · {Number(plan.price || 0).toLocaleString('vi-VN')} ₫ · {plan.durationDays} ngày · tối đa {plan.maxProducts} sản phẩm</p>{plan.description && <p className="mt-1 text-xs text-zinc-500">{plan.description}</p>}</div>
-                  <button type="button" onClick={() => handlePlanActiveChange(plan)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors ${plan.isActive ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{plan.isActive ? 'Tạm dừng' : 'Kích hoạt'}</button>
-                </div>;
-              })}</div>}
-            </section>
 
-            <form onSubmit={handleCreatePlan} className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
-              <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo gói mới</h3><p className="mt-0.5 text-xs text-zinc-500">Gói mới được API tạo ở trạng thái hoạt động.</p></div>
-              <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mã gói</label><input required value={newPlan.planCode} onChange={(e) => setNewPlan({ ...newPlan, planCode: e.target.value.toUpperCase() })} placeholder="VD: TRIAL-30" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-mono outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
-              <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tên gói</label><input required value={newPlan.planName} onChange={(e) => setNewPlan({ ...newPlan, planName: e.target.value })} placeholder="VD: Dùng thử 30 ngày" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
-              <div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giá (₫)</label><input required min="0" type="number" value={newPlan.price} onChange={(e) => setNewPlan({ ...newPlan, price: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Thời hạn</label><input required min="1" type="number" value={newPlan.durationDays} onChange={(e) => setNewPlan({ ...newPlan, durationDays: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div></div>
-              <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giới hạn sản phẩm</label><input required min="1" type="number" value={newPlan.maxProducts} onChange={(e) => setNewPlan({ ...newPlan, maxProducts: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
-              <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mô tả</label><textarea rows={2} value={newPlan.description} onChange={(e) => setNewPlan({ ...newPlan, description: e.target.value })} className="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
-              <button disabled={planSaving} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50"><Plus className="h-3.5 w-3.5" /> {planSaving ? 'Đang tạo…' : 'Tạo gói đang hoạt động'}</button>
-            </form>
-          </div>
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+                  <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+                    <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Danh sách gói</h3><p className="mt-0.5 text-xs text-zinc-500">Dữ liệu trực tiếp từ API Admin.</p></div>
+                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{subscriptionPlans.length} gói</span>
+                  </div>
+                  {plansLoading ? <div className="p-8 text-center text-sm text-zinc-500">Đang tải gói dịch vụ…</div> : subscriptionPlans.length === 0 ? <div className="p-8 text-center text-sm text-zinc-500">Chưa có gói nào. Tạo gói đầu tiên ở biểu mẫu bên phải.</div> : <div className="divide-y divide-zinc-100 dark:divide-zinc-800">{subscriptionPlans.map((plan) => {
+                    const planId = String(plan.planId || plan.id || '');
+                    return <div key={planId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{plan.planName}</p><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${plan.isActive ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>{plan.isActive ? 'ĐANG HOẠT ĐỘNG' : 'TẠM DỪNG'}</span></div><p className="mt-1 text-xs text-zinc-500">{plan.planCode} · {Number(plan.price || 0).toLocaleString('vi-VN')} ₫ · {plan.durationDays} ngày · tối đa {plan.maxProducts} sản phẩm</p>{plan.description && <p className="mt-1 text-xs text-zinc-500">{plan.description}</p>}</div>
+                      <button type="button" onClick={() => handlePlanActiveChange(plan)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${plan.isActive ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{plan.isActive ? 'Tạm dừng' : 'Kích hoạt'}</button>
+                    </div>;
+                  })}</div>}
+                </section>
+
+                <form onSubmit={handleCreatePlan} className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+                  <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo gói mới</h3><p className="mt-0.5 text-xs text-zinc-500">Gói mới được API tạo ở trạng thái hoạt động.</p></div>
+                  <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mã gói</label><input required value={newPlan.planCode} onChange={(e) => setNewPlan({ ...newPlan, planCode: e.target.value.toUpperCase() })} placeholder="VD: TRIAL-30" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-mono outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+                  <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tên gói</label><input required value={newPlan.planName} onChange={(e) => setNewPlan({ ...newPlan, planName: e.target.value })} placeholder="VD: Dùng thử 30 ngày" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+                  <div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giá (₫)</label><input required min="0" type="number" value={newPlan.price} onChange={(e) => setNewPlan({ ...newPlan, price: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Thời hạn</label><input required min="1" type="number" value={newPlan.durationDays} onChange={(e) => setNewPlan({ ...newPlan, durationDays: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div></div>
+                  <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giới hạn sản phẩm</label><input required min="1" type="number" value={newPlan.maxProducts} onChange={(e) => setNewPlan({ ...newPlan, maxProducts: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+                  <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mô tả</label><textarea rows={2} value={newPlan.description} onChange={(e) => setNewPlan({ ...newPlan, description: e.target.value })} className="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+                  <button disabled={planSaving} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50 cursor-pointer"><Plus className="h-3.5 w-3.5" /> {planSaving ? 'Đang tạo…' : 'Tạo gói đang hoạt động'}</button>
+                </form>
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-5">
+              <div className="flex flex-col gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-5 dark:border-sky-900/50 dark:from-sky-950/30 dark:to-zinc-900 sm:flex-row sm:items-start sm:justify-between">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <Cpu className="h-5 w-5 text-[#0E6BA8]" />
+                    <h2 className="text-base font-bold text-zinc-900 dark:text-white">Gói thuê nút bấm IoT (Dành cho Cư dân)</h2>
+                  </div>
+                  <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                    Quản lý danh mục gói thuê nút thông minh. Các gói đang hoạt động được lưu trực tiếp vào cơ sở dữ liệu và hiển thị ngay lập tức trên trang Thuê Nút Bấm của cư dân.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={loadRentalPackages}
+                  disabled={rentalPackagesLoading}
+                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer"
+                >
+                  <RefreshCw className={`h-3.5 w-3.5 ${rentalPackagesLoading ? 'animate-spin' : ''}`} /> Làm mới
+                </button>
+              </div>
+
+              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+                {/* List of rental packages */}
+                <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+                  <div className="flex items-center justify-between border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+                    <div>
+                      <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Danh sách gói thuê nút</h3>
+                      <p className="mt-0.5 text-xs text-zinc-500">Dữ liệu thật trực tiếp từ API PostgreSQL.</p>
+                    </div>
+                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                      {rentalPackages.length} gói
+                    </span>
+                  </div>
+
+                  {rentalPackagesLoading ? (
+                    <div className="p-8 text-center text-sm text-zinc-500">Đang tải gói thuê nút…</div>
+                  ) : rentalPackages.length === 0 ? (
+                    <div className="p-8 text-center text-sm text-zinc-500">
+                      Chưa có gói thuê nút nào. Hãy tạo gói đầu tiên ở biểu mẫu bên phải!
+                    </div>
+                  ) : (
+                    <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                      {rentalPackages.map((pkg) => {
+                        const pkgId = String(pkg.packageId || pkg.id || '');
+                        const mPrice = Number(pkg.monthlyPrice || pkg.monthlyFee || 0);
+                        const dFee = Number(pkg.depositFee || 0);
+                        return (
+                          <div key={pkgId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">
+                                  {pkg.packageName || pkg.name}
+                                </p>
+                                <span
+                                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
+                                    pkg.isActive
+                                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                      : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
+                                  }`}
+                                >
+                                  {pkg.isActive ? 'ĐANG HOẠT ĐỘNG' : 'TẠM DỪNG'}
+                                </span>
+                              </div>
+                              <p className="mt-1 text-xs text-zinc-500 font-mono">
+                                {pkg.packageCode} · {pkg.buttonQuantity} nút IoT · {mPrice.toLocaleString('vi-VN')} ₫/tháng · Cọc: {dFee.toLocaleString('vi-VN')} ₫
+                              </p>
+                              {pkg.description && <p className="mt-1 text-xs text-zinc-500 line-clamp-2">{pkg.description}</p>}
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => handleRentalPackageActiveChange(pkg)}
+                              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer shrink-0 ${
+                                pkg.isActive
+                                  ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300'
+                                  : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                              }`}
+                            >
+                              {pkg.isActive ? 'Tạm dừng' : 'Kích hoạt'}
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </section>
+
+                {/* Create rental package form */}
+                <form
+                  onSubmit={handleCreateRentalPackage}
+                  className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900"
+                >
+                  <div>
+                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo gói thuê nút mới</h3>
+                    <p className="mt-0.5 text-xs text-zinc-500">Gói được lưu vào API và hiển thị ngay cho khách hàng.</p>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mã gói *</label>
+                    <input
+                      required
+                      value={newRentalPackage.packageCode}
+                      onChange={(e) => setNewRentalPackage({ ...newRentalPackage, packageCode: e.target.value.toUpperCase() })}
+                      placeholder="VD: PKG-KIT3, PKG-BASIC"
+                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-mono outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tên gói thuê *</label>
+                    <input
+                      required
+                      value={newRentalPackage.packageName}
+                      onChange={(e) => setNewRentalPackage({ ...newRentalPackage, packageName: e.target.value })}
+                      placeholder="VD: Bộ Kit 3 Nút Bấm Thông Minh"
+                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Số lượng nút *</label>
+                      <input
+                        required
+                        min="1"
+                        type="number"
+                        value={newRentalPackage.buttonQuantity}
+                        onChange={(e) => setNewRentalPackage({ ...newRentalPackage, buttonQuantity: e.target.value })}
+                        className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giá thuê / tháng (₫) *</label>
+                      <input
+                        required
+                        min="0"
+                        type="number"
+                        value={newRentalPackage.monthlyPrice}
+                        onChange={(e) => setNewRentalPackage({ ...newRentalPackage, monthlyPrice: e.target.value })}
+                        className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tiền cọc thiết bị (₫) *</label>
+                    <input
+                      required
+                      min="0"
+                      type="number"
+                      value={newRentalPackage.depositFee}
+                      onChange={(e) => setNewRentalPackage({ ...newRentalPackage, depositFee: e.target.value })}
+                      placeholder="VD: 300000 (Hoàn lại khi trả nút)"
+                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </div>
+                  <div>
+                    <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mô tả gói thuê</label>
+                    <textarea
+                      rows={2}
+                      value={newRentalPackage.description}
+                      onChange={(e) => setNewRentalPackage({ ...newRentalPackage, description: e.target.value })}
+                      placeholder="VD: Trọn bộ 3 nút bấm thông minh dành cho căn hộ..."
+                      className="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                    />
+                  </div>
+                  <button
+                    type="submit"
+                    disabled={rentalPackageSaving}
+                    className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50 cursor-pointer"
+                  >
+                    <Plus className="h-3.5 w-3.5" />
+                    {rentalPackageSaving ? 'Đang tạo…' : 'Tạo gói thuê hoạt động ngay'}
+                  </button>
+                </form>
+              </div>
+            </div>
+          )}
         </div>
       )}
 

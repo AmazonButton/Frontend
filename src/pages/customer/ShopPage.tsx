@@ -11,6 +11,9 @@ import { StorefrontReceipt } from '../../components/orders/StorefrontReceipt';
 import { Order } from '../../types';
 import { getShippingContactErrors, normalizeShippingContact, ShippingContactField } from '../../services/shipping-contact-validation';
 
+import { DeliveryAddressMap } from '../../components/orders/DeliveryAddressMap';
+import type { DeliveryLocation } from '../../services/delivery-location';
+
 const deliveryHeroBackground = '/assets/products/delivery-hero-pastel.png';
 
 type Product = { id: string; storeId: string; name: string; brand: string; category: string; unit: string; price: number; stock: number; reservedStock: number; imageUrl?: string; store: { id: string; name: string } };
@@ -52,6 +55,7 @@ export const ShopPage: React.FC = () => {
     deliveryAddress: '',
     paymentMethod: isCustomerLoggedIn ? 'PAYOS' : 'CASH_ON_DELIVERY',
   });
+  const [deliveryLocation, setDeliveryLocation] = useState<DeliveryLocation | null>(null);
   const [cartBump, setCartBump] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [recoveryOrder, setRecoveryOrder] = useState<PayOSRecoveryOrder | null>(null);
@@ -769,9 +773,9 @@ export const ShopPage: React.FC = () => {
             onSubmit={checkout}
             noValidate
             onClick={(e) => e.stopPropagation()}
-            className="relative z-10 my-auto w-full max-w-lg rounded-2xl bg-white p-5 shadow-2xl sm:p-7 border border-slate-100"
+            className="relative z-10 my-auto flex max-h-[calc(100dvh-2rem)] w-full max-w-6xl flex-col overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-2xl"
           >
-            <div className="mb-5 flex items-start justify-between">
+            <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-7">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">Thông tin giao hàng</h2>
                 <p className="mt-1 text-sm text-slate-500">Đơn hàng từ {selectedCart[0]?.product.store.name}</p>
@@ -789,7 +793,8 @@ export const ShopPage: React.FC = () => {
               </motion.button>
             </div>
 
-            <div className="space-y-3">
+            <div className="grid min-h-0 gap-6 overflow-y-auto p-5 sm:p-7 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)] lg:overflow-hidden">
+            <div className="grid min-w-0 content-start gap-4 sm:grid-cols-2 lg:overflow-y-auto lg:pr-2">
               <div>
               <label htmlFor="checkout-customerName" className="mb-1.5 block text-sm font-medium text-slate-800">Họ và tên người nhận <span className="text-rose-600">*</span></label>
               <input
@@ -830,7 +835,7 @@ export const ShopPage: React.FC = () => {
               <p id="checkout-phone-hint" className="mt-1 text-xs text-slate-500">Dùng số di động Việt Nam gồm 10 chữ số, đang liên lạc được. Không nhập chữ hoặc ký hiệu.</p>
               {visibleContactError('customerPhone') && <p id="checkout-phone-error" role="alert" className="mt-1 text-xs text-rose-600">{visibleContactError('customerPhone')}</p>}
               </div>
-              <div>
+              <div className="min-w-0 sm:col-span-2">
               <label htmlFor="checkout-deliveryAddress" className="mb-1.5 block text-sm font-medium text-slate-800">Địa chỉ nhận hàng <span className="text-rose-600">*</span></label>
               <textarea
                 id="checkout-deliveryAddress"
@@ -839,7 +844,7 @@ export const ShopPage: React.FC = () => {
                 required
                 maxLength={255}
                 value={form.deliveryAddress}
-                onChange={(e) => setForm({ ...form, deliveryAddress: e.target.value })}
+                onChange={(e) => { setForm({ ...form, deliveryAddress: e.target.value }); setDeliveryLocation(null); }}
                 onBlur={() => touchContact('deliveryAddress')}
                 aria-invalid={Boolean(visibleContactError('deliveryAddress'))}
                 aria-describedby="checkout-address-hint checkout-address-error"
@@ -847,13 +852,15 @@ export const ShopPage: React.FC = () => {
                 rows={3}
                 className={`w-full resize-none rounded-xl border px-4 py-3 text-sm outline-none transition focus:ring-2 ${visibleContactError('deliveryAddress') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/10' : 'border-slate-200 focus:border-teal-600 focus:ring-teal-600/10'}`}
               />
+              <DeliveryAddressMap address={form.deliveryAddress} location={deliveryLocation} onSelect={(address, point) => { setForm((previous) => ({ ...previous, deliveryAddress: address })); setDeliveryLocation(point); }} />
               <p id="checkout-address-hint" className="mt-1 text-xs text-slate-500">Ghi rõ số nhà/đường hoặc thôn/ấp, phường/xã và tỉnh/thành phố. Thêm tòa nhà, tầng, căn hộ nếu có.</p>
               {visibleContactError('deliveryAddress') && <p id="checkout-address-error" role="alert" className="mt-1 text-xs text-rose-600">{visibleContactError('deliveryAddress')}</p>}
               </div>
-              <p className="rounded-lg bg-sky-50 p-3 text-xs leading-relaxed text-slate-600">Vui lòng kiểm tra chính xác họ tên, số điện thoại và địa chỉ của người nhận trước khi đặt hàng để cửa hàng liên hệ và giao đúng người.</p>
+              <p className="rounded-lg bg-sky-50 p-3 text-xs leading-relaxed text-slate-600 sm:col-span-2">Vui lòng kiểm tra chính xác họ tên, số điện thoại và địa chỉ của người nhận trước khi đặt hàng để cửa hàng liên hệ và giao đúng người.</p>
             </div>
 
-            <div className="mt-5">
+            <div className="flex min-w-0 flex-col rounded-2xl border border-slate-100 bg-slate-50/80 p-4 sm:p-5 lg:overflow-y-auto">
+            <div>
               <p className="mb-2 text-sm font-semibold text-slate-800">Phương thức thanh toán</p>
               <motion.label
                 whileHover={{ scale: 1.01 }}
@@ -907,7 +914,8 @@ export const ShopPage: React.FC = () => {
               </motion.label>
             </div>
 
-            <div className="mt-5 flex justify-between border-t pt-4 text-sm">
+            <div className="mt-5 border-t border-slate-200 pt-4 lg:mt-auto lg:pt-5">
+            <div className="flex items-center justify-between gap-3 text-sm">
               <span className="text-slate-600">Tổng thanh toán</span>
               <b className="text-lg text-[#287DA8]">{money(total)}</b>
             </div>
@@ -928,6 +936,9 @@ export const ShopPage: React.FC = () => {
               <CheckCircle2 size={13} className="text-teal-600" />
               Thông tin đơn hàng được gửi an toàn đến cửa hàng
             </p>
+            </div>
+            </div>
+            </div>
           </motion.form>
         </div>
       )}
