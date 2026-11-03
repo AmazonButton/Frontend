@@ -34,6 +34,7 @@ type NavigationItem = {
 const storeLinks: NavigationItem[] = [
   { to: '/store/dashboard', label: 'Đơn hàng trực tiếp', icon: ShoppingBag },
   { to: '/store/devices', label: 'Hạm đội nút bấm', icon: Cpu },
+  { to: '/store/rentals', label: 'Gói thuê nút IoT', icon: Cpu },
   { to: '/store/device-templates', label: 'Mẫu thiết bị', icon: Layers },
   { to: '/store/products', label: 'Sản phẩm & tồn kho', icon: Package },
   { to: '/store/analytics', label: 'Báo cáo doanh thu', icon: BarChart3 },
