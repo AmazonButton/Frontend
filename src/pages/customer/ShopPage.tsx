@@ -13,6 +13,7 @@ import { getShippingContactErrors, normalizeShippingContact, ShippingContactFiel
 
 import { DeliveryAddressMap } from '../../components/orders/DeliveryAddressMap';
 import type { DeliveryLocation } from '../../services/delivery-location';
+import { useAuth } from '../../context/AuthContext';
 
 const deliveryHeroBackground = '/assets/products/delivery-hero-pastel.png';
 
@@ -31,6 +32,7 @@ const loadCart = (): CartLine[] => {
 };
 
 export const ShopPage: React.FC = () => {
+  const { user } = useAuth();
   const location = useLocation();
   const [products, setProducts] = useState<Product[]>([]);
   const [cart, setCart] = useState<CartLine[]>(loadCart);
@@ -357,10 +359,10 @@ export const ShopPage: React.FC = () => {
 
   return (
     <motion.main
-      initial={{ opacity: 0, y: 10 }}
+      initial={user?.role === 'CUSTOMER' ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
-      className="min-h-screen bg-[#f7f8fa] text-slate-900"
+      className={`min-h-screen bg-[#f7f8fa] text-slate-900 ${user?.role === 'CUSTOMER' ? 'customer-ui customer-shop' : ''}`}
     >
     {flyingProduct && <motion.div
       key={`${flyingProduct.product.id}-${flyingProduct.x}-${flyingProduct.y}`}
@@ -373,6 +375,17 @@ export const ShopPage: React.FC = () => {
       {flyingProduct.product.imageUrl ? <img src={flyingProduct.product.imageUrl} alt="" crossOrigin="anonymous" referrerPolicy="no-referrer" loading="lazy" className="h-full w-full object-cover" /> : <span className="grid h-full place-items-center text-xl">🛍️</span>}
     </motion.div>}
     {/* Full-Bleed / Edge-to-Edge Hero Banner */}
+    {user?.role === 'CUSTOMER' ? (
+      <section data-page-motion className="shop-intro">
+        <div>
+          <p className="customer-eyebrow">Cửa hàng trực tuyến</p>
+          <h1>Mua sắm thiết yếu, giao tận nhà</h1>
+          <p className="shop-intro-description">Chọn sản phẩm từ cửa hàng bạn tin dùng. Giá và tồn kho được cập nhật trực tiếp.</p>
+          <button type="button" onClick={scrollToCatalog} className="shop-catalog-link">Xem sản phẩm <ArrowRight size={16} /></button>
+        </div>
+        <img src={deliveryHeroBackground} alt="" className="shop-intro-image" />
+      </section>
+    ) : (
     <section
       className="relative w-full overflow-hidden border-b border-sky-100/70 bg-[#eaf7f8] bg-cover bg-[center_right] sm:bg-center bg-no-repeat"
       style={{ backgroundImage: `url("${deliveryHeroBackground}")` }}
@@ -456,15 +469,16 @@ export const ShopPage: React.FC = () => {
         </div>
       </div>
     </section>
+    )}
 
-    <section id="storefront-catalog" className="mx-auto max-w-7xl px-4 pb-12 pt-8 sm:px-6 lg:px-8">
+    <section data-page-motion id="storefront-catalog" className="shop-catalog mx-auto max-w-7xl px-4 pb-12 pt-8 sm:px-6 lg:px-8">
 
-      <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+      <div className="shop-tools mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>
           <h2 className="text-xl font-bold text-slate-900">Sản phẩm dành cho bạn</h2>
           <p className="mt-1 text-sm text-slate-500">Giá và tình trạng hàng được cập nhật từ cửa hàng.</p>
         </div>
-        <div className="flex gap-2">
+        <div className="shop-search-cart flex gap-2">
           <label className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2.5 transition focus-within:border-[#287DA8] focus-within:ring-2 focus-within:ring-[#287DA8]/10 sm:w-72">
             <Search size={18} className="shrink-0 text-slate-400"/>
             <input
@@ -509,7 +523,7 @@ export const ShopPage: React.FC = () => {
         </div>
       </div>
 
-      <div className="mb-5 flex gap-2 overflow-auto pb-1">
+      <div aria-label="Danh mục sản phẩm" className="shop-categories mb-5 flex gap-2 overflow-auto pb-1">
         {categories.map((item) => (
           <motion.button
             key={item}
@@ -518,6 +532,7 @@ export const ShopPage: React.FC = () => {
             whileTap={{ scale: 0.95 }}
             transition={{ duration: 0.15 }}
             onClick={() => setCategory(item)}
+            aria-pressed={category === item}
             className={`whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors ${
               category === item
                 ? 'bg-[#287DA8] text-white shadow-xs'
@@ -546,7 +561,7 @@ export const ShopPage: React.FC = () => {
       </AnimatePresence>
       {error && <div className="rounded-2xl bg-white p-10 text-center text-sm text-rose-600">{error}</div>}
       {loading && (
-        <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+        <div className="shop-products grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {Array.from({ length: 8 }, (_, i) => (
             <div key={i} className="h-72 animate-pulse rounded-2xl bg-white/80 border border-slate-100 shadow-xs" />
           ))}
@@ -562,12 +577,12 @@ export const ShopPage: React.FC = () => {
           Chưa có sản phẩm phù hợp.
         </motion.div>
       )}
-      {!loading && shownProducts.length > 0 && <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">{shownProducts.map((product) => {
+      {!loading && shownProducts.length > 0 && <div className="shop-products grid grid-cols-1 sm:grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">{shownProducts.map((product) => {
         const line = cart.find((item) => item.product.id === product.id);
         const stock = Math.max(0, product.stock - product.reservedStock);
-        return <article key={product.id} className="group overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
-          <button type="button" onClick={() => setSelectedProduct(product)} className="relative block aspect-square w-full overflow-hidden bg-slate-50 text-left">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} crossOrigin="anonymous" referrerPolicy="no-referrer" loading="lazy" className="h-full w-full object-cover transition group-hover:scale-[1.03]"/> : <div className="grid h-full place-items-center text-5xl">🛍️</div>}<span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-slate-600"><Store className="mr-1 inline" size={12}/>{product.store.name}</span></button>
-          <div className="p-3 sm:p-4"><p className="truncate text-[11px] font-semibold uppercase tracking-wide text-teal-700">{product.category}</p><h3 className="mt-1 min-h-10 text-sm font-semibold"><button type="button" onClick={() => setSelectedProduct(product)} className="line-clamp-2 text-left hover:text-[#287DA8] hover:underline">{product.name}</button></h3><p className="mt-1 truncate text-xs text-slate-500">{product.brand || product.unit}</p><div className="mt-3 flex items-end justify-between gap-2"><div><p className="text-base font-bold text-[#287DA8]">{money(product.price)}</p><p className="text-[11px] text-slate-400">Còn {stock} {product.unit || 'sản phẩm'}</p></div><button type="button" onClick={() => buyNow(product)} disabled={!stock} className="mt-2 w-auto shrink-0 rounded-lg border bg-[#287DA8] px-2 py-1.5 text-xs font-semibold text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:opacity-40">Mua ngay</button>{line ? <div className="flex items-center gap-2 rounded-lg bg-[#EAF4F9] p-1"><button onClick={() => changeQuantity(product,-1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white"><Minus size={15}/></button><span className="min-w-4 text-center text-sm font-semibold">{line.quantity}</span><button disabled={line.quantity >= stock} onClick={() => changeQuantity(product,1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white disabled:opacity-40"><Plus size={15}/></button></div> : <button disabled={!stock || (!!cartStore && cartStore !== product.storeId)} title={cartStore && cartStore !== product.storeId ? 'Hoàn tất giỏ hiện tại trước khi chọn cửa hàng khác' : ''} onClick={(event) => addWithAnimation(product, event)} className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#287DA8] text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:bg-slate-300"><Plus size={18}/></button>}</div></div>
+        return <article key={product.id} className="shop-product group overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
+          <button type="button" onClick={() => setSelectedProduct(product)} className="shop-product-image relative block aspect-square w-full overflow-hidden bg-slate-50 text-left">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} crossOrigin="anonymous" referrerPolicy="no-referrer" loading="lazy" className="h-full w-full object-cover transition group-hover:scale-[1.03]"/> : <div className="grid h-full place-items-center text-5xl">🛍️</div>}<span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-slate-600"><Store className="mr-1 inline" size={12}/>{product.store.name}</span></button>
+          <div className="shop-product-info p-3 sm:p-4"><p className="truncate text-[11px] font-semibold uppercase tracking-wide text-teal-700">{product.category}</p><h3 className="mt-1 min-h-10 text-sm font-semibold"><button type="button" onClick={() => setSelectedProduct(product)} className="line-clamp-2 text-left hover:text-[#287DA8] hover:underline">{product.name}</button></h3><p className="mt-1 truncate text-xs text-slate-500">{product.brand || product.unit}</p><div className="shop-product-actions mt-3 flex items-end justify-between gap-2"><div><p className="text-base font-bold text-[#287DA8]">{money(product.price)}</p><p className="text-[11px] text-slate-400">Còn {stock} {product.unit || 'sản phẩm'}</p></div><button type="button" onClick={() => buyNow(product)} disabled={!stock} className="shop-buy-now mt-2 w-auto shrink-0 rounded-lg border bg-[#287DA8] px-2 py-1.5 text-xs font-semibold text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:opacity-40">Mua ngay</button>{line ? <div className="shop-quantity flex items-center gap-2 rounded-lg bg-[#EAF4F9] p-1"><button onClick={() => changeQuantity(product,-1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white"><Minus size={15}/></button><span className="min-w-4 text-center text-sm font-semibold">{line.quantity}</span><button disabled={line.quantity >= stock} onClick={() => changeQuantity(product,1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white disabled:opacity-40"><Plus size={15}/></button></div> : <button disabled={!stock || (!!cartStore && cartStore !== product.storeId)} title={cartStore && cartStore !== product.storeId ? 'Hoàn tất giỏ hiện tại trước khi chọn cửa hàng khác' : ''} onClick={(event) => addWithAnimation(product, event)} aria-label={`Th?m ${product.name} v?o gi?`} className="shop-add grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#287DA8] text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:bg-slate-300"><Plus size={18}/></button>}</div></div>
         </article>;
       })}</div>}
       <p className="mt-8 text-center text-xs text-slate-400">Bạn có thể xem sản phẩm mà không cần tài khoản. Đơn hàng trực tuyến sẽ được gửi trực tiếp đến cửa hàng bán sản phẩm.</p>

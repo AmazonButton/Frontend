@@ -28,6 +28,11 @@ export const Navbar: React.FC = () => {
   const isCustomer = user?.role === 'CUSTOMER';
   const isStoreUser = ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(user?.role || '');
 
+  useEffect(() => {
+    setMobileMenuOpen(false);
+    setUserMenuOpen(false);
+  }, [location.pathname, location.hash, location.search]);
+
   // Auto-dismiss logout modal if route goes to login or user is logged out
   useEffect(() => {
     if (showLogoutModal && (location.pathname === '/login' || !user)) {
@@ -142,7 +147,7 @@ export const Navbar: React.FC = () => {
           : 'bg-transparent border-b border-transparent backdrop-blur-sm'
       }`}
     >
-      <div className={`h-16 flex items-center justify-between gap-4 transition-all duration-200 ${
+      <div className={`h-16 flex items-center justify-between gap-2 sm:gap-4 transition-all duration-200 ${
         user ? 'w-full px-4 sm:px-6 lg:px-8' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'
       }`}>
 
@@ -170,7 +175,7 @@ export const Navbar: React.FC = () => {
         
 
         {user && user.role === 'SUPER_ADMIN' && (
-          <nav aria-label="Điều hướng admin" className="hidden md:flex items-center gap-1 rounded-xl border border-slate-200/80 bg-slate-50/70 p-1 dark:border-zinc-800 dark:bg-zinc-900/70">
+          <nav aria-label="Điều hướng admin" className="hidden lg:flex items-center gap-1 rounded-xl border border-slate-200/80 bg-slate-50/70 p-1 dark:border-zinc-800 dark:bg-zinc-900/70">
             {[
               { to: '/admin/dashboard', label: 'Admin Hub', icon: Shield },
               { to: '/admin/security/devices', label: 'Security Hub', icon: ShieldAlert },
@@ -192,7 +197,7 @@ export const Navbar: React.FC = () => {
         )}
 
         {!user && (
-          <div className="hidden md:flex items-center justify-center">
+          <div className="hidden lg:flex items-center justify-center">
             <HeaderNavigation />
           </div>
         )}
@@ -203,6 +208,17 @@ export const Navbar: React.FC = () => {
         <div className="flex items-center gap-2 sm:gap-3">
           {user ? (
             <div ref={userMenuRef} className="flex items-center gap-1.5 sm:gap-2">
+              {isCustomer && location.pathname === '/' && (
+                <Link to="/shop" aria-label="Mua sắm" className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-[#287DA8] px-2.5 text-xs font-semibold text-[#287DA8] transition-colors hover:bg-[#EAF4F9] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#287DA8] dark:text-sky-400">
+                  <ShoppingCart aria-hidden="true" className="h-4 w-4" />
+                  <span>Mua sắm</span>
+                </Link>
+              )}
+              {isCustomer && location.pathname === '/' && (
+                <Link to="/shop?cart=open" aria-label="Mở giỏ hàng" className="grid min-h-11 min-w-11 place-items-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 hover:text-[#287DA8] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#287DA8] dark:text-slate-300 dark:hover:bg-zinc-800">
+                  <ShoppingCart aria-hidden="true" className="h-4 w-4" />
+                </Link>
+              )}
               <NotificationBellPopover />
 
               <div className="relative">
@@ -235,7 +251,7 @@ export const Navbar: React.FC = () => {
                       exit={{ opacity: 0, y: -6 }}
                       transition={{ duration: 0.16 }}
                       role="menu"
-                      className="absolute right-0 mt-2 w-64 overflow-hidden rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900 z-50"
+                      className="absolute right-0 mt-2 w-64 max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-5rem)] overflow-y-auto rounded-xl border border-slate-200 bg-white p-1.5 shadow-xl dark:border-zinc-700 dark:bg-zinc-900 z-50"
                     >
                       <div className="px-3 py-2.5 border-b border-slate-100 dark:border-zinc-800">
                         <div className="flex items-center justify-between gap-2">
@@ -324,6 +340,17 @@ export const Navbar: React.FC = () => {
             </div>
           ) : (
             <div className="flex items-center gap-2 sm:gap-3">
+              {location.pathname === '/' && (
+                <>
+                  <Link to="/shop" aria-label="Mua sắm" className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-[#287DA8] px-2.5 text-xs font-semibold text-[#287DA8] transition-colors hover:bg-[#EAF4F9] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#287DA8] dark:text-sky-400">
+                    <ShoppingCart aria-hidden="true" className="h-4 w-4" />
+                    <span>Mua sắm</span>
+                  </Link>
+                  <Link to="/shop?cart=open" aria-label="Mở giỏ hàng" className="grid min-h-11 min-w-11 place-items-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 hover:text-[#287DA8] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#287DA8] dark:text-slate-300 dark:hover:bg-zinc-800">
+                    <ShoppingCart aria-hidden="true" className="h-4 w-4" />
+                  </Link>
+                </>
+              )}
               <Link
                 to="/login"
                 className="hidden sm:inline-block text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white px-2.5 py-1.5 transition-colors"
@@ -341,8 +368,10 @@ export const Navbar: React.FC = () => {
               <button
                 type="button"
                 onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
-                className="md:hidden p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-400 dark:hover:text-white dark:hover:bg-zinc-800 transition-colors"
-                aria-label="Toggle Navigation Menu"
+                className="lg:hidden p-2 rounded-xl text-slate-600 hover:text-slate-900 hover:bg-slate-100 dark:text-zinc-400 dark:hover:text-white dark:hover:bg-zinc-800 transition-colors"
+                aria-label="Mở menu điều hướng"
+                aria-expanded={mobileMenuOpen}
+                aria-controls="guest-navigation"
               >
                 {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
               </button>
@@ -359,7 +388,8 @@ export const Navbar: React.FC = () => {
             animate={{ opacity: 1, height: 'auto' }}
             exit={{ opacity: 0, height: 0 }}
             transition={{ duration: 0.25, ease: 'easeInOut' }}
-            className="md:hidden border-t border-slate-200/80 dark:border-zinc-800 bg-white/95 dark:bg-[#09090B]/95 backdrop-blur-md px-4 py-4 overflow-hidden"
+            id="guest-navigation"
+            className="lg:hidden max-h-[calc(100dvh-4rem)] overflow-y-auto border-t border-slate-200/80 dark:border-zinc-800 bg-white/95 dark:bg-[#09090B]/95 backdrop-blur-md px-4 py-4"
           >
             <div className="flex flex-col space-y-1">
               

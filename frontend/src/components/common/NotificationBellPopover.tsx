@@ -961,7 +961,7 @@ export const NotificationBellPopover: React.FC = () => {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 6 }}
             transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="absolute right-0 top-full mt-2 w-[390px] max-w-[calc(100vw-2rem)] z-[90] bg-white dark:bg-[#0c121e] border border-slate-200/90 dark:border-zinc-800 rounded-xl shadow-xl overflow-hidden flex flex-col"
+            className="fixed right-4 top-16 mt-2 sm:absolute sm:right-0 sm:top-full w-[390px] max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-5rem)] z-[90] bg-white dark:bg-[#0c121e] border border-slate-200/90 dark:border-zinc-800 rounded-xl shadow-xl overflow-hidden flex flex-col"
           >
             {/* Header: Row 1 */}
             <div className="px-4 pt-3.5 pb-2.5 flex items-center justify-between border-b border-slate-100 dark:border-zinc-800/80">
@@ -1009,7 +1009,7 @@ export const NotificationBellPopover: React.FC = () => {
             </div>
 
             {/* Notification Flat List Body */}
-            <div className="divide-y divide-slate-100 dark:divide-zinc-800 max-h-[380px] overflow-y-auto custom-scrollbar">
+            <div className="min-h-0 divide-y divide-slate-100 dark:divide-zinc-800 max-h-[380px] overflow-y-auto custom-scrollbar">
               {filteredNotifications.length === 0 ? (
                 <div className="py-12 px-4 text-center space-y-1.5">
                   <div className="w-10 h-10 mx-auto rounded-full bg-slate-100 dark:bg-zinc-800 text-slate-400 dark:text-zinc-500 flex items-center justify-center">

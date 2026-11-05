@@ -521,10 +521,10 @@ export const ProfilePage: React.FC = () => {
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={user?.role === 'CUSTOMER' ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8"
+      className={`max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 ${user?.role === 'CUSTOMER' ? `customer-ui customer-profile ${activeTab === 'SECURITY' ? 'customer-security' : ''}` : ''}`}
     >
       {/* Toast Notifications */}
       <AnimatePresence>
@@ -553,12 +553,12 @@ export const ProfilePage: React.FC = () => {
       </AnimatePresence>
 
       {/* Main Grid: Sidebar Menu + Content Card */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div data-page-motion className="profile-layout grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* ================================================================= */}
         {/* LEFT SIDEBAR MENU                                                 */}
         {/* ================================================================= */}
-        <aside className="lg:col-span-4 bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-3 shadow-xs">
-          <nav className="space-y-1">
+        <aside className="profile-navigation lg:col-span-4 bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-3 shadow-xs">
+          <nav aria-label="Quản lý tài khoản" className="space-y-1">
             {menuItems.map((item) => {
               const Icon = item.icon;
               const isActive = activeTab === item.id;
@@ -566,6 +566,7 @@ export const ProfilePage: React.FC = () => {
                 <button
                   key={item.id}
                   onClick={() => handleTabChange(item.id)}
+                  aria-current={isActive ? 'page' : undefined}
                   className={`relative w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
                     isActive
                       ? 'bg-[#0E6BA8]/10 text-[#0E6BA8] dark:text-[#38a5da] shadow-2xs'
@@ -619,9 +620,10 @@ export const ProfilePage: React.FC = () => {
         {/* ================================================================= */}
         {/* RIGHT CONTENT PANEL                                               */}
         {/* ================================================================= */}
-        <section className="lg:col-span-8 space-y-6">
+        <section className="profile-panel lg:col-span-8 space-y-6">
           {/* Header Title & Subtitle with Status Badge */}
-          <div>
+          <div className="profile-heading">
+            {user?.role === 'CUSTOMER' && <p className="customer-eyebrow">{activeTab === 'SECURITY' ? 'Bảo mật tài khoản' : 'Tài khoản của bạn'}</p>}
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight leading-tight">
                 {activeTab === 'INFO' && (isStoreOwner ? 'Hồ sơ đại lý & Chủ cửa hàng' : 'Thông tin cá nhân')}
@@ -669,10 +671,10 @@ export const ProfilePage: React.FC = () => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.2 }}
-              className="bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-6"
+              className="profile-info bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-6"
             >
               {/* Avatar / Store Logo Section */}
-              <div className="flex flex-col sm:flex-row sm:items-center gap-5">
+              <div className="profile-avatar flex flex-col sm:flex-row sm:items-center gap-5">
                 {/* Big Avatar / Logo Circle */}
                 <div className="relative w-24 h-24 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-2xl shadow-md shrink-0 overflow-hidden group">
                   {avatarPreview ? (
@@ -718,6 +720,7 @@ export const ProfilePage: React.FC = () => {
 
               {/* Form Input Grid */}
               <form onSubmit={handleSaveProfile} className="space-y-5">
+                {user?.role === 'CUSTOMER' && <div className="profile-section-heading"><h2>Thông tin liên hệ</h2><p>Thông tin được dùng để liên hệ và giao hàng cho bạn.</p></div>}
                 {isStoreOwner ? (
                   /* ================= B2B STORE OWNER FORM ================= */
                   <>
@@ -1401,10 +1404,10 @@ export const ProfilePage: React.FC = () => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.2 }}
-              className="bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-6 shadow-xs space-y-6"
+              className="profile-security bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-6 shadow-xs space-y-6"
             >
               {/* Security Status Box */}
-              <div className="p-4 rounded-xl bg-slate-50 dark:bg-zinc-850 border border-slate-200 dark:border-zinc-800 flex items-center justify-between">
+              <div className="security-hardware p-4 rounded-xl bg-slate-50 dark:bg-zinc-850 border border-slate-200 dark:border-zinc-800 flex items-center justify-between">
                 <div className="flex items-center gap-3">
                   <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 flex items-center justify-center border border-emerald-200 dark:border-emerald-800">
                     <ShieldCheck className="w-5 h-5" />
@@ -1424,7 +1427,7 @@ export const ProfilePage: React.FC = () => {
               </div>
 
               {/* Password Change Form */}
-              <form onSubmit={handleChangePassword} className="space-y-4 max-w-lg">
+              <form onSubmit={handleChangePassword} className="security-password-form space-y-4 max-w-lg">
                 <div className="flex items-center justify-between">
                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
                     {isStoreOwner ? 'Đổi mật khẩu tài khoản đại lý' : 'Đổi mật khẩu tài khoản'}
@@ -1434,13 +1437,17 @@ export const ProfilePage: React.FC = () => {
                   </span>
                 </div>
 
+                {user?.role === 'CUSTOMER' && <p className="security-password-help">Dùng ít nhất 8 ký tự, gồm chữ hoa, chữ thường, số và ký tự đặc biệt. Sau khi đổi mật khẩu, bạn sẽ đăng nhập lại.</p>}
+
                 {/* Mật khẩu hiện tại */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  <label htmlFor="account-current-password" className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
                     Mật khẩu hiện tại
                   </label>
                   <div className="relative">
                     <input
+                      id="account-current-password"
+                      autoComplete="current-password"
                       type={showCurrentPass ? 'text' : 'password'}
                       required
                       value={currentPassword}
@@ -1461,11 +1468,13 @@ export const ProfilePage: React.FC = () => {
 
                 {/* Mật khẩu mới */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  <label htmlFor="account-new-password" className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
                     Mật khẩu mới
                   </label>
                   <div className="relative">
                     <input
+                      id="account-new-password"
+                      autoComplete="new-password"
                       type={showNewPass ? 'text' : 'password'}
                       required
                       value={newPassword}
@@ -1513,11 +1522,13 @@ export const ProfilePage: React.FC = () => {
 
                 {/* Xác nhận mật khẩu mới */}
                 <div>
-                  <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
+                  <label htmlFor="account-confirm-password" className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
                     Xác nhận mật khẩu mới
                   </label>
                   <div className="relative">
                     <input
+                      id="account-confirm-password"
+                      autoComplete="new-password"
                       type={showConfirmPass ? 'text' : 'password'}
                       required
                       value={confirmPassword}

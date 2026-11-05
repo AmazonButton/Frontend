@@ -34,7 +34,6 @@
   body.modal-open-locked {
     overflow: hidden !important;
     overscroll-behavior: none !important;
-    touch-action: none;
   }
 
   /* Universal: Whenever any modal/popup is open, header must lie underneath the backdrop */
@@ -540,4 +539,86 @@
   background: rgba(17, 20, 28, 0.82);
   backdrop-filter: blur(16px);
   -webkit-backdrop-filter: blur(16px);
+}
+
+/* Let content reflow within cards instead of widening the entire page. */
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    scroll-padding-top: 5rem;
+  }
+
+  #root, main, .app-content {
+    min-width: 0;
+    width: 100%;
+  }
+
+  :where(.app-content, footer) :where(.flex, .grid) > :where(div, section, article, form) {
+    min-width: 0;
+  }
+
+  :where(h1, h2, h3, h4, p, label, button, a) {
+    overflow-wrap: anywhere;
+  }
+
+  input, select, textarea {
+    min-width: 0;
+    max-width: 100%;
+  }
+}
+
+/* The panel itself scrolls, keeping actions reachable on short/landscape screens. */
+.responsive-modal {
+  overscroll-behavior: contain;
+  padding-top: max(1rem, env(safe-area-inset-top));
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.responsive-modal > :is(.relative, .w-full, [role="dialog"]) {
+  min-width: 0;
+  max-height: calc(100vh - 2rem);
+  max-height: calc(100dvh - max(1rem, env(safe-area-inset-top)) - max(1rem, env(safe-area-inset-bottom)));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  touch-action: auto;
+}
+
+@media (max-width: 1023px) {
+  .app-content .overflow-x-auto,
+  .responsive-modal .overflow-x-auto {
+    max-width: 100%;
+    overscroll-behavior-x: contain;
+  }
+
+  .app-content table,
+  .responsive-modal table {
+    min-width: 40rem;
+  }
+}
+
+@media (max-width: 639px) {
+  .app-workspace :where(.flex.justify-between):not(td *, th *) {
+    flex-wrap: wrap;
+    row-gap: 0.75rem;
+  }
+
+  .app-content .truncate:not(input):not(select):not(textarea),
+  .responsive-modal .truncate:not(input):not(select):not(textarea) {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+  }
+
+  .app-content :where(button, a).whitespace-nowrap:not([role="tab"]) {
+    white-space: normal;
+  }
+
+  /* Avoid iOS zooming the form and pushing its buttons outside the viewport. */
+  .app-content :where(input, select, textarea) {
+    font-size: 16px;
+  }
+
+  footer .flex {
+    flex-wrap: wrap;
+  }
 }

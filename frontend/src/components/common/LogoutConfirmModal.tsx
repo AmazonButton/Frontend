@@ -98,7 +98,7 @@ export const LogoutConfirmModal: React.FC<LogoutConfirmModalProps> = ({
   return createPortal(
     <AnimatePresence>
       {isOpen && user && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 overscroll-contain">
+        <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
           {/* Backdrop blur */}
           <motion.div
             initial={{ opacity: 0 }}

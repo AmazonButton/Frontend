@@ -263,7 +263,7 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5 bg-slate-900/40 backdrop-blur-xs overscroll-contain overflow-y-auto"
+          className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-5 bg-slate-900/40 backdrop-blur-xs overscroll-contain overflow-y-auto responsive-modal overflow-y-auto"
           onClick={(e) => {
             if (e.target === e.currentTarget) handleCloseClick();
           }}

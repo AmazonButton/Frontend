@@ -1714,7 +1714,7 @@ export const AdminDashboard: React.FC = () => {
                   <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo gói mới</h3><p className="mt-0.5 text-xs text-zinc-500">Gói mới được API tạo ở trạng thái hoạt động.</p></div>
                   <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mã gói</label><input required value={newPlan.planCode} onChange={(e) => setNewPlan({ ...newPlan, planCode: e.target.value.toUpperCase() })} placeholder="VD: TRIAL-30" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs font-mono outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
                   <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tên gói</label><input required value={newPlan.planName} onChange={(e) => setNewPlan({ ...newPlan, planName: e.target.value })} placeholder="VD: Dùng thử 30 ngày" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
-                  <div className="grid grid-cols-2 gap-3"><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giá (₫)</label><input required min="0" type="number" value={newPlan.price} onChange={(e) => setNewPlan({ ...newPlan, price: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Thời hạn</label><input required min="1" type="number" value={newPlan.durationDays} onChange={(e) => setNewPlan({ ...newPlan, durationDays: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div></div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giá (₫)</label><input required min="0" type="number" value={newPlan.price} onChange={(e) => setNewPlan({ ...newPlan, price: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Thời hạn</label><input required min="1" type="number" value={newPlan.durationDays} onChange={(e) => setNewPlan({ ...newPlan, durationDays: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div></div>
                   <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giới hạn sản phẩm</label><input required min="1" type="number" value={newPlan.maxProducts} onChange={(e) => setNewPlan({ ...newPlan, maxProducts: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
                   <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mô tả</label><textarea rows={2} value={newPlan.description} onChange={(e) => setNewPlan({ ...newPlan, description: e.target.value })} className="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
                   <button disabled={planSaving} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50 cursor-pointer"><Plus className="h-3.5 w-3.5" /> {planSaving ? 'Đang tạo…' : 'Tạo gói đang hoạt động'}</button>
@@ -1837,7 +1837,7 @@ export const AdminDashboard: React.FC = () => {
                       className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
                     />
                   </div>
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Số lượng nút *</label>
                       <input
@@ -2522,7 +2522,7 @@ export const AdminDashboard: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {rejectingStoreId && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -2587,7 +2587,7 @@ export const AdminDashboard: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {showBatchModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -2668,7 +2668,7 @@ export const AdminDashboard: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {showAllocateModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -2764,7 +2764,7 @@ export const AdminDashboard: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {showAddProductModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -2900,7 +2900,7 @@ export const AdminDashboard: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {showFactoryResetModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"

@@ -689,7 +689,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   return createPortal(
     <AnimatePresence>
       {isOpen && (
-        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 overscroll-contain">
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 overscroll-contain responsive-modal overflow-y-auto">
           {/* Backdrop blur with smooth fade */}
           <motion.div
             initial={{ opacity: 0 }}

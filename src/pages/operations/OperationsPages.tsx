@@ -226,10 +226,10 @@ export const CustomerVerificationPage: React.FC = () => {
   };
 
   return (
-    <main className="mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6 lg:px-8">
+    <main className={`customer-ui customer-verification mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6 lg:px-8 ${isApproved ? 'verification-complete' : ''}`}>
       {/* Top Hero Banner */}
       {isApproved ? (
-        <section className="relative overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-800 via-teal-800 to-sky-950 p-6 text-white shadow-sm">
+        <section data-page-motion className="relative overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-800 via-teal-800 to-sky-950 p-6 text-white shadow-sm">
           <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
             <div>
               <div className="mb-2 flex items-center gap-2 text-emerald-200">
@@ -238,7 +238,7 @@ export const CustomerVerificationPage: React.FC = () => {
               </div>
               <h1 className="text-2xl font-bold tracking-tight text-white">Xác minh danh tính thành công</h1>
               <p className="mt-2 max-w-xl text-sm leading-relaxed text-emerald-50/90">
-                Hồ sơ eKYC của bạn đã được chứng thực thành công qua nhà cung cấp Didit. Toàn bộ tính năng tài khoản và bảo vệ thanh toán đã được kích hoạt.
+                Hồ sơ của bạn đã được xác minh qua Didit. Xem lại trạng thái và thông tin phiên xác minh bên dưới.
               </p>
             </div>
             <div className="flex items-center gap-2">
@@ -250,7 +250,7 @@ export const CustomerVerificationPage: React.FC = () => {
           </div>
         </section>
       ) : isPending ? (
-        <section className="relative overflow-hidden rounded-2xl border border-[#287DA8]/25 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-sm">
+        <section data-page-motion className="relative overflow-hidden rounded-2xl border border-[#287DA8]/25 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-sm">
           <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
             <div>
               <div className="mb-2 flex items-center gap-2 text-sky-100">
@@ -275,7 +275,7 @@ export const CustomerVerificationPage: React.FC = () => {
           </div>
         </section>
       ) : (
-        <section className="overflow-hidden rounded-2xl border border-[#287DA8]/25 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-sm">
+        <section data-page-motion className="overflow-hidden rounded-2xl border border-[#287DA8]/25 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-sm">
           <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
             <div>
               <div className="mb-2 flex items-center gap-2 text-sky-100">
@@ -322,9 +322,9 @@ export const CustomerVerificationPage: React.FC = () => {
       )}
 
       {/* Main Status Grid */}
-      <section className="grid gap-6 md:grid-cols-[1.15fr_.85fr] items-stretch">
+      <section data-page-motion className="verification-main grid gap-6 md:grid-cols-[1.15fr_.85fr] items-stretch">
         {/* Latest Status Card */}
-        <div className={`${card} flex flex-col justify-between`}>
+        <div className={`verification-status ${card} flex flex-col justify-between`}>
           <div className="flex items-center justify-between">
             <h2 className="font-bold text-zinc-900 dark:text-white">Trạng thái gần nhất</h2>
             {latest && (
@@ -482,30 +482,30 @@ export const CustomerVerificationPage: React.FC = () => {
         </div>
 
         {/* Benefits / Process Card */}
-        <div className={`${card} flex flex-col justify-between`}>
+        <div className={`verification-process ${card} flex flex-col justify-between`}>
           {isApproved ? (
             <>
               <div className="flex items-center gap-2">
                 <Sparkles className="h-5 w-5 text-emerald-600" />
-                <h2 className="font-bold text-zinc-900 dark:text-white">Đặc quyền bảo mật đã mở</h2>
+                <h2 className="font-bold text-zinc-900 dark:text-white">Thông tin xác minh của bạn</h2>
               </div>
               <ul className="mt-4 flex flex-1 flex-col justify-between gap-3 text-sm text-zinc-600 dark:text-zinc-300">
                 <li className="flex items-start gap-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3.5 dark:border-zinc-800/80 dark:bg-zinc-800/30">
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                   <span>
-                    <strong>Rút tiền & quản lý ví:</strong> Mở toàn bộ hạn mức rút tiền về tài khoản ngân hàng liên kết.
+                    <strong>Trạng thái xác minh:</strong> Hồ sơ đã nhận được kết quả từ nhà cung cấp Didit.
                   </span>
                 </li>
                 <li className="flex items-start gap-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3.5 dark:border-zinc-800/80 dark:bg-zinc-800/30">
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                   <span>
-                    <strong>Bảo vệ 2 lớp:</strong> Ngăn chặn giả mạo thông tin tài khoản và hỗ trợ xử lý tranh chấp ưu tiên.
+                    <strong>Thông tin giấy tờ:</strong> Số giấy tờ được che bớt khi hiển thị trên trang này.
                   </span>
                 </li>
                 <li className="flex items-start gap-3 rounded-xl border border-zinc-100 bg-zinc-50/60 p-3.5 dark:border-zinc-800/80 dark:bg-zinc-800/30">
                   <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                   <span>
-                    <strong>Huy hiệu xác minh:</strong> Tự động kích hoạt nhãn chứng thực số trên toàn bộ nền tảng Smart Order.
+                    <strong>Lịch sử xác minh:</strong> Bạn có thể xem lại thời gian và kết quả của các phiên đã thực hiện.
                   </span>
                 </li>
               </ul>

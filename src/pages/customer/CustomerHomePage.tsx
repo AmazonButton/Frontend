@@ -50,10 +50,10 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
   return (
     <motion.div
       layout
-      whileHover={{ scale: 1.012, y: -2 }}
+      whileHover={{ y: -1 }}
       whileTap={{ scale: 0.99 }}
       transition={{ type: 'spring', stiffness: 300, damping: 25 }}
-      className={`relative bg-white rounded-xl overflow-hidden shadow-xs border transition-all ${
+      className={`device-card relative bg-white rounded-xl overflow-hidden shadow-xs border transition-all ${
         isPressing
           ? 'border-amber-300 shadow-amber-100 shadow-lg ring-2 ring-amber-200'
           : 'border-slate-200/80 hover:shadow-md hover:border-slate-300'
@@ -61,7 +61,7 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
       style={{ willChange: 'transform' }}
     >
       {/* Product Image on soft bg-slate-50 */}
-      <div className="relative h-36 bg-slate-50/70 border-b border-slate-100 flex items-center justify-center overflow-hidden">
+      <div className="device-card-media relative h-36 bg-slate-50/70 border-b border-slate-100 flex items-center justify-center overflow-hidden">
 
         <img
           src={productImg}
@@ -92,7 +92,8 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
             e.stopPropagation();
             setExpanded((v) => !v);
           }}
-          className={`absolute top-3 right-3 w-7 h-7 rounded-lg flex items-center justify-center shadow-xs border transition-all z-10 ${
+          aria-expanded={expanded}
+          className={`device-settings absolute top-3 right-3 w-7 h-7 rounded-lg flex items-center justify-center shadow-xs border transition-all z-10 ${
             expanded
               ? 'bg-slate-900 border-slate-900 text-white'
               : 'bg-white/90 backdrop-blur-sm border-slate-200/80 text-slate-400 hover:text-slate-700 hover:border-slate-300'
@@ -104,10 +105,10 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
       </div>
 
       {/* Info & Primary Action */}
-      <div className="p-4 space-y-3">
+      <div className="device-card-info p-4 space-y-3">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">
-            <h3 className="text-sm font-semibold text-slate-900 truncate tracking-tight">{name}</h3>
+            <h3 className="text-sm font-semibold text-slate-900 tracking-tight">{name}</h3>
             <p className="text-xs text-slate-500 mt-0.5 truncate">
               {productDesc || cfg?.product?.name || 'Nút bấm thông minh 1 chạm'}
             </p>
@@ -123,7 +124,8 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
               }`}
               title={dev.status === 'DISABLED' ? 'Đã tắt' : isOnline ? 'Online' : 'Offline'}
             />
-            <span className="text-xs font-medium text-slate-500 tabular-nums">{battery}%</span>
+            <span className="device-state text-xs font-medium text-slate-500">{dev.status === 'DISABLED' ? 'Đã tắt' : isOnline ? 'Hoạt động' : 'Ngoại tuyến'}</span>
+            <span className="text-xs font-medium text-slate-500 tabular-nums"><Battery className="inline h-3.5 w-3.5 mr-1" />{battery}%</span>
           </div>
         </div>
 
@@ -919,8 +921,8 @@ export const CustomerHomePage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#FBFBFC]">
-    <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8">
+    <div className="customer-ui customer-devices min-h-screen bg-[#FBFBFC]">
+    <div className="devices-content max-w-5xl mx-auto px-4 sm:px-6 py-8 space-y-8">
       {/* Order Success Modal (Apple iOS / Airbnb "Digital Receipt" Experience) */}
       <OrderSuccessModal
         isOpen={showSuccessModal && !!activeSuccessOrder}
@@ -949,16 +951,17 @@ export const CustomerHomePage: React.FC = () => {
 
       {/* ── PART 1: Greeting & Minimalist Linear Status Bar ── */}
       <motion.div
-        initial={{ opacity: 0, y: 12 }}
+        initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] }}
+        transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+        data-page-motion
         className="space-y-4"
       >
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
           <div>
-            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-900">
-              Xin chào, {user?.fullName || 'Cư Dân'}
-            </h1>
+            <p className="customer-eyebrow">Thiết bị cá nhân</p>
+            <h1 className="text-2xl sm:text-3xl font-semibold tracking-tight text-slate-900">Nút của tôi</h1>
+            <p className="devices-greeting">Xin chào, {user?.fullName || 'Cư Dân'}. Quản lý nút bấm và đặt lại sản phẩm quen dùng.</p>
             <div className="flex flex-wrap items-center gap-2 mt-1.5 text-xs text-slate-500">
               <button
                 type="button"
@@ -967,9 +970,9 @@ export const CustomerHomePage: React.FC = () => {
                 title="Nhấn để đổi cửa hàng hoặc tìm đại lý lân cận"
               >
                 <Store className="w-3.5 h-3.5 text-[#0E6BA8] shrink-0" />
-                <span className="font-semibold text-slate-800">{selectedStore?.name || user?.store?.name || 'LeBao Store (Q7)'}</span>
+                <span className="font-semibold text-slate-800">{selectedStore?.name || user?.store?.name || 'Chưa chọn cửa hàng'}</span>
                 <span className="text-[10px] bg-[#0E6BA8] text-white px-1.5 py-0.2 rounded-full font-medium tabular-nums">
-                  {selectedStore?.code || 'STORE-NFHT4'}
+                  {selectedStore?.code || 'Chọn cửa hàng'}
                 </span>
                 <span className="text-[11px] text-[#0E6BA8] group-hover:underline flex items-center ml-0.5">
                   Đổi <ChevronRight className="w-3 h-3 group-hover:translate-x-0.5 transition-transform" />
@@ -978,7 +981,7 @@ export const CustomerHomePage: React.FC = () => {
               <span className="text-slate-300">·</span>
               <span className="text-slate-500 flex items-center gap-1">
                 <MapPin className="w-3 h-3 text-slate-400" />
-                <span>Căn hộ {(user as any)?.customerProfile?.apartment || 'Landmark Plus Q7'}</span>
+                <span>Căn hộ {(user as any)?.customerProfile?.apartment || 'chưa cập nhật'}</span>
               </span>
             </div>
           </div>
@@ -1006,11 +1009,11 @@ export const CustomerHomePage: React.FC = () => {
         </div>
 
         {/* Minimalist Linear/Stripe Status Bar */}
-        <div className="flex flex-wrap items-center gap-4 py-2.5 px-4 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600">
+        <div className="devices-status flex flex-wrap items-center gap-4 py-2.5 px-4 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600">
           <span className="inline-flex items-center gap-2 font-medium">
             <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse shrink-0" />
             <span className="tabular-nums font-semibold text-slate-800">
-              {devices.length > 0 ? devices.filter(d => d.status !== 'DISABLED').length : 4}/{devices.length > 0 ? devices.length : 4}
+              {devices.filter(d => d.status !== 'DISABLED').length}/{devices.length}
             </span>{' '}
             thiết bị đang hoạt động
           </span>
@@ -1019,7 +1022,7 @@ export const CustomerHomePage: React.FC = () => {
             <Battery className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             <span>Pin trung bình</span>
             <span className="tabular-nums font-semibold text-slate-800">
-              {devices.length > 0 ? Math.round(devices.reduce((s, d) => s + (d.batteryLevel ?? 93), 0) / devices.length) : 93}%
+              {devices.length > 0 ? `${Math.round(devices.reduce((s, d) => s + (d.batteryLevel ?? 93), 0) / devices.length)}%` : '—'}
             </span>
           </span>
           <span className="text-slate-300 hidden sm:inline">·</span>
@@ -1094,9 +1097,10 @@ export const CustomerHomePage: React.FC = () => {
 
       {/* ── PART 2: Device Grid ── */}
       <motion.div
-        initial={{ opacity: 0, y: 15 }}
+        initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, delay: 0.1, ease: [0.25, 0.46, 0.45, 0.94] }}
+        transition={{ duration: 0.24, delay: 0.04, ease: [0.22, 1, 0.36, 1] }}
+        data-page-motion
         className="pt-2"
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
@@ -1168,7 +1172,7 @@ export const CustomerHomePage: React.FC = () => {
             </div>
           </motion.div>
         ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
+          <div className="devices-grid grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 items-start">
             {devices.map((dev) => {
               const cfg = dev.configuration;
               const product = cfg?.product || dev.product;
@@ -1235,9 +1239,10 @@ export const CustomerHomePage: React.FC = () => {
 
       {/* ── PART 3: Order History (Clean Flat List, Linear/Stripe Style) ── */}
       <motion.div
-        initial={{ opacity: 0, y: 15 }}
+        initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, delay: 0.15, ease: [0.25, 0.46, 0.45, 0.94] }}
+        transition={{ duration: 0.24, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
+        data-page-motion
         className="pt-4"
       >
         <div className="flex items-center justify-between mb-4">
@@ -1359,7 +1364,7 @@ export const CustomerHomePage: React.FC = () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.24, ease: 'easeOut' }}
-              className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden overscroll-contain"
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden overscroll-contain responsive-modal overflow-y-auto"
             >
             {/* Smooth Backdrop */}
             <motion.div
@@ -1630,7 +1635,7 @@ export const CustomerHomePage: React.FC = () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.24, ease: [0.16, 1, 0.3, 1] }}
-              className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden overscroll-contain"
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden overscroll-contain responsive-modal overflow-y-auto"
             >
               {/* Smooth Backdrop */}
               <motion.div
@@ -1714,7 +1719,7 @@ export const CustomerHomePage: React.FC = () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.24, ease: 'easeOut' }}
-              className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden overscroll-contain"
+              className="fixed inset-0 z-[100] flex items-center justify-center p-4 overflow-hidden overscroll-contain responsive-modal overflow-y-auto"
             >
             {/* Smooth Backdrop */}
             <motion.div
@@ -1964,7 +1969,7 @@ export const CustomerHomePage: React.FC = () => {
               animate={{ opacity: 1 }}
               exit={{ opacity: 0 }}
               transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-              className="fixed inset-0 z-[110] flex items-center justify-center p-4 overflow-hidden overscroll-contain"
+              className="fixed inset-0 z-[110] flex items-center justify-center p-4 overflow-hidden overscroll-contain responsive-modal overflow-y-auto"
             >
               {/* Backdrop */}
               <motion.div

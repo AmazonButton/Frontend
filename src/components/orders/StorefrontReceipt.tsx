@@ -9,7 +9,7 @@ export const StorefrontReceipt: React.FC<{ order: Order; onClose: () => void; lo
   useBodyScrollLock(true);
   const awaitingPayment = order.paymentMethod === 'PAYOS' && order.paymentStatus !== 'PAID';
   return (
-    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4">
+    <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4 responsive-modal overflow-y-auto">
       <section role="dialog" aria-modal="true" aria-labelledby="receipt-title" className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl dark:bg-zinc-900">
         <button type="button" aria-label="Đóng xác nhận đơn hàng" onClick={onClose} className="absolute right-4 top-4 p-2 text-slate-500"><X className="h-5 w-5" /></button>
         <CheckCircle2 className="mb-3 h-9 w-9 text-emerald-600" />

@@ -27,6 +27,7 @@ import { ProfilePage } from './pages/profile/ProfilePage';
 import { AdminPayoutsPage, CustomerVerificationPage, DriverShiftPage, StoreFinancePage } from './pages/operations/OperationsPages';
 import { useAuth } from './context/AuthContext';
 import { Atmosphere3DBackground, AtmosphereVariant } from './components/3d/Atmosphere3DBackground';
+import './pages/customer/customer-ui.css';
 
 // Protected Route Wrapper with 403 Forbidden Redirection
 const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: string[] }> = ({
@@ -62,9 +63,9 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
 // state gives every role the same full-width workspace as the store owner.
 const AppShellLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] w-full bg-[#FBFBFC] dark:bg-zinc-950 relative">
+    <div className="flex flex-col lg:flex-row min-h-[calc(100vh-4rem)] w-full bg-[#FBFBFC] dark:bg-zinc-950 relative">
       <Sidebar />
-      <main className="flex-1 min-w-0 w-full p-4 sm:p-5 lg:p-6 overflow-x-hidden">
+      <main className="app-workspace flex-1 min-w-0 w-full p-3 sm:p-5 lg:p-6">
         {children || <Outlet />}
       </main>
     </div>
@@ -98,7 +99,7 @@ export const App: React.FC = () => {
       {/* 36. Animated Background — Premium 3D Atmosphere */}
       <Atmosphere3DBackground variant={getAtmosphereVariant()} />
       {!isAuth && <Navbar />}
-      <div className={`flex-1 relative ${location.pathname === "/" || isAuth ? "" : "pt-16"} ${user?.role === "CUSTOMER" && !isAuth ? "pb-16 md:pb-0" : ""}`}>
+      <div className={`app-content flex-1 min-w-0 relative ${location.pathname === "/" || isAuth ? "" : "pt-16"}`}>
         <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route

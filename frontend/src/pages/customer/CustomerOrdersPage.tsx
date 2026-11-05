@@ -274,7 +274,7 @@ export const CustomerOrdersPage: React.FC = () => {
   ];
 
   return (
-    <main className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-11">
+    <main className="customer-ui customer-orders max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-11">
       <section className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#287DA8]">
@@ -295,7 +295,7 @@ export const CustomerOrdersPage: React.FC = () => {
         </button>
       </section>
 
-      <section className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-8">
+      <section aria-label="Tóm tắt đơn hàng" className="orders-summary grid grid-cols-1 sm:grid-cols-3 gap-3 mt-8">
         {[
           { label: 'Tổng đơn hàng', value: summary.total, note: 'Từ lần đặt đầu tiên', icon: ReceiptText, tone: 'text-[#287DA8] bg-[#287DA8]/10' },
           { label: 'Đang xử lý', value: summary.active, note: 'Cần theo dõi', icon: Truck, tone: 'text-amber-600 bg-amber-50' },
@@ -303,7 +303,7 @@ export const CustomerOrdersPage: React.FC = () => {
         ].map((item) => {
           const Icon = item.icon;
           return (
-            <div key={item.label} className="rounded-xl border border-slate-200/80 bg-white px-4 py-4 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+            <div key={item.label} className="orders-summary-item rounded-xl border border-slate-200/80 bg-white px-4 py-4 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-medium text-slate-500 dark:text-zinc-400">{item.label}</p>
@@ -317,16 +317,17 @@ export const CustomerOrdersPage: React.FC = () => {
         })}
       </section>
 
-      <section className="mt-6 rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <section className="orders-list mt-6 rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
         <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-zinc-800">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex items-center gap-2 min-w-0 overflow-x-auto pb-1 lg:pb-0">
+            <div aria-label="Lọc trạng thái đơn hàng" className="orders-filters flex items-center gap-2 min-w-0 overflow-x-auto pb-1 lg:pb-0">
               <SlidersHorizontal className="w-4 h-4 text-slate-400 shrink-0" />
               {filters.map((item) => (
                 <button
                   type="button"
                   key={item.id}
                   onClick={() => setFilter(item.id)}
+                  aria-pressed={filter === item.id}
                   className={`shrink-0 inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold transition ${filter === item.id
                     ? 'bg-[#0E6BA8] text-white shadow-sm'
                     : 'text-slate-500 hover:bg-slate-100 hover:text-slate-800 dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-zinc-100'}`}
@@ -342,6 +343,7 @@ export const CustomerOrdersPage: React.FC = () => {
                 value={query}
                 onChange={(event) => setQuery(event.target.value)}
                 placeholder="Tìm mã đơn hoặc sản phẩm"
+                aria-label="Tìm đơn hàng theo mã đơn hoặc sản phẩm"
                 className="w-full rounded-lg border border-slate-200 bg-slate-50/60 py-2 pl-9 pr-3 text-xs text-slate-800 outline-none transition placeholder:text-slate-400 focus:border-[#287DA8] focus:bg-white focus:ring-3 focus:ring-[#287DA8]/10 dark:border-zinc-700 dark:bg-zinc-800 dark:text-white"
               />
             </label>
@@ -389,9 +391,9 @@ export const CustomerOrdersPage: React.FC = () => {
                       className="w-full px-2 sm:px-3 py-4 text-left rounded-xl transition hover:bg-slate-50/80 dark:hover:bg-zinc-800/60"
                       aria-expanded={isExpanded}
                     >
-                      <div className="flex items-start gap-3 sm:gap-4">
+                      <div className="order-row flex items-start gap-3 sm:gap-4">
                         <div className="hidden sm:flex mt-0.5 w-9 h-9 shrink-0 rounded-xl bg-slate-100 items-center justify-center dark:bg-zinc-800"><ShoppingBag className="w-4 h-4 text-slate-500" /></div>
-                        <div className="min-w-0 flex-1">
+                        <div className="order-identity min-w-0 flex-1">
                           <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
                             <span className="text-sm font-bold tracking-tight text-slate-900 dark:text-white">#{order.orderNumber}</span>
                             <span className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold ${meta.badge}`}><StatusIcon className="w-3 h-3" />{meta.label}</span>
@@ -399,7 +401,7 @@ export const CustomerOrdersPage: React.FC = () => {
                           <p className="mt-1 text-xs text-slate-500 dark:text-zinc-400 truncate">{itemSummary}{order.items.length > 2 ? ` và ${order.items.length - 2} sản phẩm khác` : ''}</p>
                           <p className="mt-1.5 text-[11px] text-slate-400 tabular-nums">{formatDate(order.createdAt)}</p>
                         </div>
-                        <div className="shrink-0 flex items-center gap-2 sm:gap-3">
+                        <div className="order-total shrink-0 flex items-center gap-2 sm:gap-3">
                           <div className="text-right">
                             <p className="text-sm font-bold text-slate-900 tabular-nums dark:text-white">{formatPrice(order.totalAmount)}</p>
                             <p className={`mt-1 text-[10px] ${isUnpaid ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
@@ -445,7 +447,7 @@ export const CustomerOrdersPage: React.FC = () => {
                                       : 'Đơn hàng chưa hoàn tất thanh toán. Bạn có thể thanh toán ngay. Nếu cần hủy, vui lòng liên hệ cửa hàng.'
                                     : 'Đơn hàng đang chờ xử lý, bạn vẫn có thể hủy đơn nếu muốn thay đổi.'}
                                 </p>
-                                <div className="flex items-center gap-2 self-end sm:self-auto">
+                                <div className="order-actions flex flex-wrap items-center gap-2 self-end sm:self-auto">
                                   {canPayNow && (
                                     <>
                                       <button
@@ -585,7 +587,7 @@ export const CustomerOrdersPage: React.FC = () => {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             exit={{ opacity: 0 }}
-            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/45 backdrop-blur-sm"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/45 backdrop-blur-sm responsive-modal overflow-y-auto"
             onMouseDown={() => !isCancelling && setOrderToCancel(null)}
           >
             <motion.div

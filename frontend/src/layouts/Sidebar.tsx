@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, LayoutGroup, AnimatePresence } from 'framer-motion';
@@ -73,6 +73,11 @@ export const Sidebar: React.FC = () => {
   const location = useLocation();
   const { isSidebarOpen, toggleSidebar } = useSidebar();
   const [hoveredItem, setHoveredItem] = useState<{ label: string; top: number } | null>(null);
+  const mobileMenuRef = useRef<HTMLDetailsElement>(null);
+
+  useEffect(() => {
+    if (mobileMenuRef.current) mobileMenuRef.current.open = false;
+  }, [location.pathname, location.search]);
 
   const isCustomer = user?.role === 'CUSTOMER';
   const isAdmin = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '');
@@ -90,7 +95,6 @@ export const Sidebar: React.FC = () => {
   const subtitle = isCustomer ? 'Không gian mua sắm' : isAdmin ? 'Trung tâm điều hành' : 'Edge Broker Connected';
   const icon = isCustomer ? UserRound : isAdmin ? ShieldCheck : Store;
   const HeaderIcon = icon;
-  const compactOnMobile = isCustomer || isAdmin;
 
   const isLinkActive = (path: string) => {
     if (path === '/shop') return location.pathname === '/shop';
@@ -103,11 +107,33 @@ export const Sidebar: React.FC = () => {
   };
 
   return (
+    <>
+    <details ref={mobileMenuRef} className="w-full border-b border-zinc-200 bg-white dark:border-zinc-800 dark:bg-zinc-950 lg:hidden" onKeyDown={(event) => {
+      if (event.key === 'Escape' && mobileMenuRef.current) {
+        mobileMenuRef.current.open = false;
+        mobileMenuRef.current.querySelector('summary')?.focus();
+      }
+    }}>
+      <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 px-4 py-3 text-sm font-semibold text-zinc-800 dark:text-zinc-100 [&::-webkit-details-marker]:hidden">
+        <Menu size={20} className="shrink-0" />
+        <span className="min-w-0 break-words">{links.find((item) => isLinkActive(item.to))?.label || 'Menu điều hướng'}</span>
+        <span className="ml-auto shrink-0 text-xs text-zinc-500">Menu</span>
+      </summary>
+      <nav aria-label="Điều hướng trên điện thoại" className="grid gap-1 px-3 pb-3 sm:grid-cols-2">
+        {links.map(({ to, label, icon: Icon }) => (
+          <Link key={to} to={to} aria-current={isLinkActive(to) ? 'page' : undefined}
+            onClick={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }}
+            className={`flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm ${isLinkActive(to) ? 'bg-sky-50 font-semibold text-sky-700 dark:bg-sky-950 dark:text-sky-300' : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900'}`}>
+            <Icon size={18} className="shrink-0" /><span className="min-w-0 break-words">{label}</span>
+          </Link>
+        ))}
+      </nav>
+    </details>
     <motion.aside
       initial={false}
       animate={{ width: isSidebarOpen ? 256 : 68 }}
       transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-      className={`min-h-[calc(100vh-4rem)] border-r border-zinc-200 dark:border-zinc-800 flex-col justify-between shrink-0 overflow-hidden bg-[#FBFBFC] dark:bg-zinc-950 select-none z-20 ${compactOnMobile ? 'hidden md:flex' : 'flex'}`}
+      className="min-h-[calc(100vh-4rem)] border-r border-zinc-200 dark:border-zinc-800 flex-col justify-between shrink-0 overflow-hidden bg-[#FBFBFC] dark:bg-zinc-950 select-none z-20 hidden lg:flex"
     >
       <div>
         <div className="px-3 py-3 border-b border-zinc-200/80 dark:border-zinc-800/80 h-[58px] flex items-center relative overflow-hidden">
@@ -171,5 +197,6 @@ export const Sidebar: React.FC = () => {
 
       {hoveredItem && !isSidebarOpen && ReactDOM.createPortal(<div style={{ top: hoveredItem.top }} className="fixed left-[76px] -translate-y-1/2 z-50 pointer-events-none"><div className="bg-zinc-900 text-white text-xs font-medium rounded-md px-2 py-1 shadow-lg whitespace-nowrap">{hoveredItem.label}</div></div>, document.body)}
     </motion.aside>
+    </>
   );
 };

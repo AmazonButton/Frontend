@@ -207,7 +207,7 @@ export const PayOSCancelRecoveryModal: React.FC<PayOSCancelRecoveryModalProps> =
           animate={{ opacity: 1 }}
           exit={{ opacity: 0 }}
           transition={{ duration: 0.2 }}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-xs responsive-modal overflow-y-auto"
           onClick={() => {
             if (!busyAction) {
               toast.info('Đơn hàng vẫn đang ở trạng thái Chờ thanh toán. Bạn có thể mở lại trong mục Đơn hàng.');

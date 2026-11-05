@@ -6,6 +6,21 @@ export default defineConfig({
   resolve: {
     preserveSymlinks: true,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        // Keep long-lived framework code cacheable separately from route chunks.
+        // Route-level imports in App.tsx ensure that a user only downloads the
+        // screen they open, without changing any page logic or API flow.
+        manualChunks: {
+          'react-core': ['react', 'react-dom', 'react-router-dom'],
+          animation: ['framer-motion'],
+          charts: ['recharts'],
+          qr: ['html5-qrcode', 'qrcode.react'],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     host: true,

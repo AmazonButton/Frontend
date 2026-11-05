@@ -427,7 +427,7 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {showModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
             {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
@@ -485,7 +485,7 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
                   />
                 </div>
 
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                       Ngành Hàng / Danh Mục
@@ -539,7 +539,7 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
                 </div>
 
                 {/* Technical Fields: Read-only Inputs */}
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   <div>
                     <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                       Nhấn 1 lần (Single Click)
@@ -595,7 +595,7 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {deployingTemplate && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
             {/* Backdrop */}
             <motion.div
               initial={{ opacity: 0 }}
@@ -680,7 +680,7 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
                     />
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block font-medium text-slate-700 dark:text-slate-300 mb-1">
                         Từ số

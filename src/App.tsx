@@ -1,32 +1,48 @@
-import React from 'react';
+import React, { Suspense } from 'react';
 import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
 import { Navbar } from './layouts/Navbar';
 import { Sidebar } from './layouts/Sidebar';
 import { Footer } from './layouts/Footer';
-import { LandingPage } from './pages/LandingPage';
-import { LoginPage } from './pages/auth/LoginPage';
-import { RegisterPage } from './pages/auth/RegisterPage';
-import { ForgotPasswordPage } from './pages/auth/ForgotPasswordPage';
-import { ResetPasswordPage } from './pages/auth/ResetPasswordPage';
-import { VerifyEmailPage } from './pages/auth/VerifyEmailPage';
-import { ForbiddenPage } from './pages/auth/ForbiddenPage';
-import { StoreDashboard } from './pages/store/StoreDashboard';
-import { StoreDevicesPage } from './pages/store/StoreDevicesPage';
-import { StoreDeviceTemplatesPage } from './pages/store/StoreDeviceTemplatesPage';
-import { StoreProductsPage } from './pages/store/StoreProductsPage';
-import { StoreWalletPage } from './pages/store/StoreWalletPage';
-import { StoreAnalyticsPage } from './pages/store/StoreAnalyticsPage';
-import { CustomerHomePage } from './pages/customer/CustomerHomePage';
-import { CustomerOrdersPage } from './pages/customer/CustomerOrdersPage';
-import { CustomerRentalsPage } from './pages/customer/CustomerRentalsPage';
-import { ShopPage } from './pages/customer/ShopPage';
-import { AdminDashboard } from './pages/admin/AdminDashboard';
-import { AdminSecurityHubPage } from './pages/admin/AdminSecurityHubPage';
-import { QuickSetupPage } from './pages/QuickSetupPage';
-import { ProfilePage } from './pages/profile/ProfilePage';
-import { AdminPayoutsPage, CustomerVerificationPage, DriverShiftPage, StoreFinancePage } from './pages/operations/OperationsPages';
+import { PageBackButton } from './components/common/PageBackButton';
+import { CustomerPageMotion } from './components/common/CustomerPageMotion';
 import { useAuth } from './context/AuthContext';
 import { Atmosphere3DBackground, AtmosphereVariant } from './components/3d/Atmosphere3DBackground';
+import './pages/customer/customer-ui.css';
+
+// Route modules load only when their screen is opened. This keeps every page's
+// behaviour intact while avoiding the cost of dashboards, charts and forms on
+// the first visit to an unrelated screen.
+const LandingPage = React.lazy(() => import('./pages/LandingPage').then((module) => ({ default: module.LandingPage })));
+const LoginPage = React.lazy(() => import('./pages/auth/LoginPage').then((module) => ({ default: module.LoginPage })));
+const RegisterPage = React.lazy(() => import('./pages/auth/RegisterPage').then((module) => ({ default: module.RegisterPage })));
+const ForgotPasswordPage = React.lazy(() => import('./pages/auth/ForgotPasswordPage').then((module) => ({ default: module.ForgotPasswordPage })));
+const ResetPasswordPage = React.lazy(() => import('./pages/auth/ResetPasswordPage').then((module) => ({ default: module.ResetPasswordPage })));
+const VerifyEmailPage = React.lazy(() => import('./pages/auth/VerifyEmailPage').then((module) => ({ default: module.VerifyEmailPage })));
+const ForbiddenPage = React.lazy(() => import('./pages/auth/ForbiddenPage').then((module) => ({ default: module.ForbiddenPage })));
+const StoreDashboard = React.lazy(() => import('./pages/store/StoreDashboard').then((module) => ({ default: module.StoreDashboard })));
+const StoreDevicesPage = React.lazy(() => import('./pages/store/StoreDevicesPage').then((module) => ({ default: module.StoreDevicesPage })));
+const StoreDeviceTemplatesPage = React.lazy(() => import('./pages/store/StoreDeviceTemplatesPage').then((module) => ({ default: module.StoreDeviceTemplatesPage })));
+const StoreProductsPage = React.lazy(() => import('./pages/store/StoreProductsPage').then((module) => ({ default: module.StoreProductsPage })));
+const StoreWalletPage = React.lazy(() => import('./pages/store/StoreWalletPage').then((module) => ({ default: module.StoreWalletPage })));
+const StoreAnalyticsPage = React.lazy(() => import('./pages/store/StoreAnalyticsPage').then((module) => ({ default: module.StoreAnalyticsPage })));
+const CustomerHomePage = React.lazy(() => import('./pages/customer/CustomerHomePage').then((module) => ({ default: module.CustomerHomePage })));
+const CustomerOrdersPage = React.lazy(() => import('./pages/customer/CustomerOrdersPage').then((module) => ({ default: module.CustomerOrdersPage })));
+const CustomerRentalsPage = React.lazy(() => import('./pages/customer/CustomerRentalsPage').then((module) => ({ default: module.CustomerRentalsPage })));
+const ShopPage = React.lazy(() => import('./pages/customer/ShopPage').then((module) => ({ default: module.ShopPage })));
+const AdminDashboard = React.lazy(() => import('./pages/admin/AdminDashboard').then((module) => ({ default: module.AdminDashboard })));
+const AdminSecurityHubPage = React.lazy(() => import('./pages/admin/AdminSecurityHubPage').then((module) => ({ default: module.AdminSecurityHubPage })));
+const QuickSetupPage = React.lazy(() => import('./pages/QuickSetupPage').then((module) => ({ default: module.QuickSetupPage })));
+const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage').then((module) => ({ default: module.ProfilePage })));
+const CustomerVerificationPage = React.lazy(() => import('./pages/operations/OperationsPages').then((module) => ({ default: module.CustomerVerificationPage })));
+const DriverShiftPage = React.lazy(() => import('./pages/operations/OperationsPages').then((module) => ({ default: module.DriverShiftPage })));
+const StoreFinancePage = React.lazy(() => import('./pages/operations/OperationsPages').then((module) => ({ default: module.StoreFinancePage })));
+const AdminPayoutsPage = React.lazy(() => import('./pages/operations/OperationsPages').then((module) => ({ default: module.AdminPayoutsPage })));
+
+const RouteLoadingFallback: React.FC = () => (
+  <div className="min-h-[12rem] w-full flex items-center justify-center" role="status" aria-label="Đang tải nội dung">
+    <span className="h-7 w-7 animate-spin rounded-full border-2 border-[#287DA8] border-t-transparent" />
+  </div>
+);
 
 // Protected Route Wrapper with 403 Forbidden Redirection
 const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: string[] }> = ({
@@ -61,11 +77,22 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
 // Shared desktop shell. The sidebar keeps navigation available while its compact
 // state gives every role the same full-width workspace as the store owner.
 const AppShellLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
+
   return (
-    <div className="flex min-h-[calc(100vh-4rem)] w-full bg-[#FBFBFC] dark:bg-zinc-950 relative">
+    <div className="flex flex-col lg:flex-row min-h-[calc(100vh-4rem)] w-full bg-[#FBFBFC] dark:bg-zinc-950 relative">
       <Sidebar />
-      <main className="flex-1 min-w-0 w-full p-4 sm:p-5 lg:p-6 overflow-x-hidden">
-        {children || <Outlet />}
+      <main className="app-workspace flex-1 min-w-0 w-full p-3 sm:p-5 lg:p-6">
+        {user?.role === 'CUSTOMER' && (
+          <nav aria-label="Điều hướng trang" className="mb-3 flex sm:mb-4">
+            <PageBackButton />
+          </nav>
+        )}
+        <Suspense fallback={<RouteLoadingFallback />}>
+          {user?.role === 'CUSTOMER'
+            ? <CustomerPageMotion>{children || <Outlet />}</CustomerPageMotion>
+            : children || <Outlet />}
+        </Suspense>
       </main>
     </div>
   );
@@ -94,12 +121,13 @@ export const App: React.FC = () => {
   const showFooter = !isDashboard && !isAuth;
 
   return (
-    <div className="min-h-screen bg-surface-bg dark:bg-cyber-bg text-navy-900 dark:text-slate-100 flex flex-col transition-colors duration-200 relative overflow-x-hidden">
+    <div className={`min-h-screen bg-surface-bg dark:bg-cyber-bg text-navy-900 dark:text-slate-100 flex flex-col transition-colors duration-200 relative overflow-x-hidden ${location.pathname === '/' ? 'landing-route' : ''}`}>
       {/* 36. Animated Background — Premium 3D Atmosphere */}
       <Atmosphere3DBackground variant={getAtmosphereVariant()} />
       {!isAuth && <Navbar />}
-      <div className={`flex-1 relative ${location.pathname === "/" || isAuth ? "" : "pt-16"} ${user?.role === "CUSTOMER" && !isAuth ? "pb-16 md:pb-0" : ""}`}>
-        <Routes>
+      <div className={`app-content flex-1 min-w-0 relative ${location.pathname === "/" || isAuth ? "" : "pt-16"}`}>
+        <Suspense fallback={<RouteLoadingFallback />}>
+          <Routes>
           <Route path="/" element={<LandingPage />} />
           <Route
             path="/shop"
@@ -184,14 +212,17 @@ export const App: React.FC = () => {
             path="/profile"
             element={
               <ProtectedRoute>
-                <ProfilePage />
+                {user?.role === 'CUSTOMER'
+                  ? <CustomerPageMotion><ProfilePage /></CustomerPageMotion>
+                  : <ProfilePage />}
               </ProtectedRoute>
             }
           />
 
           {/* Catch-all */}
           <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+          </Routes>
+        </Suspense>
       </div>
       {showFooter && <Footer />}
     </div>

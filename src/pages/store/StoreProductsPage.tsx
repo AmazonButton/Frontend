@@ -1016,7 +1016,7 @@ export const StoreProductsPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {showAddModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -1072,7 +1072,7 @@ export const StoreProductsPage: React.FC = () => {
                   </div>
 
                   {/* Thương Hiệu & SKU */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                         Thương Hiệu *
@@ -1102,7 +1102,7 @@ export const StoreProductsPage: React.FC = () => {
                   </div>
 
                   {/* Danh Mục & Đơn Vị */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                         Danh Mục
@@ -1135,7 +1135,7 @@ export const StoreProductsPage: React.FC = () => {
                   </div>
 
                   {/* Đơn Giá & Tồn Kho */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                         Đơn Giá Bán (VNĐ) *
@@ -1262,7 +1262,7 @@ export const StoreProductsPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {editingProduct && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}
@@ -1318,7 +1318,7 @@ export const StoreProductsPage: React.FC = () => {
                   </div>
 
                   {/* Thương Hiệu & SKU */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                         Thương Hiệu *
@@ -1345,7 +1345,7 @@ export const StoreProductsPage: React.FC = () => {
                   </div>
 
                   {/* Danh Mục & Đơn Vị */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                         Danh Mục
@@ -1377,7 +1377,7 @@ export const StoreProductsPage: React.FC = () => {
                   </div>
 
                   {/* Đơn Giá & Tồn Kho */}
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">
                         Đơn Giá Bán (VNĐ) *
@@ -1502,7 +1502,7 @@ export const StoreProductsPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {statusConfirmation && (
-            <div className="fixed inset-0 z-[110] flex items-center justify-center p-4">
+            <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 responsive-modal overflow-y-auto">
               <motion.div
                 initial={{ opacity: 0 }}
                 animate={{ opacity: 1 }}

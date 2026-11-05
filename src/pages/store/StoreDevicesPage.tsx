@@ -1577,7 +1577,7 @@ export const StoreDevicesPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {showWizard && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -1817,7 +1817,7 @@ export const StoreDevicesPage: React.FC = () => {
                       />
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                           Số lượng mỗi lần bấm:
@@ -1907,7 +1907,7 @@ export const StoreDevicesPage: React.FC = () => {
                       </select>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                           Số lượng mỗi lần bấm
@@ -1968,7 +1968,7 @@ export const StoreDevicesPage: React.FC = () => {
                             />
                           </div>
 
-                          <div className="grid grid-cols-2 gap-3">
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                             <div>
                               <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
                                 Địa chỉ MAC (Tùy chọn)
@@ -2083,7 +2083,7 @@ export const StoreDevicesPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {assigningDevice && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -2182,7 +2182,7 @@ export const StoreDevicesPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {qrModalDevice && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -2270,7 +2270,7 @@ export const StoreDevicesPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {inspectDevice && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -2426,7 +2426,7 @@ export const StoreDevicesPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {showBulkModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -2556,7 +2556,7 @@ export const StoreDevicesPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {showCreateModal && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -2597,7 +2597,7 @@ export const StoreDevicesPage: React.FC = () => {
                 )}
 
                 <form onSubmit={handleCreateDeviceSubmit} className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                         Mã Thiết Bị (Device ID) *
@@ -2655,7 +2655,7 @@ export const StoreDevicesPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                         Tên Nút Bấm Hiển Thị *
@@ -2691,7 +2691,7 @@ export const StoreDevicesPage: React.FC = () => {
                       <span>Ánh Xạ Sản Phẩm Đặt Hàng Nhanh (1 Chạm)</span>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                       <div className="col-span-2">
                         <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
                           Sản phẩm được giao
@@ -2728,7 +2728,7 @@ export const StoreDevicesPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                         Vị Trí Lắp Đặt
@@ -2757,7 +2757,7 @@ export const StoreDevicesPage: React.FC = () => {
                   </div>
 
                   {/* Status, Battery & Expiration Configuration (Flat layout, single divider) */}
-                  <div className="grid grid-cols-3 gap-3 border-t border-slate-100 dark:border-slate-800 pt-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 border-t border-slate-100 dark:border-slate-800 pt-4">
                     <div>
                       <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                         Trạng Thái Ban Đầu
@@ -2834,7 +2834,7 @@ export const StoreDevicesPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {editingDevice && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -2885,7 +2885,7 @@ export const StoreDevicesPage: React.FC = () => {
             )}
 
             <form onSubmit={handleEditDeviceSubmit} className="space-y-4">
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Tên Nút Bấm Hiển Thị *
@@ -2923,7 +2923,7 @@ export const StoreDevicesPage: React.FC = () => {
                   <span>Sản Phẩm Đang Ánh Xạ</span>
                 </div>
 
-                <div className="grid grid-cols-3 gap-3">
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
                   <div className="col-span-2">
                     <label className="block text-[11px] font-bold text-slate-600 dark:text-slate-400 mb-1">
                       Chọn sản phẩm gán mới
@@ -2960,7 +2960,7 @@ export const StoreDevicesPage: React.FC = () => {
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Vị Trí Lắp Đặt
@@ -2989,7 +2989,7 @@ export const StoreDevicesPage: React.FC = () => {
               </div>
 
               {/* Battery & Expiration Configuration */}
-              <div className="grid grid-cols-2 gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-slate-800">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 p-3 rounded-2xl bg-slate-50 dark:bg-black/30 border border-slate-200 dark:border-slate-800">
                 <div>
                   <label className="block text-[11px] font-bold text-slate-700 dark:text-slate-300 mb-1">
                     Dung Lượng Pin Hiện Tại (%)
@@ -3047,7 +3047,7 @@ export const StoreDevicesPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {deletingDevice && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -3142,7 +3142,7 @@ export const StoreDevicesPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {simulationResult && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"
@@ -3232,7 +3232,7 @@ export const StoreDevicesPage: React.FC = () => {
       {createPortal(
         <AnimatePresence>
           {behaviorDevice && (
-            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain">
+            <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
               <motion.div
                 variants={modalBackdropVariants}
                 initial="hidden"

@@ -243,9 +243,9 @@ export const CustomerRentalsPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-slate-50/60 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 pb-16">
+    <div className={`min-h-screen bg-slate-50/60 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 pb-16 ${user?.role === 'CUSTOMER' ? 'customer-ui customer-rentals' : ''}`}>
       {/* Top Breadcrumb & Page Banner */}
-      <div className="bg-white dark:bg-zinc-900 border-b border-slate-200/80 dark:border-zinc-800">
+      <div className="rental-header bg-white dark:bg-zinc-900 border-b border-slate-200/80 dark:border-zinc-800">
         <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
             <div>
@@ -318,10 +318,11 @@ export const CustomerRentalsPage: React.FC = () => {
           </div>
 
           {/* Navigation Sub-Tabs */}
-          <div className="flex items-center gap-2 mt-6 pt-2 border-t border-slate-100 dark:border-zinc-800/80">
+          <div className="rental-tabs flex items-center gap-2 mt-6 pt-2 border-t border-slate-100 dark:border-zinc-800/80">
             <button
               type="button"
               onClick={() => setActiveTab('PACKAGES')}
+              aria-pressed={activeTab === 'PACKAGES'}
               className={`relative px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all cursor-pointer flex items-center gap-2 ${
                 activeTab === 'PACKAGES'
                   ? 'bg-[#0E6BA8] text-white shadow-xs'
@@ -338,6 +339,7 @@ export const CustomerRentalsPage: React.FC = () => {
             <button
               type="button"
               onClick={() => setActiveTab('MY_RENTALS')}
+              aria-pressed={activeTab === 'MY_RENTALS'}
               className={`relative px-4 py-2 text-xs sm:text-sm font-semibold rounded-xl transition-all cursor-pointer flex items-center gap-2 ${
                 activeTab === 'MY_RENTALS'
                   ? 'bg-[#0E6BA8] text-white shadow-xs'
@@ -359,14 +361,14 @@ export const CustomerRentalsPage: React.FC = () => {
       </div>
 
       {/* Main Content Area */}
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
+      <div className="rental-content max-w-6xl mx-auto px-4 sm:px-6 py-6 sm:py-8 space-y-6">
         {/* ========================================================================= */}
         {/* TAB 1: BROWSE PACKAGES & RENT                                            */}
         {/* ========================================================================= */}
         {activeTab === 'PACKAGES' && (
-          <div className="space-y-6">
+          <div className="rental-package-section space-y-6">
             {/* Feature Perks Highlights */}
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+            <div className="rental-benefits grid grid-cols-1 sm:grid-cols-3 gap-4">
               <div className="p-4 rounded-2xl bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 flex items-start gap-3.5 shadow-2xs">
                 <div className="w-10 h-10 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400 flex items-center justify-center shrink-0">
                   <ShieldCheck className="w-5 h-5" />
@@ -426,7 +428,7 @@ export const CustomerRentalsPage: React.FC = () => {
                 </button>
               </div>
             ) : (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
+              <div className="rental-packages grid grid-cols-1 md:grid-cols-3 gap-6 items-stretch">
               {packages.map((pkg, idx) => {
                 const monthlyPrice = Number(pkg.monthlyPrice || pkg.monthlyFee || 0);
                 const depositFee = Number(pkg.depositFee || 0);
@@ -438,7 +440,7 @@ export const CustomerRentalsPage: React.FC = () => {
                     initial={{ opacity: 0, y: 15 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ delay: idx * 0.1 }}
-                    className={`relative rounded-3xl p-6 flex flex-col justify-between transition-all bg-white dark:bg-zinc-900 border shadow-sm ${
+                    className={`rental-package relative rounded-3xl p-6 flex flex-col justify-between transition-all bg-white dark:bg-zinc-900 border shadow-sm ${
                       isHighlight
                         ? 'border-[#0E6BA8] ring-2 ring-[#0E6BA8]/20 dark:ring-[#38a5da]/20 shadow-md scale-[1.02]'
                         : 'border-slate-200 dark:border-zinc-800 hover:border-slate-300 dark:hover:border-zinc-700'
@@ -446,7 +448,7 @@ export const CustomerRentalsPage: React.FC = () => {
                   >
                     {/* Highlight Badge */}
                     {isHighlight && (
-                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-gradient-to-r from-[#0E6BA8] to-sky-600 text-white text-[10px] font-bold tracking-wider uppercase shadow-xs flex items-center gap-1">
+                      <div className="rental-recommendation absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-1 rounded-full bg-gradient-to-r from-[#0E6BA8] to-sky-600 text-white text-[10px] font-bold tracking-wider uppercase shadow-xs flex items-center gap-1">
                         <Sparkles className="w-3 h-3" />
                         <span>Khuyên Dùng Cho Gia Đình</span>
                       </div>
@@ -471,7 +473,7 @@ export const CustomerRentalsPage: React.FC = () => {
                       </p>
 
                       {/* Pricing */}
-                      <div className="my-5 p-4 rounded-2xl bg-slate-50 dark:bg-zinc-800/60 border border-slate-100 dark:border-zinc-800 space-y-1.5">
+                      <div className="rental-pricing my-5 p-4 rounded-2xl bg-slate-50 dark:bg-zinc-800/60 border border-slate-100 dark:border-zinc-800 space-y-1.5">
                         <div className="flex items-baseline gap-1.5">
                           <span className="text-2xl font-extrabold text-[#0E6BA8] dark:text-[#38a5da] tracking-tight">
                             {monthlyPrice.toLocaleString('vi-VN')}
@@ -611,7 +613,7 @@ export const CustomerRentalsPage: React.FC = () => {
                       </div>
 
                       {/* Detail fields */}
-                      <div className="grid grid-cols-2 gap-3 text-xs p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800">
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs p-3.5 rounded-2xl bg-slate-50 dark:bg-zinc-800/50 border border-slate-100 dark:border-zinc-800">
                         <div>
                           <span className="text-[11px] text-slate-400 dark:text-zinc-500 block">Thời hạn hợp đồng</span>
                           <span className="font-semibold text-slate-800 dark:text-zinc-200 text-xs">
@@ -685,7 +687,7 @@ export const CustomerRentalsPage: React.FC = () => {
       {/* ========================================================================= */}
       <AnimatePresence>
         {isCheckoutOpen && selectedPackage && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 overscroll-contain">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-3 sm:p-4 overscroll-contain responsive-modal overflow-y-auto">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
@@ -766,7 +768,7 @@ export const CustomerRentalsPage: React.FC = () => {
                     ĐỊA CHỈ GIAO NÚT BẤM VÀ LẮP ĐẶT:
                   </p>
 
-                  <div className="grid grid-cols-2 gap-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="block text-[11px] font-medium text-slate-700 dark:text-zinc-300 mb-1">
                         Họ và tên người nhận *
@@ -918,7 +920,7 @@ export const CustomerRentalsPage: React.FC = () => {
       {/* ========================================================================= */}
       <AnimatePresence>
         {payingContract && (
-          <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4 overscroll-contain">
+          <div className="fixed inset-0 z-[110] flex items-center justify-center p-3 sm:p-4 overscroll-contain responsive-modal overflow-y-auto">
             <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
