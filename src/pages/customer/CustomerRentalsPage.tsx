@@ -223,7 +223,14 @@ export const CustomerRentalsPage: React.FC = () => {
   const handleConfirmPayment = async (contract: CustomerRentalContract) => {
     setIsProcessingPayment(true);
     try {
-      await rentalsService.payRental(contract.rentalId, 'PAYOS');
+      const canonicalRentals = await rentalsService.getMyRentals();
+      const current = canonicalRentals.find(item => String(item.rentalId || item.id) === String(contract.rentalId));
+      if (!current || !['PAID', 'ACTIVE'].includes(current.status)) {
+        toast.info('Hệ thống chưa xác nhận thanh toán hợp đồng. Vui lòng liên hệ hỗ trợ để được hướng dẫn.');
+        await fetchData();
+        return;
+      }
+      const paymentResult = { data: current };
       playSuccessChime();
       try {
         confetti({
@@ -232,7 +239,7 @@ export const CustomerRentalsPage: React.FC = () => {
           origin: { y: 0.6 },
         });
       } catch (_) {}
-      toast.success('Thanh toán thành công! Hợp đồng đã được kích hoạt.');
+      toast.success(paymentResult.data?.status === 'ACTIVE' ? 'Thanh toán đã được xác nhận. Hợp đồng đang hoạt động.' : 'Thanh toán đã được xác nhận. Hợp đồng đang chờ kích hoạt.');
       setPayingContract(null);
       await fetchData();
     } catch (err: any) {
@@ -963,17 +970,9 @@ export const CustomerRentalsPage: React.FC = () => {
                 </button>
               </div>
 
-              {/* VietQR Mock Card */}
+              {/* Rental payment availability */}
               <div className="p-4 rounded-2xl bg-gradient-to-b from-slate-50 to-slate-100 dark:from-zinc-800 dark:to-zinc-850 border border-slate-200 dark:border-zinc-700 space-y-3">
-                <div className="w-40 h-40 mx-auto bg-white p-2.5 rounded-2xl shadow-xs border border-slate-200 flex items-center justify-center">
-                  <img
-                    src={`https://api.qrserver.com/v1/create-qr-code/?size=180x180&data=${encodeURIComponent(
-                      `2.00.01021200000000000000000000000000${payingContract.rentalCode}`
-                    )}`}
-                    alt="VietQR Payment"
-                    className="w-full h-full object-contain"
-                  />
-                </div>
+                <p role="status" className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm leading-relaxed text-amber-900 dark:border-amber-900 dark:bg-amber-950/25 dark:text-amber-200">Thanh toán trực tuyến cho hợp đồng thuê chưa sẵn sàng. Vui lòng liên hệ hỗ trợ để nhận hướng dẫn; trạng thái chỉ thay đổi khi hệ thống xác nhận.</p>
                 <div>
                   <p className="text-xs text-slate-500 dark:text-zinc-400">Số tiền thanh toán:</p>
                   <p className="text-xl font-bold text-[#0E6BA8] dark:text-[#38a5da]">
@@ -995,12 +994,12 @@ export const CustomerRentalsPage: React.FC = () => {
                   {isProcessingPayment ? (
                     <>
                       <RefreshCw className="w-4 h-4 animate-spin" />
-                      <span>Đang xác nhận thanh toán...</span>
+                      <span>Đang kiểm tra trạng thái...</span>
                     </>
                   ) : (
                     <>
                       <Check className="w-4 h-4 stroke-[2.5]" />
-                      <span>Xác Nhận Đã Thanh Toán Thành Công</span>
+                      <span>Kiểm tra trạng thái hợp đồng</span>
                     </>
                   )}
                 </button>

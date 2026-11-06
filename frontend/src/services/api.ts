@@ -84,7 +84,6 @@ export const isPublicAuthEndpoint = (url?: string): boolean => {
     url.includes('/auth/verify-email') ||
     url.includes('/auth/resend-verification') ||
     url.includes('/auth/google') ||
-    url.includes('/auth/phone') ||
     url.includes('/auth/check-email') ||
     url.includes('/auth/check-username')
   );

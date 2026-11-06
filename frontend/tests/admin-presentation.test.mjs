@@ -51,6 +51,7 @@ for (const prefix of ['../src/', '../../src/']) {
       const actualRequire = name => {
         if (name.endsWith('.css')) return {};
         if (name === './admin-presentation') return presentation;
+        if (name === './AdminLiveData') return { AdminLiveAnalytics: () => React.createElement('div', null, 'Báo cáo từ API'), AdminLiveDevices: () => React.createElement('div', null, 'Thiết bị từ API') };
         if (name === 'react-router-dom') return { useSearchParams: () => [new URLSearchParams({ section }), () => {}] };
         if (name === 'react-dom') return { createPortal: () => null };
         if (name === '../../hooks/useBodyScrollLock') return { useBodyScrollLock() {} };
@@ -75,7 +76,7 @@ for (const prefix of ['../src/', '../../src/']) {
         assert.ok(!html.includes('<details open'));
         assert.ok(html.includes('Khi có đơn hàng mới'));
       }
-      if (['TELEMETRY', 'ANALYTICS', 'RBAC', 'OVERVIEW'].includes(section)) assert.ok(html.includes('minh họa'));
+      if (['RBAC', 'OVERVIEW'].includes(section)) assert.ok(html.includes('minh họa'));
     }
   });
 

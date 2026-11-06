@@ -5,6 +5,7 @@ import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { api } from '../../services/api';
 import { toast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
+import { DeviceProductRemoval } from '../../components/devices/DeviceProductRemoval';
 import { subscribeToStore, getSocket } from '../../services/socket';
 import { Device, Product, FleetStats, DeviceTelemetry, DeviceAuditLog } from '../../types';
 import { QRCodeSVG } from 'qrcode.react';
@@ -2178,6 +2179,13 @@ export const StoreDevicesPage: React.FC = () => {
                 </button>
               </div>
             </form>
+            <DeviceProductRemoval
+              key={assigningDevice.id || assigningDevice.deviceId}
+              device={assigningDevice}
+              role={String(user?.role || '')}
+              disabled={assignLoading}
+              onRemoved={async () => { await fetchData(); setAssigningDevice(null); }}
+            />
           </motion.div>
         </div>
       )}

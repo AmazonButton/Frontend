@@ -18,6 +18,7 @@ import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { paymentsService, PayosPaymentLinkResponse } from '../../services/payments.service';
 import { getOrderRecipient } from '../../services/order-events';
 import { ShippingContact } from './ShippingContact';
+import { PaymentRequestTools } from './PaymentRequestTools';
 
 export interface OrderSuccessModalProps {
   isOpen: boolean;
@@ -587,6 +588,19 @@ export const OrderSuccessModal: React.FC<OrderSuccessModalProps> = ({
                 </p>
               </motion.div>
             )}
+
+            {!isCancelled && paymentData?.orderCode && <PaymentRequestTools
+              key={`${order.id || order.orderId}-${paymentData.orderCode}`}
+              orderCode={paymentData.orderCode}
+              orderId={order.id || order.orderId}
+              transactionId={(paymentData as PayosPaymentLinkResponse & { paymentTransactionId?: string }).paymentTransactionId}
+              linkStatus={isPaid ? 'PAID' : paymentData.status}
+              disabled={isPaying || loadingPayment}
+              onRefresh={({ provider, order: currentOrder }) => {
+                if (provider?.status === 'PAID' || currentOrder?.paymentStatus === 'PAID') setIsPaid(true);
+                if (provider?.status === 'CANCELLED') setPaymentData(previous => previous ? { ...previous, status: 'CANCELLED', checkoutUrl: '' } : previous);
+              }}
+            />}
 
             {/* ── 6. Order Summary Container: Soft background container (#F8FAFC) ── */}
             <div

@@ -45,6 +45,7 @@ import {
 } from 'lucide-react';
 
 import { LogoutConfirmModal } from '../../components/common/LogoutConfirmModal';
+import { PushNotificationSettings } from '../../components/operations/PushNotificationSettings';
 
 type ProfileTab = 'INFO' | 'DEVICES' | 'ORDERS' | 'ADDRESSES' | 'WAREHOUSE' | 'NOTIFICATIONS' | 'SECURITY';
 
@@ -674,6 +675,8 @@ export const ProfilePage: React.FC = () => {
               transition={{ duration: 0.2 }}
               className="profile-info bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-6"
             >
+              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 p-4 dark:border-sky-900 dark:bg-sky-950/25"><div><p className="text-sm font-semibold text-zinc-900 dark:text-white">Số điện thoại tài khoản</p><p className="mt-1 text-xs text-zinc-500">Xác nhận bằng tin nhắn để liên kết số điện thoại của bạn.</p></div><Link to="/phone-auth?mode=verify" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-[#287DA8]"><Phone className="h-4 w-4" />Xác minh số điện thoại</Link></div>
+
               {/* Avatar / Store Logo Section */}
               <div className="profile-avatar flex flex-col sm:flex-row sm:items-center gap-5">
                 {/* Big Avatar / Logo Circle */}
@@ -1366,6 +1369,7 @@ export const ProfilePage: React.FC = () => {
                 </div>
               </div>
 
+              <PushNotificationSettings />
               {/* Feature 3: Thông báo đẩy màn hình */}
               <div className="p-4 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-850/50 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div className="space-y-1">

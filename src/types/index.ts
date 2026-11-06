@@ -1,8 +1,14 @@
 export type UserRole =
   | 'SUPER_ADMIN'
+  | 'SYSTEM_ADMIN'
+  | 'ADMIN'
   | 'STORE_OWNER'
   | 'STORE_MANAGER'
   | 'STORE_STAFF'
+  | 'STAFF_ORDER'
+  | 'STAFF_INVENTORY'
+  | 'STAFF_BUTTON'
+  | 'STAFF_DELIVERY'
   | 'CUSTOMER'
   | 'TECHNICIAN';
 

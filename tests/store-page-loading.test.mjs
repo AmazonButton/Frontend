@@ -29,6 +29,10 @@ function staticDependencies(...entries) {
 }
 const includesModule = (graph, pattern) => graph.some(chunk => moduleNames(chunk).some(name => pattern.test(name)));
 const entry = chunks.find(chunk => chunk.isEntry);
+
+test('Firebase authentication and messaging stay outside initial page loading', () => {
+  assert.ok(!includesModule(staticDependencies(entry), /\/node_modules\/(?:@firebase|firebase)\//), 'Firebase only loads after the explicit phone or push action');
+});
 const pages = [
   ['/store/dashboard', '/pages/store/StoreDashboard.tsx'],
   ['/store/devices', '/pages/store/StoreDevicesPage.tsx'],

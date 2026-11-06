@@ -102,6 +102,13 @@ export const Navbar: React.FC = () => {
 
   const getRoleBadge = (role: string) => {
     switch (role) {
+      case 'STAFF_DELIVERY':
+        return { label: 'Giao hàng', color: 'bg-sky-50 text-sky-700 border-sky-200' };
+      case 'STAFF_ORDER':
+        return { label: 'Xử lý đơn', color: 'bg-sky-50 text-sky-700 border-sky-200' };
+      case 'ADMIN':
+      case 'SYSTEM_ADMIN':
+        return { label: 'Quản trị viên', color: 'bg-violet-50 text-violet-700 border-violet-200' };
       case 'SUPER_ADMIN':
         return { label: 'Quản trị', color: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20' };
       case 'STORE_OWNER':
@@ -126,7 +133,7 @@ export const Navbar: React.FC = () => {
   const getProfileRoute = (role?: string) => {
     if (role === 'CUSTOMER') return '/customer/profile';
     if (['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(role || '')) return '/store/profile';
-    if (role === 'SUPER_ADMIN') return '/admin/profile';
+    if (['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(role || '')) return '/admin/profile';
     return '/profile';
   };
 
@@ -307,6 +314,7 @@ export const Navbar: React.FC = () => {
                         </button>
                       </div>
 
+                      {user && ['STAFF_DELIVERY', 'STAFF_ORDER', 'STORE_OWNER', 'STORE_MANAGER', 'SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(user.role) && <Link role="menuitem" to="/driver/deliveries" onClick={() => setUserMenuOpen(false)} className="flex min-h-11 items-center gap-2 px-3 text-sm font-medium text-[#287DA8] hover:bg-sky-50 dark:hover:bg-zinc-800">Đi tới giao hàng</Link>}
                       <div className="my-1 border-t border-slate-100 dark:border-zinc-800" />
 
                       <button

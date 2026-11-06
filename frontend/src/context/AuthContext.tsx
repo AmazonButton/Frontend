@@ -2,6 +2,8 @@ import React, { createContext, useContext, useState, useEffect, useCallback } fr
 import { User } from '../types';
 import { api, isTokenExpired, getOrRefreshValidToken } from '../services/api';
 import { updateSocketAuth, clearSocketSubscriptions } from '../services/socket';
+import { clearPushToken, cleanupBrowserPushAfterLogout, currentPushUserId, invalidatePushSession, readPushOwner, readPushToken, unregisterWebPush } from '../services/web-push-state';
+import axios from 'axios';
 
 interface AuthContextType {
   user: User | null;
@@ -81,8 +83,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Instant optimistic logout: clears storage and state immediately, notifies backend in background
   const logout = useCallback(() => {
-    const activeToken = token || (typeof window !== 'undefined' ? localStorage.getItem('smart_order_token') : null);
-    const activeRefreshToken = refreshToken || (typeof window !== 'undefined' ? localStorage.getItem('smart_order_refresh_token') : null);
+    const activeToken = localStorage.getItem('smart_order_token') || token;
+    const activeRefreshToken = localStorage.getItem('smart_order_refresh_token') || refreshToken;
+    // Capture credentials before the existing immediate logout clears them.
+    // FCM is a device subscription, separate from the socket/auth session.
+    const activeUserId = currentPushUserId() || user?.id || '';
+    const pushToken = activeUserId ? readPushToken(activeUserId) : '';
+    invalidatePushSession();
+    if (activeUserId) clearPushToken(activeUserId);
+    if (pushToken && activeToken) {
+      const pushTransport = { delete: (path: string, options: any) => axios.delete(path, { ...options, baseURL: api.defaults.baseURL }) };
+      void unregisterWebPush(pushTransport, pushToken, activeToken).catch(() => { /* The existing auth logout also deactivates backend registrations. */ });
+    }
 
     // 1. Instantly wipe client credentials & state (0ms UI transition)
     localStorage.removeItem('smart_order_token');
@@ -95,6 +107,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsLoading(false);
     clearSocketSubscriptions();
     updateSocketAuth(null);
+    if (pushToken && activeUserId) void cleanupBrowserPushAfterLogout(activeUserId).catch(() => { /* Local cleanup is best effort and never delays immediate logout. */ });
 
     // 2. Fire-and-forget background revoke to server without blocking UI
     // Only call /auth/logout if we have an active, unexpired access token, because the backend
@@ -195,6 +208,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [refreshUser]);
 
   const login = (newToken: string, userData: User, newRefreshToken?: string) => {
+    const previousPushOwner = readPushOwner();
+    invalidatePushSession();
+    if (previousPushOwner && previousPushOwner !== userData.id) {
+      clearPushToken(previousPushOwner);
+      void cleanupBrowserPushAfterLogout(previousPushOwner).catch(() => undefined);
+    }
     localStorage.setItem('smart_order_token', newToken);
     setToken(newToken);
     api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;

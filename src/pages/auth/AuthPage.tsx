@@ -148,6 +148,8 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
 
         if (['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(user.role)) {
           navigate('/store/dashboard', { replace: true });
+        } else if (['STAFF_DELIVERY', 'STAFF_ORDER'].includes(user.role)) {
+          navigate('/driver/deliveries', { replace: true });
         } else if (user.role === 'CUSTOMER') {
           navigate('/customer/home', { replace: true });
         } else if (['SUPER_ADMIN', 'ADMIN', 'SYSTEM_ADMIN'].includes(user.role)) {
@@ -1410,6 +1412,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
                   </motion.div>
                 )}
               </AnimatePresence>
+              <div className="mt-4 border-t border-slate-200 pt-3 text-center"><Link to={`/phone-auth?mode=${mode}`} className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-[#287DA8] hover:underline"><Phone className="h-4 w-4" />{mode === 'register' ? 'Đăng ký khách hàng bằng điện thoại' : 'Đăng nhập bằng số điện thoại'}</Link></div>
             </div>
           </div>
 

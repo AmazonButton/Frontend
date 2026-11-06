@@ -1,0 +1,50 @@
+import './admin-ui.css';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { motion, useReducedMotion } from 'framer-motion';
+import { ChevronLeft, ChevronRight, Eye, RefreshCw, Search, ShieldCheck, Trash2 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
+import { api } from '../../services/api';
+import { card, primaryButton } from '../operations/OperationPrimitives';
+import { adminDate, adminField, adminSecondary, AdminWorkflowDialog, AdminWorkflowNotice, AdminWorkflowStatus } from './AdminWorkflowDialog';
+import { canManageIdentity, deleteIdentitySession, getIdentitySession, loadIdentitySessions, syncIdentitySession, workflowError } from './admin-workflows.mjs';
+
+export const AdminIdentityPage: React.FC = () => {
+  const { user } = useAuth(); const allowed = canManageIdentity(user); const reduced = useReducedMotion();
+  const [items, setItems] = useState<any[]>([]); const [page, setPage] = useState(1); const [totalPages, setTotalPages] = useState(1); const [total, setTotal] = useState(0);
+  const [loading, setLoading] = useState(true); const [error, setError] = useState(''); const [notice, setNotice] = useState(''); const [query, setQuery] = useState('');
+  const [detail, setDetail] = useState<any>(null); const [busy, setBusy] = useState(false); const [dialogError, setDialogError] = useState(''); const [confirmDelete, setConfirmDelete] = useState(false); const [acknowledged, setAcknowledged] = useState(false);
+  const busyRef = useRef(false); const sequenceRef = useRef(0);
+  const load = useCallback(async () => {
+    if (!allowed) { setLoading(false); return; }
+    const sequence = ++sequenceRef.current; setLoading(true); setError('');
+    try { const result = await loadIdentitySessions(api, page); if (sequence !== sequenceRef.current) return; setItems(result.items); setTotalPages(Math.max(1, Number(result.pagination.totalPages) || 1)); setTotal(Number(result.pagination.totalItems) || 0); }
+    catch (failure) { if (sequence === sequenceRef.current) setError(workflowError(failure)); }
+    finally { if (sequence === sequenceRef.current) setLoading(false); }
+  }, [allowed, page]);
+  useEffect(() => { void load(); return () => { sequenceRef.current += 1; }; }, [load]);
+  const lock = () => { if (busyRef.current) return false; busyRef.current = true; setBusy(true); return true; };
+  const unlock = () => { busyRef.current = false; setBusy(false); };
+  const openDetail = async (item: any) => {
+    if (!lock()) return; setDetail(item); setConfirmDelete(false); setAcknowledged(false); setDialogError('');
+    try { setDetail(await getIdentitySession(api, item.sessionId)); }
+    catch (failure) { setDialogError(workflowError(failure)); } finally { unlock(); }
+  };
+  const sync = async () => {
+    if (!detail || !lock()) return; setDialogError('');
+    try { setDetail(await syncIdentitySession(api, detail.sessionId)); await load(); }
+    catch (failure) { setDialogError(workflowError(failure)); } finally { unlock(); }
+  };
+  const remove = async (event: React.FormEvent) => {
+    event.preventDefault(); if (!detail || !acknowledged || !lock()) return; setDialogError('');
+    try { await deleteIdentitySession(api, detail.sessionId); setDetail(null); setNotice('Đã xóa phiên xác minh theo kết quả xác nhận từ máy chủ.'); if (items.length === 1 && page > 1) setPage(page - 1); else await load(); }
+    catch (failure) { setDialogError(workflowError(failure)); } finally { unlock(); }
+  };
+  const displayName = (item: any) => item?.user?.fullName || item?.metadata?.fullName || `Người dùng #${item?.userId}`;
+  const displayContact = (item: any) => [item?.user?.email, item?.user?.phone].filter(Boolean).join(' · ');
+  const visible = items.filter(item => `${item.sessionId} ${item.userId} ${item.user?.fullName || ''} ${item.user?.email || ''} ${item.user?.phone || ''} ${item.metadata?.fullName || ''}`.toLowerCase().includes(query.toLowerCase()));
+  return <motion.main initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.22 }} className="admin-ui mx-auto max-w-5xl space-y-5 px-4 py-7 sm:px-6">
+    <header className="flex flex-wrap items-start justify-between gap-4"><div><p className="mb-1 text-xs font-semibold text-[#287DA8]">Quản trị hệ thống</p><h1 className="text-2xl font-bold text-zinc-900 dark:text-white">Xác minh danh tính</h1><p className="mt-2 text-sm text-zinc-500">Theo dõi hồ sơ, cập nhật kết quả và xử lý các phiên xác minh.</p></div>{allowed && <button type="button" disabled={loading || busy} onClick={() => void load()} className={adminSecondary}><RefreshCw className={`h-4 w-4 ${loading && !reduced ? 'animate-spin' : ''}`} />Tải lại</button>}</header>
+    {!allowed ? <AdminWorkflowNotice>Tài khoản hiện tại chưa được cấp quyền xem hồ sơ xác minh của người dùng khác. Vui lòng sử dụng tài khoản quản trị có quyền phù hợp.</AdminWorkflowNotice> : <>{notice && <AdminWorkflowNotice success>{notice}</AdminWorkflowNotice>}{error && <AdminWorkflowNotice>{error}</AdminWorkflowNotice>}<section className={card}><div className="mb-4 flex flex-wrap items-center justify-between gap-3"><h2 className="font-semibold text-zinc-900 dark:text-white">Hồ sơ xác minh <span className="text-zinc-500">({total})</span></h2><label className="relative min-w-0 sm:w-72"><span className="sr-only">Tìm trong trang hiện tại</span><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-zinc-400" /><input value={query} onChange={event => setQuery(event.target.value)} placeholder="Tìm theo tên, email, SĐT hoặc mã phiên" className={`${adminField} !pl-9`} /></label></div>{loading ? <p role="status" className="py-12 text-center text-sm text-zinc-500">Đang tải hồ sơ…</p> : !visible.length ? <div className="py-12 text-center"><ShieldCheck className="mx-auto mb-3 h-8 w-8 text-zinc-300" /><p className="text-sm text-zinc-500">{error ? 'Chưa lấy được hồ sơ. Vui lòng tải lại.' : 'Chưa có hồ sơ phù hợp.'}</p></div> : <div className="divide-y divide-zinc-100 dark:divide-zinc-800">{visible.map(item => <article key={item.sessionId} className="flex flex-wrap items-center justify-between gap-4 py-4"><div className="min-w-0"><p className="break-words font-semibold text-zinc-900 dark:text-white">{displayName(item)}</p><p className="mt-1 text-xs text-zinc-500">{displayContact(item) ? `${displayContact(item)} · ` : ''}Phiên #{item.sessionId} · {adminDate(item.createdAt)}</p></div><div className="flex flex-wrap items-center gap-3"><AdminWorkflowStatus value={item.status} /><button type="button" disabled={busy} onClick={() => void openDetail(item)} className={adminSecondary}><Eye className="h-4 w-4" />Xem hồ sơ</button></div></article>)}</div>}<div className="mt-5 flex flex-wrap items-center justify-between gap-3 border-t border-zinc-100 pt-4 text-sm dark:border-zinc-800"><p className="text-zinc-500">Trang {page} / {totalPages}</p><div className="flex gap-2"><button type="button" disabled={page <= 1 || loading || busy} onClick={() => setPage(value => value - 1)} className={adminSecondary}><ChevronLeft className="h-4 w-4" />Trước</button><button type="button" disabled={page >= totalPages || loading || busy} onClick={() => setPage(value => value + 1)} className={adminSecondary}>Sau<ChevronRight className="h-4 w-4" /></button></div></div></section></>}
+    {detail && <AdminWorkflowDialog title={confirmDelete ? 'Xóa phiên xác minh' : 'Hồ sơ xác minh'} busy={busy} onClose={() => setDetail(null)}><div className="space-y-4"><dl className="grid grid-cols-1 gap-4 rounded-xl bg-zinc-50 p-4 text-sm sm:grid-cols-2 dark:bg-zinc-800"><div><dt className="text-zinc-500">Người dùng</dt><dd className="mt-1 break-words font-semibold">{displayName(detail)}</dd>{displayContact(detail) && <dd className="mt-0.5 text-xs text-zinc-500">{displayContact(detail)}</dd>}</div><div><dt className="text-zinc-500">Trạng thái</dt><dd className="mt-1"><AdminWorkflowStatus value={detail.status} /></dd></div><div><dt className="text-zinc-500">Mã phiên</dt><dd className="mt-1 break-all">#{detail.sessionId}</dd></div><div><dt className="text-zinc-500">Ngày tạo</dt><dd className="mt-1">{adminDate(detail.createdAt)}</dd></div><div><dt className="text-zinc-500">Hoàn tất</dt><dd className="mt-1">{adminDate(detail.completedAt)}</dd></div><div><dt className="text-zinc-500">Hết hạn</dt><dd className="mt-1">{adminDate(detail.expiresAt)}</dd></div></dl>{busy && <p role="status" className="text-sm text-zinc-500">Đang cập nhật hồ sơ…</p>}{dialogError && <AdminWorkflowNotice>{dialogError}</AdminWorkflowNotice>}{confirmDelete ? <form onSubmit={remove} className="space-y-4"><AdminWorkflowNotice>Phiên sẽ bị xóa tại dịch vụ xác minh và khỏi danh sách hoạt động. Thao tác này không thể hoàn tác từ giao diện.</AdminWorkflowNotice><label className="flex items-start gap-3 text-sm"><input type="checkbox" required checked={acknowledged} disabled={busy} onChange={event => setAcknowledged(event.target.checked)} className="mt-0.5 h-4 w-4 shrink-0 accent-[#287DA8]" /><span>Tôi đã kiểm tra đúng hồ sơ và xác nhận xóa phiên #{detail.sessionId}.</span></label><div className="flex flex-wrap justify-end gap-2"><button type="button" disabled={busy} onClick={() => { setConfirmDelete(false); setDialogError(''); }} className={adminSecondary}>Quay lại</button><button type="submit" disabled={busy || !acknowledged} className={`${primaryButton} !bg-rose-600 hover:!bg-rose-700`}><Trash2 className="h-4 w-4" />{busy ? 'Đang xóa…' : 'Xác nhận xóa'}</button></div></form> : <div className="flex flex-wrap justify-between gap-2"><button type="button" disabled={busy} onClick={() => { setConfirmDelete(true); setAcknowledged(false); }} className={`${adminSecondary} !text-rose-700 dark:!text-rose-300`}><Trash2 className="h-4 w-4" />Xóa phiên</button><button type="button" disabled={busy} onClick={() => void sync()} className={primaryButton}><RefreshCw className="h-4 w-4" />Cập nhật kết quả</button></div>}</div></AdminWorkflowDialog>}
+  </motion.main>;
+};

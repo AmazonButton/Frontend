@@ -33,9 +33,14 @@ const AdminDashboard = React.lazy(() => import('./pages/admin/AdminDashboard').t
 const QuickSetupPage = React.lazy(() => import('./pages/QuickSetupPage').then((module) => ({ default: module.QuickSetupPage })));
 const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage').then((module) => ({ default: module.ProfilePage })));
 const CustomerVerificationPage = React.lazy(() => import('./pages/operations/OperationsPages').then((module) => ({ default: module.CustomerVerificationPage })));
-const DriverShiftPage = React.lazy(() => import('./pages/operations/OperationsPages').then((module) => ({ default: module.DriverShiftPage })));
 const StoreFinancePage = React.lazy(() => import('./pages/store/StoreFinancePage').then((module) => ({ default: module.StoreFinancePage })));
 const AdminPayoutsPage = React.lazy(() => import('./pages/admin/AdminPayoutsPage').then((module) => ({ default: module.AdminPayoutsPage })));
+const AdminIdentityPage = React.lazy(() => import('./pages/admin/AdminIdentityPage').then(module => ({ default: module.AdminIdentityPage })));
+const AdminRentalActivationPage = React.lazy(() => import('./pages/admin/AdminRentalActivationPanel').then(module => ({ default: module.AdminRentalActivationPage })));
+const DriverDeliveryPage = React.lazy(() => import('./pages/operations/DriverDeliveryPage').then(module => ({ default: module.DriverDeliveryPage })));
+const DriverShiftManagement = React.lazy(() => import('./pages/operations/DriverShiftManagement').then(module => ({ default: module.DriverShiftPage })));
+const PhoneAuthPage = React.lazy(() => import('./pages/auth/PhoneAuthPage').then(module => ({ default: module.PhoneAuthPage })));
+const DevicePairingPage = React.lazy(() => import('./pages/customer/DevicePairingPage').then(module => ({ default: module.DevicePairingPage })));
 
 const RouteLoadingFallback: React.FC = () => (
   <div className="min-h-[12rem] w-full flex items-center justify-center" role="status" aria-label="Đang tải nội dung">
@@ -111,6 +116,12 @@ const StandaloneProfileBackNavigation: React.FC = () => {
   );
 };
 
+const DriverBackNavigation: React.FC = () => {
+  const { user } = useAuth();
+  const fallback = ['SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(user?.role || '') ? '/admin/dashboard' : ['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role || '') ? '/store/dashboard' : '/profile';
+  return <nav className="mx-auto max-w-6xl px-4 pt-4 sm:px-6" aria-label="Điều hướng giao hàng"><PageBackButton fallbackTo={fallback} /></nav>;
+};
+
 export const App: React.FC = () => {
   const location = useLocation();
   const { user } = useAuth();
@@ -119,18 +130,18 @@ export const App: React.FC = () => {
   const getAtmosphereVariant = (): AtmosphereVariant => {
     const p = location.pathname;
     if (p === '/') return 'hero';
-    if (p.startsWith('/login') || p.startsWith('/register') || p.startsWith('/forgot-password') || p.startsWith('/reset-password') || p.startsWith('/verify-email')) {
+    if (p.startsWith('/login') || p.startsWith('/register') || p.startsWith('/phone-auth') || p.startsWith('/forgot-password') || p.startsWith('/reset-password') || p.startsWith('/verify-email')) {
       return 'auth';
     }
     if (p === '/quick-setup') return 'device-config';
-    if (p.startsWith('/store') || p.startsWith('/customer') || p.startsWith('/admin')) {
+    if (p.startsWith('/store') || p.startsWith('/customer') || p.startsWith('/admin') || p.startsWith('/driver/')) {
       return 'dashboard';
     }
     return 'hero';
   };
 
-  const isDashboard = location.pathname.startsWith('/store') || location.pathname.startsWith('/admin');
-  const isAuth = ['/login', '/register', '/forgot-password', '/reset-password', '/verify-email', '/403'].includes(location.pathname);
+  const isDashboard = location.pathname.startsWith('/store') || location.pathname.startsWith('/admin') || location.pathname.startsWith('/driver/');
+  const isAuth = ['/login', '/register', '/phone-auth', '/forgot-password', '/reset-password', '/verify-email', '/403'].includes(location.pathname);
   const showFooter = !isDashboard && !isAuth;
 
   return (
@@ -149,6 +160,7 @@ export const App: React.FC = () => {
           <Route path="/quick-setup" element={<QuickSetupPage />} />
           <Route path="/login" element={<LoginPage initialMode="login" />} />
           <Route path="/register" element={<RegisterPage initialMode="register" />} />
+          <Route path="/phone-auth" element={<PhoneAuthPage />} />
           <Route path="/forgot-password" element={<ForgotPasswordPage />} />
           <Route path="/reset-password" element={<ResetPasswordPage />} />
           <Route path="/verify-email" element={<VerifyEmailPage />} />
@@ -195,6 +207,7 @@ export const App: React.FC = () => {
             }
           >
             <Route path="/customer/home" element={<CustomerHomePage />} />
+            <Route path="/customer/pair-device" element={<DevicePairingPage />} />
             <Route path="/customer/rentals" element={<CustomerRentalsPage />} />
             <Route path="/customer/orders" element={<CustomerOrdersPage />} />
             <Route path="/customer/verification" element={<CustomerVerificationPage />} />
@@ -204,11 +217,12 @@ export const App: React.FC = () => {
           <Route
             path="/driver/shifts"
             element={
-              <ProtectedRoute allowedRoles={['STAFF_DELIVERY']}>
-                <DriverShiftPage />
+              <ProtectedRoute allowedRoles={['STAFF_DELIVERY', 'STORE_OWNER', 'STORE_MANAGER', 'STAFF_ORDER', 'SUPER_ADMIN', 'SYSTEM_ADMIN']}>
+                <><DriverBackNavigation /><DriverShiftManagement /></>
               </ProtectedRoute>
             }
           />
+          <Route path="/driver/deliveries" element={<ProtectedRoute allowedRoles={['STAFF_DELIVERY', 'STORE_OWNER', 'STORE_MANAGER', 'STAFF_ORDER', 'SUPER_ADMIN', 'SYSTEM_ADMIN']}><DriverBackNavigation /><DriverDeliveryPage /></ProtectedRoute>} />
           {/* Admin routes share the same collapsible desktop sidebar. */}
           <Route
             element={
@@ -219,6 +233,8 @@ export const App: React.FC = () => {
           >
             <Route path="/admin/dashboard" element={<AdminDashboard />} />
             <Route path="/admin/payouts" element={<AdminPayoutsPage />} />
+            <Route path="/admin/identity" element={<AdminIdentityPage />} />
+            <Route path="/admin/rental-activation" element={<AdminRentalActivationPage />} />
             <Route path="/admin/profile" element={<ProfilePage />} />
           </Route>
 

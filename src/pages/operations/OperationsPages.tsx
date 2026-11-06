@@ -23,6 +23,7 @@ import {
 import { api } from '../../services';
 import { useAuth } from '../../context/AuthContext';
 import { card, primaryButton, StatusPill } from './OperationPrimitives';
+import { CustomerVerificationDetails } from '../../components/customer/CustomerVerificationDetails';
 
 export const CustomerVerificationPage: React.FC = () => {
   const { user, refreshUser } = useAuth();
@@ -271,6 +272,7 @@ export const CustomerVerificationPage: React.FC = () => {
         </section>
       )}
 
+      {latest && <div className="flex justify-end"><CustomerVerificationDetails sessionId={latest.sessionId || latest.id} /></div>}
       {/* Alert Notification */}
       {message && (
         <div
@@ -339,7 +341,7 @@ export const CustomerVerificationPage: React.FC = () => {
                   <div className="flex flex-wrap items-center gap-2">
                     <StatusPill value={latest.status} />
                     <span className="text-xs text-zinc-400">
-                      Tạo lúc: {formatDate(latest.createdAt)}
+                      Tạo lúc: {formatDate(latest?.createdAt)}
                     </span>
                   </div>
 
@@ -368,13 +370,13 @@ export const CustomerVerificationPage: React.FC = () => {
                     <div>
                       <p className="text-zinc-500 dark:text-zinc-400">Họ và tên</p>
                       <p className="font-semibold text-zinc-800 dark:text-zinc-100">
-                        {latest.metadata?.fullName || (user as any)?.fullName || 'Hồ sơ đã chứng thực'}
+                        {latest?.metadata?.fullName || (user as any)?.fullName || 'Hồ sơ đã chứng thực'}
                       </p>
                     </div>
                     <div>
                       <p className="text-zinc-500 dark:text-zinc-400">Số giấy tờ</p>
                       <p className="font-semibold text-zinc-800 dark:text-zinc-100">
-                        {latest.metadata?.documentNumber
+                        {latest?.metadata?.documentNumber
                           ? '•••• ' + String(latest.metadata.documentNumber).slice(-4)
                           : '•••••••• (Bảo mật)'}
                       </p>
@@ -382,13 +384,13 @@ export const CustomerVerificationPage: React.FC = () => {
                     <div>
                       <p className="text-zinc-500 dark:text-zinc-400">Quốc tịch</p>
                       <p className="font-semibold text-zinc-800 dark:text-zinc-100">
-                        {latest.metadata?.nationality === 'VNM' ? 'Việt Nam (VNM)' : latest.metadata?.nationality || 'Việt Nam (VNM)'}
+                        {latest?.metadata?.nationality === 'VNM' ? 'Việt Nam (VNM)' : latest?.metadata?.nationality || 'Việt Nam (VNM)'}
                       </p>
                     </div>
                     <div>
                       <p className="text-zinc-500 dark:text-zinc-400">Thời gian duyệt</p>
                       <p className="font-semibold text-zinc-800 dark:text-zinc-100">
-                        {formatDate(latest.completedAt || latest.createdAt)}
+                        {formatDate(latest?.completedAt || latest?.createdAt)}
                       </p>
                     </div>
                   </div>
@@ -549,13 +551,7 @@ export const CustomerVerificationPage: React.FC = () => {
   );
 };
 
-export const DriverShiftPage: React.FC = () => {
-  const [shift, setShift] = useState<any>(null); const [history, setHistory] = useState<any[]>([]); const [busy, setBusy] = useState(false); const [message, setMessage] = useState('');
-  const load = useCallback(async () => { try { const [current, past] = await Promise.all([api.get('/driver-shifts/current'), api.get('/driver-shifts/history')]); setShift(current.data?.data || null); setHistory(past.data?.data || []); } catch (e: any) { setMessage(e.response?.data?.message || 'Không thể tải dữ liệu ca làm.'); } }, []);
-  useEffect(() => { load(); }, [load]);
-  const action = async (path: string) => { setBusy(true); setMessage(''); try { await api.post(path); await load(); } catch (e: any) { setMessage(e.response?.data?.message || 'Thao tác chưa hoàn tất.'); } finally { setBusy(false); } };
-  return <main className="mx-auto max-w-5xl space-y-5 px-4 py-7 sm:px-6"><header><p className="text-xs font-bold uppercase tracking-[.16em] text-[#287DA8]">Delivery operations</p><h1 className="mt-1 text-2xl font-bold text-zinc-900 dark:text-white">Ca làm giao hàng</h1><p className="mt-1 text-sm text-zinc-500">Bắt đầu ca, theo dõi thời lượng và đóng ca minh bạch.</p></header>{message && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{message}</div>}<section className="grid gap-4 md:grid-cols-[1.2fr_.8fr]"><div className={card}><div className="flex items-start justify-between"><div><p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Ca hiện tại</p><h2 className="mt-1 text-xl font-bold text-zinc-900 dark:text-white">{shift ? 'Đang trong ca' : 'Chưa bắt đầu ca'}</h2></div><StatusPill value={shift?.status || (shift ? 'ACTIVE' : 'OFFLINE')} /></div><div className="mt-6 flex gap-2">{shift ? <button className={primaryButton} disabled={busy} onClick={() => action(`/driver-shifts/${shift.id || shift.shiftId}/close`)}><Clock3 className="h-4 w-4" />Kết thúc ca</button> : <button className={primaryButton} disabled={busy} onClick={() => action('/driver-shifts/start')}><Play className="h-4 w-4" />Bắt đầu ca</button>}<button onClick={load} className="rounded-lg border border-zinc-200 p-2 text-zinc-500 hover:text-[#287DA8] dark:border-zinc-700"><RefreshCw className="h-4 w-4" /></button></div></div><div className={card}><p className="text-xs font-semibold uppercase tracking-wider text-zinc-400">Gợi ý</p><p className="mt-3 text-sm leading-6 text-zinc-600 dark:text-zinc-300">Chỉ nhận đơn khi ca đang hoạt động. Đóng ca sau khi hoàn tất bàn giao.</p></div></section><section className={card}><h2 className="font-bold text-zinc-900 dark:text-white">Lịch sử ca gần đây</h2><div className="mt-4 divide-y divide-zinc-100 dark:divide-zinc-800">{history.length ? history.map((item, index) => <div className="flex items-center justify-between py-3 text-sm" key={item.id || index}><span className="font-medium text-zinc-700 dark:text-zinc-200">Ca #{item.id || item.shiftId}</span><StatusPill value={item.status} /></div>) : <p className="py-5 text-sm text-zinc-500">Chưa có lịch sử ca làm.</p>}</div></section></main>;
-};
+export { DriverShiftPage } from './DriverShiftManagement';
 
 export { StoreFinancePage } from '../store/StoreFinancePage';
 

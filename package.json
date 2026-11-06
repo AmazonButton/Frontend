@@ -14,6 +14,7 @@
     "axios": "^1.7.9",
     "canvas-confetti": "^1.9.4",
     "clsx": "^2.1.1",
+    "firebase": "^13.2.0",
     "framer-motion": "^13.4.2",
     "html5-qrcode": "^2.3.8",
     "lucide-react": "^0.468.0",

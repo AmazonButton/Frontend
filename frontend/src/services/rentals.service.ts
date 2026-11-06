@@ -140,12 +140,11 @@ export const rentalsService = {
       const res = await api.get('/rentals/my-rentals');
       if (res.data?.success && Array.isArray(res.data.data)) {
         return res.data.data.map((r: any) => {
-          const localStatus = typeof window !== 'undefined' ? localStorage.getItem(`smart_order_rental_status_${r.rentalId || r.id}`) : null;
           return {
             ...r,
             id: r.rentalId || r.id,
             rentalId: r.rentalId || r.id,
-            status: localStatus || r.status,
+            status: r.status,
           };
         });
       }
@@ -159,14 +158,14 @@ export const rentalsService = {
    * Khách hàng thanh toán và ghi nhận hợp đồng thuê
    */
   async payRental(id: string | number, paymentMethod: string = 'PAYOS'): Promise<any> {
-    try {
-      if (typeof window !== 'undefined') {
-        localStorage.setItem(`smart_order_rental_status_${id}`, 'PAID');
-        localStorage.setItem(`smart_order_rental_payment_${id}`, paymentMethod);
-      }
-      await api.post(`/rentals/${id}/pay`, { paymentMethod }).catch(() => null);
-    } catch (_) {}
-    return { success: true, message: 'Đã ghi nhận thanh toán hợp đồng' };
+    const response = await api.post(`/rentals/${id}/pay`, { paymentMethod });
+    if (response.data?.success !== true) throw new Error(response.data?.message || 'Hệ thống chưa xác nhận thanh toán hợp đồng.');
+    const latest = await api.get('/rentals/my-rentals');
+    const contract = Array.isArray(latest.data?.data) ? latest.data.data.find((item: any) => String(item.rentalId || item.id) === String(id)) : null;
+    if (latest.data?.success !== true || !contract || !['PAID', 'ACTIVE'].includes(contract.status)) {
+      throw new Error('Đã gửi yêu cầu nhưng chưa xác nhận được trạng thái hợp đồng. Vui lòng tải lại, không thanh toán lại.');
+    }
+    return { success: true, data: contract };
   },
 
   /**

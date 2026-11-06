@@ -20,6 +20,7 @@ import {
   Store,
   UserRound,
   Wallet,
+  Truck,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSidebar } from '../context/SidebarContext';
@@ -44,6 +45,7 @@ const storeLinks: NavigationItem[] = [
 const customerLinks: NavigationItem[] = [
   { to: '/shop', label: 'Mua sắm', icon: ShoppingCart },
   { to: '/customer/home', label: 'Nút của tôi', icon: Smartphone },
+  { to: '/customer/pair-device', label: 'Thêm nút bằng mã', icon: Cpu },
   { to: '/customer/rentals', label: 'Thuê nút bấm', icon: Cpu },
   { to: '/customer/orders', label: 'Đơn hàng', icon: ReceiptText },
   { to: '/customer/verification', label: 'Xác minh eKYC', icon: BadgeCheck },
@@ -63,6 +65,8 @@ const adminLinks: NavigationItem[] = [
   { to: '/admin/dashboard?section=ANALYTICS', label: 'Báo cáo & doanh thu', icon: BarChart3 },
   { to: '/admin/dashboard?section=NOTIFICATIONS', label: 'Cài đặt thông báo', icon: ShoppingBag },
   { to: '/admin/payouts', label: 'Theo dõi chi trả', icon: Wallet },
+  { to: '/admin/identity', label: 'Xác minh danh tính', icon: BadgeCheck },
+  { to: '/admin/rental-activation', label: 'Kích hoạt hợp đồng thuê', icon: Cpu },
   { to: '/admin/profile', label: 'Tài khoản', icon: UserRound },
 ];
 
@@ -85,6 +89,7 @@ export const Sidebar: React.FC = () => {
       ? adminLinks
       : [
           ...storeLinks,
+          ...(['STORE_OWNER', 'STORE_MANAGER', 'STAFF_ORDER'].includes(user?.role || '') ? [{ to: '/driver/deliveries', label: 'Giao hàng', icon: Truck }, { to: '/driver/shifts', label: 'Ca & bàn giao', icon: ReceiptText }] : []),
           ...(['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role || '')
             ? [{ to: '/store/finance', label: 'Gói & ngân hàng', icon: Landmark }]
             : []),

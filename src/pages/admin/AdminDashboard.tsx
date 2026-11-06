@@ -5,6 +5,9 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
 
+const AdminLiveAnalytics = React.lazy(() => import('./AdminLiveData').then(module => ({ default: module.AdminLiveAnalytics })));
+const AdminLiveDevices = React.lazy(() => import('./AdminLiveData').then(module => ({ default: module.AdminLiveDevices })));
+
 const modalBackdropVariants: Variants = {
   hidden: { opacity: 0 },
   visible: {
@@ -2028,181 +2031,12 @@ export const AdminDashboard: React.FC = () => {
       {/* ========================================================================= */}
       {/* MODULE 4: 4.2.3 IOT TELEMETRY & BATTERY MONITORING                        */}
       {/* ========================================================================= */}
-      {activeTab === 'TELEMETRY' && (
-        <div className="space-y-4">
-          <p className="admin-data-note">Dữ liệu thiết bị trong mục này hiện là dữ liệu minh họa.</p>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
-                <Battery className="w-4 h-4 text-zinc-900 dark:text-white" />
-                <span>Thông tin thiết bị & pin</span>
-              </h2>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                Chỉ số pin thời gian thực, cường độ tín hiệu sóng và tình trạng heartbeat
-              </p>
-            </div>
-
-            <div className="admin-actions flex items-center gap-2">
-              <button
-                onClick={handleExportCsv}
-                className="px-3.5 py-1.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm active:scale-[0.97] transition-all cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Xuất Báo Cáo Pin (CSV)</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Telemetry Devices List - High Density Edge-to-Edge Data Table */}
-          <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-zinc-50 dark:bg-zinc-900/60 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400  text-[11px]  ">
-                <tr>
-                  <th scope="col" className="py-2.5 px-3">Mã thiết bị</th>
-                  <th scope="col" className="py-2.5 px-3">Tên Nút Bấm</th>
-                  <th scope="col" className="py-2.5 px-3">Căn Hộ Sở Hữu</th>
-                  <th scope="col" className="py-2.5 px-3">Dung Lượng Pin</th>
-                  <th scope="col" className="py-2.5 px-3">Trạng thái</th>
-                  <th scope="col" className="py-2.5 px-3">Kết nối Wi-Fi</th>
-                  <th scope="col" className="py-2.5 px-3">Lần cập nhật</th>
-                </tr>
-              </thead>
-              <motion.tbody
-                variants={tableBodyVariants}
-                initial="hidden"
-                animate="visible"
-                className="divide-y divide-zinc-200 dark:divide-zinc-800 "
-              >
-                {telemetryDevices.map((dev) => (
-                  <motion.tr
-                    variants={tableRowVariants}
-                    key={dev.deviceId}
-                    className="hover:bg-zinc-50 dark:hover:bg-zinc-850/60 transition-colors"
-                  >
-                    <td className="py-2.5 px-3  font-semibold text-zinc-900 dark:text-white">
-                      {dev.deviceId}
-                    </td>
-                    <td className="py-2.5 px-3 font-sans font-medium text-zinc-900 dark:text-zinc-200">
-                      {dev.customName}
-                    </td>
-                    <td className="py-2.5 px-3 font-sans text-zinc-600 dark:text-zinc-400">
-                      {dev.customer}
-                    </td>
-                    <td className="py-2.5 px-3 whitespace-nowrap">
-                      <div className="flex items-center gap-2">
-                        <span
-                          className={`w-2 h-2 rounded-full shrink-0 ${
-                            dev.battery > 20 ? 'bg-emerald-500' : 'bg-rose-500'
-                          }`}
-                        />
-                        <span className="text-sm font-medium  text-zinc-900 dark:text-zinc-100">
-                          {dev.battery}%
-                        </span>
-                        {dev.battery <= 20 && (
-                          <span className="px-1.5 py-0.2 rounded text-[9px]  font-medium text-rose-600 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border border-rose-200 dark:border-rose-900">
-                            Pin yếu
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="py-2.5 px-3 whitespace-nowrap">
-                      {dev.status === 'ONLINE' ? (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-emerald-600 dark:text-emerald-400">
-                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
-                          Đang kết nối
-                        </span>
-                      ) : (
-                        <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-600">
-                          <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 dark:bg-zinc-600" />
-                          Mất kết nối
-                        </span>
-                      )}
-                    </td>
-                    <td className="py-2.5 px-3 text-zinc-500 text-xs">
-                      <div>{dev.wifiRssi} dBm</div>
-                      <div className="text-[10px] text-zinc-600">{dev.ip}</div>
-                    </td>
-                    <td className="py-2.5 px-3 text-zinc-500 font-sans text-xs">
-                      {dev.lastSeen}
-                    </td>
-                  </motion.tr>
-                ))}
-              </motion.tbody>
-            </table>
-          </div>
-        </div>
-      )}
+      {activeTab === 'TELEMETRY' && <React.Suspense fallback={<div role="status" className="py-12 text-center text-sm text-zinc-500">Đang tải dữ liệu...</div>}><AdminLiveDevices /></React.Suspense>}
 
       {/* ========================================================================= */}
       {/* MODULE 5: 4.2.4 ANALYTICS & EXPORT REPORTS (CSV / PDF)                   */}
       {/* ========================================================================= */}
-      {activeTab === 'ANALYTICS' && (
-        <div className="space-y-4">
-          <p className="admin-data-note">Các chỉ số vận hành bên dưới là số liệu minh họa, chưa phản ánh báo cáo thực tế.</p>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
-                <TrendingUp className="w-4 h-4 text-zinc-900 dark:text-white" />
-                <span>Báo cáo vận hành</span>
-              </h2>
-              <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                Chỉ số thời gian giao hàng, tỷ lệ hủy đơn 2 phút và tần suất kích hoạt
-              </p>
-            </div>
-
-            <div className="admin-actions flex items-center gap-2">
-              <button
-                onClick={handleExportCsv}
-                className="px-3.5 py-1.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm active:scale-[0.97] transition-all cursor-pointer"
-              >
-                <Download className="w-3.5 h-3.5" />
-                <span>Xuất bảng tính</span>
-              </button>
-              <button
-                onClick={() => window.print()}
-                className="px-3.5 py-1.5 rounded-lg bg-white border border-zinc-200 hover:bg-zinc-50 text-zinc-700 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 font-medium text-xs flex items-center gap-1.5 shadow-2xs transition-colors cursor-pointer"
-              >
-                <FileText className="w-3.5 h-3.5" />
-                <span>In báo cáo</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Operational Metrics Cards - High Density */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-            <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
-              <span className="text-[11px]  font-medium text-zinc-500 ">Thời Gian Giao Trung Bình</span>
-              <p className="text-xl font-bold  text-zinc-900 dark:text-white mt-1">18.4 Phút</p>
-              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Nhanh hơn mục tiêu 6.6p</span>
-            </div>
-            <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
-              <span className="text-[11px]  font-medium text-zinc-500 ">Tỷ Lệ Hủy Đơn (2 Phút)</span>
-              <p className="text-xl font-bold  text-zinc-900 dark:text-white mt-1">1.8%</p>
-              <span className="text-[10px] text-zinc-600">Khách đổi ý hoặc bấm nhầm</span>
-            </div>
-            <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
-              <span className="text-[11px]  font-medium text-zinc-500 ">Tần Suất Bấm Nút / Căn Hộ</span>
-              <p className="text-xl font-bold  text-zinc-900 dark:text-white mt-1">4.2 Lần / Tháng</p>
-              <span className="text-[10px] text-zinc-600">Nhu yếu phẩm định kỳ</span>
-            </div>
-            <div className="p-3.5 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800">
-              <span className="text-[11px]  font-medium text-zinc-500 ">Độ Hài Lòng Khách Hàng</span>
-              <p className="text-xl font-bold  text-zinc-900 dark:text-white mt-1">4.92 / 5.0</p>
-              <span className="text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">Đánh giá 1-chạm</span>
-            </div>
-          </div>
-
-          {/* Revenue Chart */}
-          <div className="p-4 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 space-y-2">
-            <h4 className="text-xs font-semibold text-zinc-900 dark:text-white   ">
-              Xu hướng đơn hàng & doanh thu
-            </h4>
-            <React.Suspense fallback={<div className="h-72 flex items-center justify-center text-sm text-zinc-600 dark:text-zinc-400" role="status">Đang tải biểu đồ...</div>}>
-              <AnalyticsChart data={[]} />
-            </React.Suspense>
-          </div>
-        </div>
-      )}
+      {activeTab === 'ANALYTICS' && <React.Suspense fallback={<div role="status" className="py-12 text-center text-sm text-zinc-500">Đang tải dữ liệu...</div>}><AdminLiveAnalytics /></React.Suspense>}
 
       {/* ========================================================================= */}
       {/* MODULE 6: 4.2.5 FCM NOTIFICATIONS & MESSAGE TEMPLATES                     */}
