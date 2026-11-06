@@ -1,3 +1,4 @@
+import './StoreDashboard.css';
 import { deliveryMapUrl } from '../../services/delivery-location';
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
@@ -9,7 +10,6 @@ import { subscribeToStore, getSocket } from '../../services/socket';
 import { useAuth } from '../../context/AuthContext';
 import { useSound } from '../../context/OrderSoundContext';
 import { toast } from '../../context/ToastContext';
-import { AnalyticsChart } from '../../components/AnalyticsChart';
 import { Order } from '../../types';
 import { mergeOrderUpdate, normalizeOrder, normalizeOrderEvent, ORDER_EVENT, publishOrderEvent } from '../../services/order-events';
 import { ShippingContact } from '../../components/orders/ShippingContact';
@@ -44,6 +44,9 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { StoreCatalogItem, getStoreCatalog, saveStoreCatalog } from '../../data/storeProductsData';
+
+// The collapsed chart must not pull the charting library into the orders load.
+const AnalyticsChart = React.lazy(() => import('../../components/AnalyticsChart').then((module) => ({ default: module.AnalyticsChart })));
 
 const buildChartDataFromOrders = (orders: Order[]) => {
   const byDay = new Map<string, { date: string; rawDate: Date; revenue: number }>();
@@ -634,33 +637,33 @@ export const StoreDashboard: React.FC = () => {
     return pages;
   };
 
-  // Strict 6px solid dot + Sentence case text (Vercel / Linear system)
+  // Status presentation; existing status mappings and pulse are preserved.
   const renderStatus = (status: string) => {
     switch (status) {
       case 'PENDING':
         return (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-800 dark:text-zinc-200">
+          <span className="store-order-status store-order-status--pending">
             <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse shrink-0"></span>
             Chờ xác nhận
           </span>
         );
       case 'CONFIRMED':
         return (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+          <span className="store-order-status store-order-status--confirmed">
             <span className="w-1.5 h-1.5 rounded-full bg-blue-500 shrink-0"></span>
             Đã tiếp nhận
           </span>
         );
       case 'PREPARING':
         return (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+          <span className="store-order-status store-order-status--preparing">
             <span className="w-1.5 h-1.5 rounded-full bg-violet-500 shrink-0"></span>
             Đang chuẩn bị
           </span>
         );
       case 'READY_FOR_DELIVERY':
         return (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+          <span className="store-order-status store-order-status--ready">
             <span className="w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0"></span>
             Sẵn sàng giao
           </span>
@@ -668,21 +671,21 @@ export const StoreDashboard: React.FC = () => {
       case 'OUT_FOR_DELIVERY':
       case 'SHIPPING':
         return (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+          <span className="store-order-status store-order-status--shipping">
             <span className="w-1.5 h-1.5 rounded-full bg-sky-500 shrink-0"></span>
             Đang giao
           </span>
         );
       case 'DELIVERED':
         return (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+          <span className="store-order-status store-order-status--delivered">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
             Đã giao · Chờ hoàn tất
           </span>
         );
       case 'COMPLETED':
         return (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+          <span className="store-order-status store-order-status--completed">
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0"></span>
             Đã giao
           </span>
@@ -690,14 +693,14 @@ export const StoreDashboard: React.FC = () => {
       case 'CANCELLED':
       case 'REJECTED':
         return (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-400 dark:text-zinc-500">
+          <span className="store-order-status store-order-status--cancelled">
             <span className="w-1.5 h-1.5 rounded-full bg-rose-500 shrink-0"></span>
             Đã hủy
           </span>
         );
       default:
         return (
-          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-500">
+          <span className="store-order-status store-order-status--unknown">
             <span className="w-1.5 h-1.5 rounded-full bg-zinc-400 shrink-0"></span>
             {status === 'DELIVERED' ? 'Đã giao' : status}
           </span>
@@ -758,23 +761,23 @@ export const StoreDashboard: React.FC = () => {
   );
 
   return (
-    <div className="w-full space-y-3.5 text-zinc-900 dark:text-zinc-100">
+    <div className="store-orders w-full text-zinc-900 dark:text-zinc-100">
 
       {/* ── Page Header ── */}
       <div className="w-full">
         {/* Page Title Row */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-3 border-b border-zinc-200 dark:border-zinc-800">
+        <div className="store-orders-header">
           <div>
-            <div className="flex items-center gap-2">
-              <h1 className="text-base font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
+            <div className="store-orders-title-row">
+              <h1 className="store-orders-title">
                 Đơn Hàng Trực Tiếp
               </h1>
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-emerald-50 dark:bg-emerald-950/50 border border-emerald-200 dark:border-emerald-800 text-[10px] font-mono font-semibold text-emerald-700 dark:text-emerald-400">
+              <span className="store-orders-live">
                 <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse inline-block"></span>
                 LIVE
               </span>
             </div>
-            <p className="text-[11px] text-zinc-400 dark:text-zinc-500 mt-0.5">
+            <p className="store-orders-subtitle">
               Luồng sự kiện tức thì từ Smart Order Button trong mạng lưới khách hàng
             </p>
           </div>
@@ -783,18 +786,18 @@ export const StoreDashboard: React.FC = () => {
 
       {/* ── Metrics Strip ── */}
       <div className="w-full">
-        <div className="grid grid-cols-2 md:grid-cols-4 rounded-lg border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 divide-y md:divide-y-0 md:divide-x divide-zinc-200 dark:divide-zinc-800 overflow-hidden">
+        <div className="store-orders-metrics">
           {[
             {
-              label: 'Chờ Xử Lý',
+              label: 'Chờ xử lý',
               value: pendingCount,
               sub: 'cần xác nhận ngay',
               dot: 'bg-amber-500',
               urgent: pendingCount > 0,
-              valueColor: pendingCount > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-900 dark:text-zinc-100',
+              valueColor: pendingCount > 0 ? 'text-amber-700 dark:text-amber-300' : 'text-zinc-900 dark:text-zinc-100',
             },
             {
-              label: 'Đang Tiến Hành',
+              label: 'Đang tiến hành',
               value: inProgressCount,
               sub: 'chuẩn bị & giao',
               dot: 'bg-[#287DA8]',
@@ -802,7 +805,7 @@ export const StoreDashboard: React.FC = () => {
               valueColor: 'text-zinc-900 dark:text-zinc-100',
             },
             {
-              label: 'Đã Hoàn Thành',
+              label: 'Đã hoàn thành',
               value: completedCount,
               sub: 'giao thành công',
               dot: 'bg-[#4AA785]',
@@ -810,38 +813,38 @@ export const StoreDashboard: React.FC = () => {
               valueColor: 'text-zinc-900 dark:text-zinc-100',
             },
             {
-              label: 'Doanh Số Tạm Tính',
+              label: 'Doanh số tạm tính',
               value: null,
               revenue: totalRevenue,
-              sub: 'đã chốt hôm nay',
+              sub: 'các đơn không bị hủy / từ chối',
               dot: null,
               urgent: false,
               valueColor: 'text-zinc-900 dark:text-zinc-100',
             },
           ].map((m, i) => (
-            <div key={i} className="px-3.5 py-2.5 sm:px-4 sm:py-3">
-              <div className="flex items-center justify-between mb-1.5">
-                <span className="text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
+            <div key={i} className="store-orders-metric">
+              <div className="store-orders-metric-label-row">
+                <span className="store-orders-metric-label">
                   {m.label}
                 </span>
                 {m.dot && (
                   <span className={`w-2 h-2 rounded-full ${m.dot} ${m.urgent ? 'animate-pulse' : ''}`}></span>
                 )}
                 {!m.dot && (
-                  <DollarSign className="w-3.5 h-3.5 text-zinc-300 dark:text-zinc-600" />
+                  <DollarSign className="w-4 h-4 text-zinc-500 dark:text-zinc-400" />
                 )}
               </div>
               {m.revenue !== undefined ? (
-                <div className="font-mono font-bold text-base sm:text-lg text-zinc-900 dark:text-zinc-100 leading-none">
+                <div className="store-orders-metric-value text-zinc-900 dark:text-zinc-100">
                   {Number(m.revenue || 0).toLocaleString()}
-                  <span className="text-xs font-medium text-zinc-400 ml-0.5">₫</span>
+                  <span className="store-orders-currency">₫</span>
                 </div>
               ) : (
-                <div className={`font-mono font-bold text-xl sm:text-2xl leading-none ${m.valueColor}`}>
+                <div className={`store-orders-metric-value ${m.valueColor}`}>
                   {m.value}
                 </div>
               )}
-              <p className="text-[10px] text-zinc-400 dark:text-zinc-500 mt-1">{m.sub}</p>
+              <p className="store-orders-metric-description">{m.sub}</p>
             </div>
           ))}
         </div>
@@ -856,7 +859,7 @@ export const StoreDashboard: React.FC = () => {
                 <span className="text-[12.5px] font-bold text-zinc-900 dark:text-zinc-100">
                   Xu Hướng Đơn Hàng
                 </span>
-                <span className="ml-2 text-[10.5px] font-mono text-zinc-400">7 ngày gần nhất</span>
+                <span className="ml-2 text-xs text-zinc-600 dark:text-zinc-400">7 ngày gần nhất</span>
               </div>
               <button
                 type="button"
@@ -866,26 +869,28 @@ export const StoreDashboard: React.FC = () => {
                 <X className="w-3.5 h-3.5" />
               </button>
             </div>
-            <AnalyticsChart data={chartData} />
+            <React.Suspense fallback={<div className="w-full h-72 flex items-center justify-center text-sm text-zinc-500" role="status">Đang tải biểu đồ...</div>}>
+              <AnalyticsChart data={chartData} />
+            </React.Suspense>
           </div>
         </div>
       )}
 
       {/* ── Orders Table Section ── */}
-      <div className="w-full space-y-2.5">
+      <div className="store-orders-list">
 
         {/* Filter Bar */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-between gap-2.5">
+        <div className="store-orders-toolbar">
           {/* Status Tabs with Framer Motion layoutId gliding pill */}
-          <div className="flex items-center gap-1 overflow-x-auto scrollbar-none pb-0.5 sm:pb-0 relative">
+          <div className="store-orders-tabs">
             {[
-              { key: 'ALL', label: 'Tất Cả', count: orders.length },
-              { key: 'PENDING', label: 'Chờ Xử Lý', count: pendingCount, urgent: pendingCount > 0 },
-              { key: 'CONFIRMED', label: 'Đã Nhận' },
-              { key: 'PREPARING', label: 'Chuẩn Bị' },
-              { key: 'OUT_FOR_DELIVERY', label: 'Đang Giao' },
-              { key: 'COMPLETED', label: 'Đã Giao', count: completedCount },
-              { key: 'CANCELLED', label: 'Đã Hủy' },
+              { key: 'ALL', label: 'Tất cả', count: orders.length },
+              { key: 'PENDING', label: 'Chờ xử lý', count: pendingCount, urgent: pendingCount > 0 },
+              { key: 'CONFIRMED', label: 'Đã nhận' },
+              { key: 'PREPARING', label: 'Chuẩn bị' },
+              { key: 'OUT_FOR_DELIVERY', label: 'Đang giao' },
+              { key: 'COMPLETED', label: 'Đã giao', count: completedCount },
+              { key: 'CANCELLED', label: 'Đã hủy' },
             ].map((tab) => {
               const isActive = statusFilter === tab.key;
               return (
@@ -893,28 +898,28 @@ export const StoreDashboard: React.FC = () => {
                   key={tab.key}
                   type="button"
                   onClick={() => setStatusFilter(tab.key)}
-                  className={`relative px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors flex items-center gap-1.5 z-10 cursor-pointer ${
+                  className={`store-orders-tab relative rounded-md font-medium whitespace-nowrap transition-colors flex items-center gap-2 z-10 cursor-pointer ${
                     isActive
                       ? 'text-white font-semibold'
-                      : 'text-zinc-500 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-white hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
+                      : 'text-zinc-600 dark:text-zinc-300 hover:text-[#206588] dark:hover:text-white hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/60'
                   }`}
                 >
                   {isActive && (
                     <motion.span
                       layoutId="activeStoreDashboardTab"
-                      className="absolute inset-0 bg-[#287DA8] rounded-md -z-10 shadow-[0_2px_8px_rgba(40,125,168,0.3)] pointer-events-none"
+                      className="absolute inset-0 bg-[#206588] rounded-md -z-10 shadow-sm pointer-events-none"
                       transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                     />
                   )}
                   <span>{tab.label}</span>
                   {tab.count !== undefined && (
                     <span
-                      className={`text-[9.5px] font-mono px-1.5 py-0.5 rounded-full leading-none transition-colors ${
+                      className={`store-orders-tab-count px-1.5 py-0.5 rounded leading-none transition-colors ${
                         isActive
                           ? 'bg-white/25 text-white font-bold'
                           : (tab as any).urgent
                           ? 'bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300 font-bold'
-                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400'
+                          : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-300'
                       }`}
                     >
                       {tab.count}
@@ -926,21 +931,23 @@ export const StoreDashboard: React.FC = () => {
           </div>
 
           {/* Search + Sort */}
-          <div className="flex items-center gap-2 shrink-0">
-            <div className="relative w-full sm:w-56">
-              <Search className="w-3.5 h-3.5 text-zinc-400 absolute left-2.5 top-1/2 -translate-y-1/2" />
+          <div className="store-orders-search-sort">
+            <div className="store-orders-search relative">
+              <Search className="w-4 h-4 text-zinc-500 absolute left-3 top-1/2 -translate-y-1/2 pointer-events-none" />
               <input
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
+                aria-label="Tìm kiếm đơn hàng"
                 placeholder="Tìm mã đơn, tên, SĐT, địa chỉ..."
-                className="w-full pl-8 pr-7 py-1 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 placeholder:text-zinc-400 focus:outline-none focus:border-[#287DA8] focus:ring-1 focus:ring-[#287DA8]/20 transition-colors"
+                className="store-orders-input w-full transition-colors"
               />
               {searchQuery && (
                 <button
                   type="button"
                   onClick={() => setSearchQuery('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 text-zinc-400 hover:text-zinc-600"
+                  aria-label="Xóa từ khóa tìm kiếm"
+                  className="store-orders-search-clear absolute right-1 top-1/2 -translate-y-1/2 text-zinc-500 hover:text-zinc-900 dark:hover:text-white"
                 >
                   <X className="w-3 h-3" />
                 </button>
@@ -950,7 +957,8 @@ export const StoreDashboard: React.FC = () => {
             <select
               value={sortBy}
               onChange={(e) => setSortBy(e.target.value as any)}
-              className="px-2 py-1 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 focus:outline-none focus:border-[#287DA8] cursor-pointer"
+              aria-label="Sắp xếp đơn hàng"
+              className="store-orders-sort cursor-pointer"
             >
               <option value="PRIORITY">Ưu tiên xử lý</option>
               <option value="NEWEST">Mới nhất</option>
@@ -960,40 +968,41 @@ export const StoreDashboard: React.FC = () => {
         </div>
 
         {/* Table */}
-        <div ref={tableTopRef} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-lg overflow-hidden scroll-mt-20">
+        <div ref={tableTopRef} className="store-orders-table-panel overflow-hidden scroll-mt-20">
           {loading ? (
-            <div className="py-16 text-center">
-              <div className="inline-flex items-center gap-2 text-xs font-mono text-zinc-400">
+            <div className="store-orders-placeholder text-center">
+              <div className="inline-flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
                 <span className="w-2 h-2 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-pulse inline-block"></span>
                 Đang tải dữ liệu đơn hàng...
               </div>
             </div>
           ) : filteredOrders.length === 0 ? (
-            <div className="py-16 text-center space-y-2">
-              <ShoppingBag className="w-7 h-7 text-zinc-200 dark:text-zinc-700 mx-auto" />
-              <p className="text-xs font-medium text-zinc-400">
+            <div className="store-orders-placeholder text-center space-y-2">
+              <ShoppingBag className="w-9 h-9 text-zinc-600 dark:text-zinc-400 mx-auto mb-3" />
+              <p className="text-sm font-medium text-zinc-600 dark:text-zinc-300">
                 Không có đơn hàng nào khớp với bộ lọc
               </p>
             </div>
           ) : (
             <>
-              <div className="overflow-x-auto">
-              <table className="w-full text-left border-collapse">
+              <div className="store-orders-table-scroll" tabIndex={0} role="region" aria-label="Danh sách đơn hàng, cuộn ngang để xem đầy đủ">
+              <table className="store-orders-table w-full text-left border-collapse">
+                <caption className="sr-only">Đơn hàng với thông tin người nhận, giao hàng, thanh toán, trạng thái và thao tác</caption>
                 <thead>
-                  <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-800/40 text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
-                    <th className="py-2 px-3.5 font-semibold">Mã Đơn</th>
-                    <th className="py-2 px-3.5 font-semibold">Người nhận</th>
-                    <th className="py-2 px-3.5 font-semibold">Địa Chỉ</th>
-                    <th className="py-2 px-3.5 font-semibold">Mặt Hàng</th>
-                    <th className="py-2 px-3.5 font-semibold">Trạng Thái</th>
-                    <th className="py-2 px-3.5 font-semibold text-right">Thao Tác</th>
+                  <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-800/50">
+                    <th scope="col" className="font-semibold">Mã đơn</th>
+                    <th scope="col" className="font-semibold">Người nhận</th>
+                    <th scope="col" className="font-semibold">Địa chỉ</th>
+                    <th scope="col" className="font-semibold">Mặt hàng</th>
+                    <th scope="col" className="font-semibold">Trạng thái</th>
+                    <th scope="col" className="font-semibold text-right">Thao tác</th>
                   </tr>
                 </thead>
                 <motion.tbody
                   variants={tableContainerVariants}
                   initial="hidden"
                   animate="show"
-                  className="divide-y divide-zinc-100 dark:divide-zinc-800/60 text-xs"
+                  className="divide-y divide-zinc-200/70 dark:divide-zinc-800 text-sm"
                 >
                   {paginatedOrders.map((order) => {
                     const items = Array.isArray(order.items) ? order.items : [];
@@ -1010,22 +1019,22 @@ export const StoreDashboard: React.FC = () => {
                         variants={tableRowVariants}
                         className="hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30 transition-colors group"
                       >
-                        {/* Mã Đơn / Giờ */}
-                        <td className="py-2.5 px-3.5 whitespace-nowrap">
+                        {/* Mã đơn / Giờ */}
+                        <td className="store-orders-code-cell">
                           <div
-                            className="font-mono text-[11.5px] flex items-baseline gap-1"
+                            className="store-orders-code"
                             title={`Mã đầy đủ: #${order.orderNumber}`}
                           >
                             <span className="font-bold text-slate-900 dark:text-zinc-100">
                               #{getOrderShortCode(order.orderNumber)}
                             </span>
                             {order.orderNumber.includes('-') && (
-                              <span className="text-[9.5px] text-slate-400 dark:text-zinc-500 font-normal truncate max-w-[110px]">
+                              <span className="store-orders-reference">
                                 · {order.orderNumber.slice(0, order.orderNumber.lastIndexOf('-'))}
                               </span>
                             )}
                           </div>
-                          <div className="text-[9.5px] font-mono text-zinc-400 mt-0.5">
+                          <div className="store-orders-time">
                             {new Date(order.createdAt).toLocaleTimeString('vi-VN', {
                               hour: '2-digit',
                               minute: '2-digit',
@@ -1039,80 +1048,80 @@ export const StoreDashboard: React.FC = () => {
                         </td>
 
                         {/* Người nhận ghi trên đơn hàng */}
-                        <td className="py-2.5 px-3.5 min-w-[160px] max-w-[240px]">
-                          <div className="font-semibold text-[11.5px] text-zinc-900 dark:text-zinc-100 whitespace-normal break-words">
+                        <td className="store-orders-recipient-cell">
+                          <div className="font-semibold text-sm text-zinc-900 dark:text-zinc-100 whitespace-normal break-words">
                             {order.customerName || 'Chưa có tên người nhận'}
                           </div>
-                          <div className="text-[10px] font-mono text-zinc-400 flex items-center gap-1 mt-0.5">
-                            <Phone className="w-2.5 h-2.5" />
+                          <div className="store-orders-secondary flex items-center gap-1.5 mt-1">
+                            <Phone className="w-3 h-3 shrink-0" />
                             {order.customerPhone ? <a href={`tel:${order.customerPhone}`} className="break-all hover:underline">{order.customerPhone}</a> : 'Chưa có số điện thoại'}
                           </div>
                         </td>
 
-                        {/* Địa Chỉ */}
-                        <td className="py-2.5 px-3.5 max-w-[240px]">
+                        {/* Địa chỉ */}
+                        <td className="store-orders-address-cell">
                           <div
-                            className="whitespace-pre-line break-words text-[11.5px] text-zinc-700 dark:text-zinc-300 font-medium"
+                            className="whitespace-pre-line break-words text-[13px] leading-relaxed text-zinc-700 dark:text-zinc-300"
                             title={order.deliveryAddress}
                           >
                             {order.deliveryAddress || 'Chưa có địa chỉ giao hàng'}
                           </div>
-                          {deliveryMapUrl(order) && <a href={deliveryMapUrl(order)!} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs text-sky-600 hover:underline">Xem vị trí giao hàng</a>}
+                          {deliveryMapUrl(order) && <a href={deliveryMapUrl(order)!} target="_blank" rel="noopener noreferrer" className="mt-1 inline-block text-xs font-medium text-[#206588] dark:text-sky-300 hover:underline">Xem vị trí giao hàng</a>}
                           {order.device && (
-                            <div className="text-[9.5px] font-mono text-zinc-400 flex items-center gap-1 mt-0.5">
-                              <Radio className="w-2.5 h-2.5 text-emerald-500" />
+                            <div className="store-orders-secondary flex items-center gap-1.5 mt-1">
+                              <Radio className="w-3 h-3 text-emerald-600 shrink-0" />
                               {order.device.configuration?.customName || order.device.deviceId}
                             </div>
                           )}
                         </td>
 
-                        {/* Mặt Hàng */}
-                        <td className="py-2.5 px-3.5">
-                          <div className="text-[11.5px] text-zinc-900 dark:text-zinc-100 font-medium">
+                        {/* Mặt hàng */}
+                        <td className="store-orders-product-cell">
+                          <div className="text-sm text-zinc-900 dark:text-zinc-100 font-semibold break-words">
                             {firstItem ? `${firstItem.quantity}× ${firstItem.productName}` : 'Đơn hàng'}
                             {otherCount > 0 && (
-                              <span className="text-[10px] text-zinc-400 ml-1">+{otherCount} món</span>
+                              <span className="text-xs text-zinc-600 dark:text-zinc-400 ml-1 font-normal">+{otherCount} món</span>
                             )}
                           </div>
-                          <div className="mt-0.5 flex flex-wrap items-center gap-x-1.5 text-[10.5px] font-mono font-semibold">
-                            <span className="text-zinc-500 dark:text-zinc-400">
-                              {Number(order.totalAmount || (order as any).total_amount || 0).toLocaleString()} ₫ ·
+                          <div className="store-orders-payment">
+                            <span className="store-orders-amount">
+                              {Number(order.totalAmount || (order as any).total_amount || 0).toLocaleString()} ₫
                             </span>
                             {isCancelled ? (
-                              <span className="text-zinc-400 dark:text-zinc-500">Đơn đã hủy · Không cần thanh toán</span>
+                              <span className="text-zinc-600 dark:text-zinc-400">Đơn đã hủy · Không cần thanh toán</span>
                             ) : order.paymentStatus === 'REFUND_PENDING' ? (
                               <span className="text-rose-600 dark:text-rose-400">Đã nhận tiền · Chờ hoàn PayOS</span>
                             ) : order.paymentStatus === 'PAID' ? (
-                              <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-bold">
+                              <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300 font-medium">
                                 <Check className="w-3 h-3" />
                                 {['CASH_ON_DELIVERY', 'COD'].includes(order.paymentMethod as string) ? 'Đã thu tiền mặt' : 'Đã thanh toán (PayOS)'}
                               </span>
                             ) : ['CASH_ON_DELIVERY', 'COD'].includes(order.paymentMethod as string) ? (
-                              <span className="text-amber-600 dark:text-amber-400 font-medium">COD · Chờ thu tiền khi giao</span>
+                              <span className="text-amber-700 dark:text-amber-300 font-medium">COD · Chờ thu tiền khi giao</span>
                             ) : order.paymentMethod === 'PAYOS' ? (
-                              <span className="text-amber-600 dark:text-amber-400 font-medium">Chờ thanh toán PayOS</span>
+                              <span className="text-amber-700 dark:text-amber-300 font-medium">Chờ thanh toán PayOS</span>
                             ) : (
-                              <span className="text-zinc-400">Chờ thanh toán</span>
+                              <span className="text-zinc-600 dark:text-zinc-400">Chờ thanh toán</span>
                             )}
                           </div>
                         </td>
 
-                        {/* Trạng Thái */}
-                        <td className="py-2.5 px-3.5 whitespace-nowrap">
+                        {/* Trạng thái */}
+                        <td className="store-orders-status-cell">
                           {renderStatus(orderStatus)}
                         </td>
 
-                        {/* Thao Tác */}
-                        <td className="py-2.5 px-3.5 text-right whitespace-nowrap">
+                        {/* Thao tác */}
+                        <td className="store-orders-action-cell text-right">
                           <fieldset disabled={Boolean(pendingStatusUpdates[order.id])} aria-busy={Boolean(pendingStatusUpdates[order.id])} className="m-0 min-w-0 border-0 p-0 disabled:opacity-60">
                           {orderStatus === 'PENDING' && (
                             <motion.button
                               type="button"
                               whileTap={{ scale: 0.96 }}
                               onClick={() => handleUpdateStatus(order.id, 'CONFIRMED')}
-                              className="px-2.5 py-1 bg-[#287DA8] hover:bg-[#206588] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
+                              className="store-orders-action bg-[#206588] hover:bg-[#194f6b] text-white font-semibold rounded-md shadow-sm transition-all cursor-pointer"
                             >
-                              Tiếp Nhận
+                              Tiếp nhận
                             </motion.button>
                           )}
                           {orderStatus === 'CONFIRMED' && (
@@ -1120,9 +1129,9 @@ export const StoreDashboard: React.FC = () => {
                               type="button"
                               whileTap={{ scale: 0.96 }}
                               onClick={() => handleUpdateStatus(order.id, 'PREPARING')}
-                              className="px-2.5 py-1 bg-[#287DA8] hover:bg-[#206588] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
+                              className="store-orders-action bg-[#206588] hover:bg-[#194f6b] text-white font-semibold rounded-md shadow-sm transition-all cursor-pointer"
                             >
-                              Chuẩn Bị
+                              Chuẩn bị
                             </motion.button>
                           )}
                           {orderStatus === 'PREPARING' && (
@@ -1130,9 +1139,9 @@ export const StoreDashboard: React.FC = () => {
                               type="button"
                               whileTap={{ scale: 0.96 }}
                               onClick={() => handleUpdateStatus(order.id, 'READY_FOR_DELIVERY')}
-                              className="px-2.5 py-1 bg-[#287DA8] hover:bg-[#206588] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
+                              className="store-orders-action bg-[#206588] hover:bg-[#194f6b] text-white font-semibold rounded-md shadow-sm transition-all cursor-pointer"
                             >
-                              Xuất Giao
+                              Xuất giao
                             </motion.button>
                           )}
                           {orderStatus === 'READY_FOR_DELIVERY' && (
@@ -1140,9 +1149,9 @@ export const StoreDashboard: React.FC = () => {
                               type="button"
                               whileTap={{ scale: 0.96 }}
                               onClick={() => handleUpdateStatus(order.id, 'SHIPPING')}
-                              className="px-2.5 py-1 bg-[#287DA8] hover:bg-[#206588] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
+                              className="store-orders-action bg-[#206588] hover:bg-[#194f6b] text-white font-semibold rounded-md shadow-sm transition-all cursor-pointer"
                             >
-                              Bắt Đầu Giao
+                              Bắt đầu giao
                             </motion.button>
                           )}
                           {(orderStatus === 'OUT_FOR_DELIVERY' || orderStatus === 'SHIPPING') && (
@@ -1150,9 +1159,9 @@ export const StoreDashboard: React.FC = () => {
                               type="button"
                               whileTap={{ scale: 0.96 }}
                               onClick={() => handleUpdateStatus(order.id, 'DELIVERED')}
-                              className="px-2.5 py-1 bg-[#4AA785] hover:bg-[#3d9173] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(74,167,133,0.25)] transition-all cursor-pointer"
+                              className="store-orders-action bg-[#237455] hover:bg-[#195a40] text-white font-semibold rounded-md shadow-sm transition-all cursor-pointer"
                             >
-                              Đã Giao ✓
+                              Đã giao ✓
                             </motion.button>
                           )}
                           {orderStatus === 'DELIVERED' && (
@@ -1160,22 +1169,22 @@ export const StoreDashboard: React.FC = () => {
                               type="button"
                               whileTap={{ scale: 0.96 }}
                               onClick={() => handleUpdateStatus(order.id, 'COMPLETED')}
-                              className="px-2.5 py-1 bg-[#4AA785] hover:bg-[#3d9173] text-white text-[11px] font-semibold rounded-md shadow-[0_2px_8px_rgba(74,167,133,0.25)] transition-all cursor-pointer"
+                              className="store-orders-action bg-[#237455] hover:bg-[#195a40] text-white font-semibold rounded-md shadow-sm transition-all cursor-pointer"
                             >
-                              Hoàn Tất & Cộng Ví
+                              Hoàn tất & cộng ví
                             </motion.button>
                           )}
                           {orderStatus === 'COMPLETED' && (
-                            <span className="text-[10.5px] font-mono text-[#4AA785] dark:text-[#5ec29e] flex items-center justify-end gap-1 font-semibold">
+                            <span className="text-xs text-emerald-700 dark:text-emerald-300 flex items-center justify-end gap-1 font-semibold">
                               <Check className="w-3.5 h-3.5 stroke-[2.5]" />
                               Đã giao
                             </span>
                           )}
                           {isCancelled && (
-                            <span className="text-[10.5px] font-mono text-zinc-400">Đã hủy</span>
+                            <span className="text-xs text-zinc-600 dark:text-zinc-400">Đã hủy</span>
                           )}
                           </fieldset>
-                          {pendingStatusUpdates[order.id] && <span role="status" className="mt-1 block text-[10px] text-slate-500">Đang xác nhận…</span>}
+                          {pendingStatusUpdates[order.id] && <span role="status" className="mt-1 block text-xs text-zinc-600 dark:text-zinc-400">Đang xác nhận…</span>}
                         </td>
                       </motion.tr>
                     );
@@ -1185,8 +1194,8 @@ export const StoreDashboard: React.FC = () => {
             </div>
 
             {/* Pagination Bar */}
-            <div className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 flex flex-col sm:flex-row items-center justify-between gap-3">
-              <div className="text-xs text-slate-500 dark:text-zinc-400 tabular-nums">
+            <div className="store-orders-pagination border-t border-zinc-200 dark:border-zinc-800 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div className="text-[13px] text-zinc-600 dark:text-zinc-400 tabular-nums">
                 Hiển thị{' '}
                 <span className="font-semibold text-slate-700 dark:text-zinc-200">
                   {filteredOrders.length === 0 ? 0 : startIndex + 1}–{endIndex}
@@ -1199,14 +1208,15 @@ export const StoreDashboard: React.FC = () => {
               </div>
 
               {totalPages > 1 && (
-                <div className="flex items-center gap-1.5 ml-auto">
+                <div className="store-orders-page-controls flex items-center gap-1.5 ml-auto">
                   {/* Nút Trước */}
                   <button
                     type="button"
                     disabled={currentPage === 1}
                     onClick={() => handlePageChange(currentPage - 1)}
-                    className="px-2.5 py-1 text-xs font-medium rounded-lg text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center gap-1 select-none"
+                    className="min-w-9 min-h-9 px-2.5 py-2 text-xs font-medium rounded-md text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center gap-1 select-none"
                     title="Trang trước"
+                    aria-label="Trang trước"
                   >
                     <ChevronLeft className="w-3.5 h-3.5" />
                     <span className="hidden sm:inline">Trước</span>
@@ -1230,10 +1240,12 @@ export const StoreDashboard: React.FC = () => {
                         <button
                           key={`page-${page}`}
                           type="button"
+                          aria-label={`Trang ${page}`}
+                          aria-current={isCurrent ? 'page' : undefined}
                           onClick={() => handlePageChange(Number(page))}
-                          className={`min-w-7 h-7 px-2 text-xs font-medium rounded-lg transition-colors cursor-pointer tabular-nums flex items-center justify-center select-none ${
+                          className={`min-w-9 h-9 px-2 text-xs font-medium rounded-md transition-colors cursor-pointer tabular-nums flex items-center justify-center select-none ${
                             isCurrent
-                              ? 'bg-[#0E6BA8] text-white shadow-xs font-semibold'
+                              ? 'bg-[#206588] text-white shadow-sm font-semibold'
                               : 'text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white'
                           }`}
                         >
@@ -1248,8 +1260,9 @@ export const StoreDashboard: React.FC = () => {
                     type="button"
                     disabled={currentPage === totalPages}
                     onClick={() => handlePageChange(currentPage + 1)}
-                    className="px-2.5 py-1 text-xs font-medium rounded-lg text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center gap-1 select-none"
+                    className="min-w-9 min-h-9 px-2.5 py-2 text-xs font-medium rounded-md text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 hover:text-slate-900 dark:hover:text-white disabled:opacity-40 disabled:cursor-not-allowed transition-colors cursor-pointer flex items-center gap-1 select-none"
                     title="Trang sau"
+                    aria-label="Trang sau"
                   >
                     <span className="hidden sm:inline">Sau</span>
                     <ChevronRight className="w-3.5 h-3.5" />
@@ -1510,6 +1523,10 @@ export const StoreDashboard: React.FC = () => {
                         <img
                           src={item.imageUrl}
                           alt={item.name}
+                          loading="lazy"
+                          decoding="async"
+                          width={48}
+                          height={48}
                           className="w-full h-full object-cover"
                         />
                         {/* Hover Overlay with Camera Icon */}

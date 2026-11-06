@@ -15,7 +15,7 @@ test('Sidebar includes Thuê nút bấm for customer and Gói thuê nút IoT for
 
   assert.match(
     content,
-    /\{\s*to:\s*'\/admin\/dashboard\?section=RENTALS',\s*label:\s*'2\.1 Gói thuê nút IoT'/,
+    /\{\s*to:\s*'\/admin\/dashboard\?section=RENTALS',\s*label:\s*'Gói thuê nút bấm'/,
     'Sidebar adminLinks must include /admin/dashboard?section=RENTALS'
   );
 });
@@ -26,8 +26,8 @@ test('App.tsx registers /customer/rentals route', () => {
 
   assert.match(
     content,
-    /import\s*\{\s*CustomerRentalsPage\s*\}\s*from\s*'\.\/pages\/customer\/CustomerRentalsPage'/,
-    'App.tsx must import CustomerRentalsPage'
+    /const\s+CustomerRentalsPage\s*=\s*React\.lazy\(\(\)\s*=>\s*import\('\.\/pages\/customer\/CustomerRentalsPage'\)\.then\(\(module\)\s*=>\s*\(\{\s*default:\s*module\.CustomerRentalsPage\s*\}\)\)\)/,
+    'App.tsx must keep the customer rentals page available through its lazy route module'
   );
   assert.match(
     content,
@@ -57,7 +57,7 @@ test('AdminDashboard integrates rental packages creation and real API management
   assert.match(content, /handleCreateRentalPackage/, 'AdminDashboard must define handleCreateRentalPackage');
   assert.match(content, /adminCreatePackage/, 'AdminDashboard must call rentalsService.adminCreatePackage');
   assert.match(content, /adminListPackages/, 'AdminDashboard must call rentalsService.adminListPackages');
-  assert.match(content, /Gói thuê nút bấm IoT/, 'AdminDashboard must render rental packages view');
+  assert.match(content, /Gói thuê nút bấm/, 'AdminDashboard must render rental packages view');
 });
 
 test('Rental notifications cross-notify store owners and customers', () => {

@@ -790,6 +790,10 @@ export const StoreProductsPage: React.FC = () => {
                               <img
                                 src={prod.imageUrl}
                                 alt={prod.name}
+                                loading="lazy"
+                                decoding="async"
+                                width={44}
+                                height={44}
                                 className="w-full h-full object-contain p-0.5 group-hover/thumb:scale-110 transition-transform duration-200"
                                 onError={(e) => {
                                   (e.target as HTMLElement).style.display = 'none';

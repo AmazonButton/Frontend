@@ -13,7 +13,6 @@ import {
   Menu,
   Package,
   ReceiptText,
-  ShieldAlert,
   ShieldCheck,
   ShoppingBag,
   ShoppingCart,
@@ -54,16 +53,15 @@ const customerLinks: NavigationItem[] = [
 
 const adminLinks: NavigationItem[] = [
   { to: '/admin/dashboard', label: 'Tổng quan', icon: LayoutDashboard },
-  { to: '/admin/dashboard?section=STORES', label: '1. Trạm cửa hàng', icon: Store },
-  { to: '/admin/dashboard?section=PLANS', label: '2. Gói dịch vụ', icon: Wallet },
-  { to: '/admin/dashboard?section=RENTALS', label: '2.1 Gói thuê nút IoT', icon: Cpu },
-  { to: '/admin/dashboard?section=CATALOG', label: '3. Danh mục gốc', icon: Layers },
-  { to: '/admin/dashboard?section=DEVICES', label: '4. Kho nút bấm', icon: Cpu },
-  { to: '/admin/dashboard?section=RBAC', label: '5. Tài khoản & phân quyền', icon: UserRound },
-  { to: '/admin/dashboard?section=TELEMETRY', label: '6. Giám sát IoT & pin', icon: Smartphone },
-  { to: '/admin/dashboard?section=ANALYTICS', label: '7. Báo cáo & doanh thu', icon: BarChart3 },
-  { to: '/admin/dashboard?section=NOTIFICATIONS', label: '8. Cấu hình FCM', icon: ShoppingBag },
-  { to: '/admin/dashboard?section=SECURITY', label: '9. An ninh & giả mạo', icon: ShieldAlert },
+  { to: '/admin/dashboard?section=STORES', label: 'Cửa hàng', icon: Store },
+  { to: '/admin/dashboard?section=PLANS', label: 'Gói dịch vụ', icon: Wallet },
+  { to: '/admin/dashboard?section=RENTALS', label: 'Gói thuê nút bấm', icon: Cpu },
+  { to: '/admin/dashboard?section=CATALOG', label: 'Danh mục sản phẩm', icon: Layers },
+  { to: '/admin/dashboard?section=DEVICES', label: 'Kho nút bấm', icon: Cpu },
+  { to: '/admin/dashboard?section=RBAC', label: 'Tài khoản & phân quyền', icon: UserRound },
+  { to: '/admin/dashboard?section=TELEMETRY', label: 'Thiết bị & pin', icon: Smartphone },
+  { to: '/admin/dashboard?section=ANALYTICS', label: 'Báo cáo & doanh thu', icon: BarChart3 },
+  { to: '/admin/dashboard?section=NOTIFICATIONS', label: 'Cài đặt thông báo', icon: ShoppingBag },
   { to: '/admin/payouts', label: 'Theo dõi chi trả', icon: Wallet },
   { to: '/admin/profile', label: 'Tài khoản', icon: UserRound },
 ];
@@ -98,7 +96,14 @@ export const Sidebar: React.FC = () => {
 
   const isLinkActive = (path: string) => {
     if (path === '/shop') return location.pathname === '/shop';
+    if (isAdmin && path === '/admin/dashboard') {
+      const section = new URLSearchParams(location.search).get('section');
+      return location.pathname === path && (!section || section === 'OVERVIEW');
+    }
     const [pathname, search] = path.split('?');
+    if (isAdmin && pathname === '/admin/dashboard' && search) {
+      return location.pathname === pathname && new URLSearchParams(location.search).get('section') === new URLSearchParams(search).get('section');
+    }
     if (search) return location.pathname === pathname && location.search === `?${search}`;
     if (path.includes('profile')) {
       return location.pathname === pathname && (!location.search || location.search === '?tab=INFO');
@@ -133,7 +138,7 @@ export const Sidebar: React.FC = () => {
       initial={false}
       animate={{ width: isSidebarOpen ? 256 : 68 }}
       transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
-      className="min-h-[calc(100vh-4rem)] border-r border-zinc-200 dark:border-zinc-800 flex-col justify-between shrink-0 overflow-hidden bg-[#FBFBFC] dark:bg-zinc-950 select-none z-20 hidden lg:flex"
+      className={`${isAdmin ? 'admin-navigation ' : ''}min-h-[calc(100vh-4rem)] border-r border-zinc-200 dark:border-zinc-800 flex-col justify-between shrink-0 overflow-hidden bg-[#FBFBFC] dark:bg-zinc-950 select-none z-20 hidden lg:flex`}
     >
       <div>
         <div className="px-3 py-3 border-b border-zinc-200/80 dark:border-zinc-800/80 h-[58px] flex items-center relative overflow-hidden">
@@ -178,7 +183,7 @@ export const Sidebar: React.FC = () => {
               const Icon = item.icon;
               const isActive = isLinkActive(item.to);
               return (
-                <Link key={item.to} to={item.to} onClick={() => setHoveredItem(null)} onMouseEnter={(event) => { if (!isSidebarOpen) { const rect = event.currentTarget.getBoundingClientRect(); setHoveredItem({ label: item.label, top: rect.top + rect.height / 2 }); } }} onMouseLeave={() => setHoveredItem(null)} className={`relative flex items-center h-10 rounded-lg text-xs font-medium transition-colors group select-none cursor-pointer ${isActive ? 'text-[#287DA8] dark:text-[#38a5da] font-semibold' : 'text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/40'}`}>
+                <Link key={item.to} to={item.to} aria-current={isActive ? 'page' : undefined} title={item.label} onClick={() => setHoveredItem(null)} onMouseEnter={(event) => { if (!isSidebarOpen) { const rect = event.currentTarget.getBoundingClientRect(); setHoveredItem({ label: item.label, top: rect.top + rect.height / 2 }); } }} onMouseLeave={() => setHoveredItem(null)} className={`relative flex items-center h-10 rounded-lg text-xs font-medium transition-colors group select-none cursor-pointer ${isActive ? 'text-[#287DA8] dark:text-[#38a5da] font-semibold' : 'text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/40'}`}>
                   {isActive && <motion.div layoutId="sidebar-active-pill" className="absolute inset-0 bg-[#287DA8]/10 dark:bg-[#287DA8]/15 rounded-lg border-l-[3px] border-[#287DA8] dark:border-[#38a5da] pointer-events-none" transition={{ type: 'spring', stiffness: 420, damping: 34 }} />}
                   <div className="w-[40px] h-[40px] flex items-center justify-center shrink-0 relative z-10 pointer-events-none"><Icon size={18} strokeWidth={1.5} className={isActive ? 'text-[#287DA8] dark:text-[#38a5da]' : 'text-zinc-400 dark:text-zinc-500 group-hover:text-[#287DA8] dark:group-hover:text-[#38a5da]'} /></div>
                   <motion.span initial={false} animate={{ opacity: isSidebarOpen ? 1 : 0, width: isSidebarOpen ? 'auto' : 0 }} transition={{ duration: 0.2 }} className="relative z-10 overflow-hidden whitespace-nowrap pl-1 text-[13px] pointer-events-none">{item.label}</motion.span>

@@ -73,3 +73,5 @@ Desktop.ini
 .gemini/
 .agents/
 *.skill
+
+.vite/

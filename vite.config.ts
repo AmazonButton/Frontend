@@ -16,7 +16,9 @@ export default defineConfig({
           'react-core': ['react', 'react-dom', 'react-router-dom'],
           animation: ['framer-motion'],
           charts: ['recharts'],
-          qr: ['html5-qrcode', 'qrcode.react'],
+          // Displaying a QR code does not require the much larger camera decoder.
+          'qr-scanner': ['html5-qrcode'],
+          'qr-renderer': ['qrcode.react'],
         },
       },
     },

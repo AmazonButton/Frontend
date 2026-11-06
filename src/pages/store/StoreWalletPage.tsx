@@ -583,6 +583,10 @@ export const StoreWalletPage: React.FC = () => {
                                 <img
                                   src={b.logo}
                                   alt={b.shortName}
+                                  loading="lazy"
+                                  decoding="async"
+                                  width={20}
+                                  height={20}
                                   className="h-5 w-5 object-contain"
                                 />
                                 <div>
@@ -625,6 +629,10 @@ export const StoreWalletPage: React.FC = () => {
                         <img
                           src={b.logo}
                           alt={b.shortName}
+                          loading="lazy"
+                          decoding="async"
+                          width={14}
+                          height={14}
                           className="h-3.5 w-3.5 object-contain"
                         />
                         {b.shortName}

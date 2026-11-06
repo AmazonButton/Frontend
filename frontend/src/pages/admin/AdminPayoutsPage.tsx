@@ -1,0 +1,12 @@
+import './admin-ui.css';
+import React, { useCallback, useEffect, useState } from 'react';
+import { Banknote, CheckCircle2 } from 'lucide-react';
+import { api } from '../../services/api';
+import { card, StatusPill } from '../operations/OperationPrimitives';
+
+export const AdminPayoutsPage: React.FC = () => {
+  const [withdrawals, setWithdrawals] = useState<any[]>([]); const [payouts, setPayouts] = useState<any[]>([]); const [message, setMessage] = useState('');
+  const load = useCallback(async () => { try { const [w, p] = await Promise.all([api.get('/admin/withdrawals'), api.get('/admin/payos/payouts')]); setWithdrawals(w.data?.data || []); setPayouts(p.data?.data || []); } catch (e: any) { setMessage(e.response?.data?.message || 'Không thể tải dữ liệu payout.'); } }, []);
+  useEffect(() => { load(); }, [load]);
+  return <main className="admin-ui admin-payouts mx-auto max-w-6xl space-y-5 px-4 py-7 sm:px-6"><header><p className="text-xs font-bold uppercase tracking-[.16em] text-violet-600">Quản trị hệ thống</p><h1 className="mt-1 text-2xl font-bold text-zinc-900 dark:text-white">Theo dõi chi trả</h1><p className="mt-1 text-sm text-zinc-500">Theo dõi yêu cầu rút tiền và trạng thái chuyển khoản PayOS.</p></header>{message && <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">{message}</div>}<section className="grid gap-4 md:grid-cols-2"><div className={card}><Banknote className="h-5 w-5 text-violet-600" /><p className="mt-3 text-2xl font-bold text-zinc-900 dark:text-white">{withdrawals.length}</p><p className="text-sm text-zinc-500">Yêu cầu rút tiền</p></div><div className={card}><CheckCircle2 className="h-5 w-5 text-emerald-600" /><p className="mt-3 text-2xl font-bold text-zinc-900 dark:text-white">{payouts.length}</p><p className="text-sm text-zinc-500">Bản ghi chi trả</p></div></section><section className={card}><h2 className="font-bold text-zinc-900 dark:text-white">Yêu cầu cần xử lý</h2><div className="mt-4 divide-y divide-zinc-100 dark:divide-zinc-800">{withdrawals.length ? withdrawals.map((item, index) => <div className="flex items-center justify-between gap-3 py-4" key={item.id || index}><div><p className="text-sm font-semibold text-zinc-800 dark:text-zinc-100">Yêu cầu #{item.id || item.withdrawalId}</p><p className="text-xs text-zinc-500">{item.amount?.toLocaleString?.('vi-VN') || '—'} VND</p></div><StatusPill value={item.status} /></div>) : <p className="py-5 text-sm text-zinc-500">Không có yêu cầu nào.</p>}</div></section></main>;
+};

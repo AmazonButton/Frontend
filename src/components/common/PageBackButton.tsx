@@ -2,7 +2,11 @@ import React from 'react';
 import { ArrowLeft } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-export const PageBackButton: React.FC = () => {
+interface PageBackButtonProps {
+  fallbackTo?: string;
+}
+
+export const PageBackButton: React.FC<PageBackButtonProps> = ({ fallbackTo } = {}) => {
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -14,13 +18,23 @@ export const PageBackButton: React.FC = () => {
       return;
     }
 
-    const isProfile = location.pathname === '/customer/profile' || location.pathname === '/profile';
+    const sectionRoot = location.pathname.startsWith('/admin/')
+      ? '/admin'
+      : location.pathname.startsWith('/store/')
+        ? '/store'
+        : null;
+    const isProfile = ['/customer/profile', '/store/profile', '/admin/profile', '/profile'].includes(location.pathname);
     const isSecurityTab = isProfile && new URLSearchParams(location.search).get('tab') === 'SECURITY';
+    const profilePath = location.pathname === '/profile' && !fallbackTo ? '/customer/profile' : location.pathname;
     const fallback = isSecurityTab
-      ? '/customer/profile?tab=INFO'
-      : location.pathname === '/customer/home'
-        ? '/shop'
-        : '/customer/home';
+      ? `${profilePath}?tab=INFO`
+      : fallbackTo || (sectionRoot
+        ? location.pathname === `${sectionRoot}/dashboard` && !location.search
+          ? '/'
+          : `${sectionRoot}/dashboard`
+        : location.pathname === '/customer/home'
+          ? '/shop'
+          : '/customer/home');
 
     // Replace the direct entry so repeatedly going back cannot create a loop.
     navigate(fallback, { replace: true });

@@ -1417,12 +1417,15 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
       </main>
 
       {/* Footer Bottom Line */}
-      <footer className="relative z-10 w-full px-4 sm:px-8 py-3 text-center sm:flex sm:items-center sm:justify-between text-xs text-slate-500">
-        <p>© 2026 Smart Order Button · IoT Instant Commerce. Nền tảng Đặt Hàng Tức Thì.</p>
-        <div className="hidden sm:flex items-center gap-4 text-slate-500">
-          <Link to="/" className="hover:text-slate-800 transition-colors">Trang chủ</Link>
-          <a href="#privacy" className="hover:text-slate-800 transition-colors">Bảo mật</a>
-          <a href="#terms" className="hover:text-slate-800 transition-colors">Điều khoản</a>
+      <footer
+        className="relative z-10 flex w-full flex-col items-center justify-between gap-1.5 bg-transparent px-4 py-2 text-center text-xs font-bold leading-5 text-white sm:flex-row sm:gap-6 sm:px-8 sm:text-left"
+        style={{ textShadow: '0 1px 2px #0f172a, 0 0 5px #0f172a', WebkitTextStroke: '0.3px rgba(15, 23, 42, 0.85)' }}
+      >
+        <p className="min-w-0 break-words">© 2026 Smart Order Button · IoT Instant Commerce. Nền tảng Đặt Hàng Tức Thì.</p>
+        <div className="flex flex-wrap items-center justify-center gap-x-5 sm:shrink-0">
+          <Link to="/" className="inline-flex min-h-11 items-center transition-colors hover:text-sky-100 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Trang chủ</Link>
+          <a href="#privacy" className="inline-flex min-h-11 items-center transition-colors hover:text-sky-100 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Bảo mật</a>
+          <a href="#terms" className="inline-flex min-h-11 items-center transition-colors hover:text-sky-100 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Điều khoản</a>
         </div>
       </footer>
     </div>

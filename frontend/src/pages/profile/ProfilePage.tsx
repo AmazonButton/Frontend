@@ -1,3 +1,4 @@
+import '../admin/admin-ui.css';
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
@@ -524,7 +525,7 @@ export const ProfilePage: React.FC = () => {
       initial={{ opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
-      className={`max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 ${user?.role === 'CUSTOMER' ? `customer-ui customer-profile ${activeTab === 'SECURITY' ? 'customer-security' : ''}` : ''}`}
+      className={`${['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '') ? 'admin-ui admin-profile ' : ''}max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 ${user?.role === 'CUSTOMER' ? `customer-ui customer-profile ${activeTab === 'SECURITY' ? 'customer-security' : ''}` : ''}`}
     >
       {/* Toast Notifications */}
       <AnimatePresence>

@@ -18,7 +18,6 @@ Tài liệu này tổng hợp chi tiết toàn bộ các trang, phân hệ, tín
 | **Cửa Hàng — Phân Tích** | `/store/analytics` | `STORE_OWNER`, `STORE_MANAGER` | Báo cáo chu kỳ tiêu dùng, dự đoán nhu cầu khách hàng |
 | **Khách Hàng** | `/customer/home` | `CUSTOMER` | Xem danh sách nút bấm sở hữu, Đổi Wi-Fi, Chuyển nhượng |
 | **Quản Trị Hệ Thống** | `/admin/dashboard` | `SUPER_ADMIN` | Quản trị toàn sàn, duyệt cửa hàng, tổng hợp giao dịch |
-| **Trung Tâm An Ninh** | `/admin/security/devices` | `SUPER_ADMIN`, `TECHNICIAN` | Giám sát tấn công Replay, kiểm tra khóa bí mật HMAC |
 | **Mô Phỏng Phần Cứng** | `/simulator` | Công khai / Toàn quyền | Bàn thử nghiệm ESP32 Simulator với 10 lệnh phần cứng |
 
 ---
@@ -120,18 +119,14 @@ Tài liệu này tổng hợp chi tiết toàn bộ các trang, phân hệ, tín
 
 ---
 
-### 2.5. Phân Hệ Quản Trị Hệ Thống & Bảo Mật (Super Admin & Security)
+### 2.5. Phân Hệ Quản Trị Hệ Thống (Admin)
 
 #### A. Trang Quản Trị Sàn Toàn Quốc (`/admin/dashboard`)
 * Tổng quan số lượng cửa hàng đại lý đang hoạt động trên hệ thống.
 * Tổng lưu lượng đơn hàng phát sinh từ các nút bấm trên toàn quốc.
 * Quản lý phê duyệt đại lý cửa hàng mới.
 
-#### B. Trung Tâm An Ninh & Bảo Mật Thiết Bị (`/admin/security/devices`)
-* **Giám sát tấn công Replay Attack:** Hệ thống lưu Nonce với TTL 10 phút. Bất kỳ gói tin nào gửi lại Nonce cũ đều bị chặn ngay lập tức (HTTP 409 Conflict).
-* **Kiểm soát tính toàn vẹn chữ ký HMAC-SHA256:**
-  * Giám sát các gói tin IoT gửi lên máy chủ. Gói tin bị sửa đổi dữ liệu hoặc sai khóa bí mật sẽ bị từ chối với mã lỗi 401 Unauthorized.
-* **Thu hồi khóa bí mật (Secret Revocation):** Khóa ngay lập tức nút bấm nếu bị báo mất cắp.
+Security Hub đã được gỡ khỏi giao diện admin. Các cơ chế bảo mật thiết bị và API/backend hiện có vẫn được giữ nguyên.
 
 ---
 

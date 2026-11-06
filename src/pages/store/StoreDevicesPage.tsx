@@ -62,8 +62,10 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { QrCameraScanner } from '../../components/common/QrCameraScanner';
 import { WhiteDeviceAirPodsModal } from '../../components/devices/WhiteDeviceAirPodsModal';
+
+// Keep camera decoding out of the initial device list; the existing camera branch mounts it.
+const QrCameraScanner = React.lazy(() => import('../../components/common/QrCameraScanner').then((module) => ({ default: module.QrCameraScanner })));
 
 const tableContainerVariants: Variants = {
   hidden: { opacity: 0 },
@@ -1754,12 +1756,19 @@ export const StoreDevicesPage: React.FC = () => {
                       </div>
                     ) : (
                       <div className="space-y-3">
-                        <QrCameraScanner
-                          onScanSuccess={(txt) => {
-                            setQuickCodeInput(txt);
-                            handleStoreLookupCode(txt);
-                          }}
-                        />
+                        <React.Suspense fallback={
+                          <div className="w-full max-w-[280px] aspect-square mx-auto rounded-2xl bg-slate-950 flex flex-col items-center justify-center gap-2 text-slate-300" role="status">
+                            <RefreshCw className="w-6 h-6 animate-spin text-sky-400" />
+                            <span className="text-xs font-medium">Đang tải trình quét Camera...</span>
+                          </div>
+                        }>
+                          <QrCameraScanner
+                            onScanSuccess={(txt) => {
+                              setQuickCodeInput(txt);
+                              handleStoreLookupCode(txt);
+                            }}
+                          />
+                        </React.Suspense>
                         <button
                           type="button"
                           onClick={() => setStoreCameraActive(false)}

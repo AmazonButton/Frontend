@@ -6,6 +6,19 @@ export default defineConfig({
   resolve: {
     preserveSymlinks: true,
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'react-core': ['react', 'react-dom', 'react-router-dom'],
+          animation: ['framer-motion'],
+          charts: ['recharts'],
+          'qr-scanner': ['html5-qrcode'],
+          'qr-renderer': ['qrcode.react'],
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     host: true,

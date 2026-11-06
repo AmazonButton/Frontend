@@ -4,7 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useSound } from '../context/OrderSoundContext';
-import { LogOut, Shield, ShieldAlert, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, BadgeCheck, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X, ShoppingCart, ReceiptText, ChevronDown } from 'lucide-react';
+import { LogOut, Shield, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, BadgeCheck, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X, ShoppingCart, ReceiptText, ChevronDown } from 'lucide-react';
 import { WhiteDeviceAirPodsModal } from '../components/devices/WhiteDeviceAirPodsModal';
 import { HeaderNavigation } from '../components/common/HeaderNavigation';
 import { LogoutConfirmModal } from '../components/common/LogoutConfirmModal';
@@ -103,7 +103,7 @@ export const Navbar: React.FC = () => {
   const getRoleBadge = (role: string) => {
     switch (role) {
       case 'SUPER_ADMIN':
-        return { label: 'Admin Hub', color: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20' };
+        return { label: 'Quản trị', color: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20' };
       case 'STORE_OWNER':
         return { label: 'Chủ Cửa Hàng', color: 'bg-[#287DA8]/10 text-[#287DA8] dark:text-[#38a5da] border-[#287DA8]/25' };
       case 'STORE_MANAGER':
@@ -177,8 +177,7 @@ export const Navbar: React.FC = () => {
         {user && user.role === 'SUPER_ADMIN' && (
           <nav aria-label="Điều hướng admin" className="hidden lg:flex items-center gap-1 rounded-xl border border-slate-200/80 bg-slate-50/70 p-1 dark:border-zinc-800 dark:bg-zinc-900/70">
             {[
-              { to: '/admin/dashboard', label: 'Admin Hub', icon: Shield },
-              { to: '/admin/security/devices', label: 'Security Hub', icon: ShieldAlert },
+              { to: '/admin/dashboard', label: 'Quản trị', icon: Shield },
             ].map(({ to, label, icon: Icon }) => (
               <Link
                 key={to}

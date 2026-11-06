@@ -30,13 +30,12 @@ const CustomerOrdersPage = React.lazy(() => import('./pages/customer/CustomerOrd
 const CustomerRentalsPage = React.lazy(() => import('./pages/customer/CustomerRentalsPage').then((module) => ({ default: module.CustomerRentalsPage })));
 const ShopPage = React.lazy(() => import('./pages/customer/ShopPage').then((module) => ({ default: module.ShopPage })));
 const AdminDashboard = React.lazy(() => import('./pages/admin/AdminDashboard').then((module) => ({ default: module.AdminDashboard })));
-const AdminSecurityHubPage = React.lazy(() => import('./pages/admin/AdminSecurityHubPage').then((module) => ({ default: module.AdminSecurityHubPage })));
 const QuickSetupPage = React.lazy(() => import('./pages/QuickSetupPage').then((module) => ({ default: module.QuickSetupPage })));
 const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage').then((module) => ({ default: module.ProfilePage })));
 const CustomerVerificationPage = React.lazy(() => import('./pages/operations/OperationsPages').then((module) => ({ default: module.CustomerVerificationPage })));
 const DriverShiftPage = React.lazy(() => import('./pages/operations/OperationsPages').then((module) => ({ default: module.DriverShiftPage })));
-const StoreFinancePage = React.lazy(() => import('./pages/operations/OperationsPages').then((module) => ({ default: module.StoreFinancePage })));
-const AdminPayoutsPage = React.lazy(() => import('./pages/operations/OperationsPages').then((module) => ({ default: module.AdminPayoutsPage })));
+const StoreFinancePage = React.lazy(() => import('./pages/store/StoreFinancePage').then((module) => ({ default: module.StoreFinancePage })));
+const AdminPayoutsPage = React.lazy(() => import('./pages/admin/AdminPayoutsPage').then((module) => ({ default: module.AdminPayoutsPage })));
 
 const RouteLoadingFallback: React.FC = () => (
   <div className="min-h-[12rem] w-full flex items-center justify-center" role="status" aria-label="Đang tải nội dung">
@@ -83,7 +82,7 @@ const AppShellLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) 
     <div className="flex flex-col lg:flex-row min-h-[calc(100vh-4rem)] w-full bg-[#FBFBFC] dark:bg-zinc-950 relative">
       <Sidebar />
       <main className="app-workspace flex-1 min-w-0 w-full p-3 sm:p-5 lg:p-6">
-        {user?.role === 'CUSTOMER' && (
+        {['CUSTOMER', 'STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '') && (
           <nav aria-label="Điều hướng trang" className="mb-3 flex sm:mb-4">
             <PageBackButton />
           </nav>
@@ -95,6 +94,20 @@ const AppShellLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) 
         </Suspense>
       </main>
     </div>
+  );
+};
+
+// These profile routes sit outside AppShellLayout, so supply their back control once.
+const StandaloneProfileBackNavigation: React.FC = () => {
+  const { user } = useAuth();
+  const isAdmin = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '');
+  const isStoreUser = ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(user?.role || '');
+  if (!isAdmin && !isStoreUser) return null;
+
+  return (
+    <nav aria-label="Điều hướng trang" className="mx-auto flex max-w-6xl px-4 pt-4 sm:px-6 lg:px-8">
+      <PageBackButton fallbackTo={isAdmin ? '/admin/dashboard' : '/store/dashboard'} />
+    </nav>
   );
 };
 
@@ -165,7 +178,10 @@ export const App: React.FC = () => {
             path="/store/profile"
             element={
               <ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF']}>
-                <ProfilePage />
+                <>
+                  <StandaloneProfileBackNavigation />
+                  <ProfilePage />
+                </>
               </ProtectedRoute>
             }
           />
@@ -202,7 +218,6 @@ export const App: React.FC = () => {
             }
           >
             <Route path="/admin/dashboard" element={<AdminDashboard />} />
-            <Route path="/admin/security/devices" element={<AdminSecurityHubPage />} />
             <Route path="/admin/payouts" element={<AdminPayoutsPage />} />
             <Route path="/admin/profile" element={<ProfilePage />} />
           </Route>
@@ -214,7 +229,7 @@ export const App: React.FC = () => {
               <ProtectedRoute>
                 {user?.role === 'CUSTOMER'
                   ? <CustomerPageMotion><ProfilePage /></CustomerPageMotion>
-                  : <ProfilePage />}
+                  : <><StandaloneProfileBackNavigation /><ProfilePage /></>}
               </ProtectedRoute>
             }
           />
