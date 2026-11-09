@@ -1,7 +1,7 @@
 import '../admin/admin-ui.css';
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../../context/AuthContext';
 import { useSound } from '../../context/OrderSoundContext';
 import { api } from '../../services/api';
@@ -47,20 +47,35 @@ import {
 import { LogoutConfirmModal } from '../../components/common/LogoutConfirmModal';
 import { PushNotificationSettings } from '../../components/operations/PushNotificationSettings';
 
-type ProfileTab = 'INFO' | 'DEVICES' | 'ORDERS' | 'ADDRESSES' | 'WAREHOUSE' | 'NOTIFICATIONS' | 'SECURITY';
+type ProfileTab = 'INFO' | 'DEVICES' | 'ORDERS' | 'ADDRESSES' | 'NOTIFICATIONS' | 'SECURITY';
 
 export const ProfilePage: React.FC = () => {
   const { user, refreshUser, logout } = useAuth();
   const { isSoundEnabled, toggleSound, isVoiceEnabled, toggleVoice, testSound, testStoreBankSpeaker } = useSound();
   const navigate = useNavigate();
+  const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
 
   const isStoreOwner = user?.role === 'STORE_OWNER' || user?.role === 'STORE_MANAGER';
+  const isCustomer = user?.role === 'CUSTOMER';
+  const isAdmin = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '');
+  useEffect(() => {
+    if (isCustomer && location.hash === '#customer-identity-verification') navigate('/customer/verification', { replace: true });
+  }, [isCustomer, location.hash, navigate]);
+  const customerPhoneVerified = (user as any)?.phoneVerified === true ||
+    (typeof (user as any)?.phoneVerifiedAt === 'string' && Number.isFinite(Date.parse((user as any).phoneVerifiedAt)));
 
-  // Tab state (read from URL ?tab=... or default to INFO)
-  const initialTab = (searchParams.get('tab') as ProfileTab) || 'INFO';
-  const [activeTab, setActiveTab] = useState<ProfileTab>(initialTab);
+  // Resolve hidden/invalid tabs before rendering, including old bookmarked URLs.
+  const requestedTab = searchParams.get('tab') || 'INFO';
+  const allowedTabs: ProfileTab[] = isStoreOwner
+    ? ['INFO', 'NOTIFICATIONS', 'SECURITY']
+    : isAdmin ? ['INFO', 'ORDERS', 'ADDRESSES', 'SECURITY']
+    : isCustomer ? ['INFO', 'DEVICES', 'ORDERS', 'SECURITY']
+    : ['INFO', 'DEVICES', 'ORDERS', 'ADDRESSES', 'SECURITY'];
+  const activeTab: ProfileTab = allowedTabs.includes(requestedTab as ProfileTab)
+    ? requestedTab as ProfileTab
+    : 'INFO';
 
   const cleanFullName = (name?: string) => {
     if (!name) return 'Nguyễn Văn Định';
@@ -109,13 +124,15 @@ export const ProfilePage: React.FC = () => {
   const isPasswordValid = hasMinLen && hasUpper && hasLower && hasNumber && hasSpecial;
   const isMatching = newPassword.length > 0 && newPassword === confirmPassword;
 
-  // Keep activeTab in sync with URL searchParams (e.g. from Sidebar ?tab=SECURITY)
   useEffect(() => {
-    const tabFromUrl = searchParams.get('tab') as ProfileTab;
-    if (tabFromUrl && tabFromUrl !== activeTab) {
-      setActiveTab(tabFromUrl);
+    if (isStoreOwner && requestedTab === 'DEVICES') {
+      navigate('/store/devices', { replace: true });
+    } else if (isStoreOwner && requestedTab === 'ORDERS') {
+      navigate('/store/dashboard', { replace: true });
+    } else if (!allowedTabs.includes(requestedTab as ProfileTab)) {
+      setSearchParams({ tab: 'INFO' }, { replace: true });
     }
-  }, [searchParams]);
+  }, [isStoreOwner, isCustomer, isAdmin, requestedTab, navigate, setSearchParams]);
 
   // Associated Data
   const [devices, setDevices] = useState<Device[]>([]);
@@ -149,17 +166,17 @@ export const ProfilePage: React.FC = () => {
 
   // Sync tab with URL
   const handleTabChange = (tab: ProfileTab) => {
-    setActiveTab(tab);
     setSearchParams({ tab });
   };
 
-  // Load devices and orders for customer/store
+  // Store operations live on their dedicated screens.
   useEffect(() => {
+    if (isStoreOwner) return;
     const loadAssociatedData = async () => {
       setLoadingData(true);
       try {
         const [devRes, ordRes] = await Promise.all([
-          api.get('/devices').catch(() => ({ data: { success: false, data: [] } })),
+          isAdmin ? Promise.resolve({ data: { success: false, data: [] } }) : api.get('/devices').catch(() => ({ data: { success: false, data: [] } })),
           api.get('/orders').catch(() => ({ data: { success: false, data: [] } })),
         ]);
         if (devRes.data?.success && Array.isArray(devRes.data.data)) {
@@ -176,7 +193,7 @@ export const ProfilePage: React.FC = () => {
     };
 
     loadAssociatedData();
-  }, []);
+  }, [isStoreOwner, isAdmin]);
 
   // Avatar initial letter helper
   const getInitials = (name?: string) => {
@@ -456,7 +473,7 @@ export const ProfilePage: React.FC = () => {
   };
 
   // Dynamic menu items based on Role (B2B Store Owner vs B2C Customer)
-  const menuItems = isStoreOwner
+  const menuItems = (isStoreOwner
     ? [
         {
           id: 'INFO' as ProfileTab,
@@ -464,25 +481,8 @@ export const ProfilePage: React.FC = () => {
           icon: Store,
         },
         {
-          id: 'DEVICES' as ProfileTab,
-          label: 'Thiết bị đã cấp phát',
-          icon: Cpu,
-          count: devices.length > 0 ? devices.length : undefined,
-        },
-        {
-          id: 'ORDERS' as ProfileTab,
-          label: 'Đơn hàng từ nút bấm',
-          icon: ShoppingBag,
-          count: orders.length > 0 ? orders.length : undefined,
-        },
-        {
-          id: 'WAREHOUSE' as ProfileTab,
-          label: 'Kho bãi & Điểm bán',
-          icon: MapPin,
-        },
-        {
           id: 'NOTIFICATIONS' as ProfileTab,
-          label: 'Chuông báo đơn IoT',
+          label: 'Cài đặt thông báo',
           icon: Radio,
         },
         {
@@ -519,11 +519,11 @@ export const ProfilePage: React.FC = () => {
           label: 'Bảo mật & Đổi mật khẩu',
           icon: Key,
         },
-      ];
+      ]).filter(item => !isAdmin || item.id !== 'DEVICES');
 
   return (
     <motion.div
-      initial={{ opacity: 0, y: 10 }}
+      initial={user?.role === 'CUSTOMER' ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className={`${['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '') ? 'admin-ui admin-profile ' : ''}max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 ${user?.role === 'CUSTOMER' ? `customer-ui customer-profile ${activeTab === 'SECURITY' ? 'customer-security' : ''}` : ''}`}
@@ -555,11 +555,11 @@ export const ProfilePage: React.FC = () => {
       </AnimatePresence>
 
       {/* Main Grid: Sidebar Menu + Content Card */}
-      <div className="profile-layout grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      <div data-page-motion className="profile-layout grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
         {/* ================================================================= */}
         {/* LEFT SIDEBAR MENU                                                 */}
         {/* ================================================================= */}
-        <aside className="profile-navigation lg:col-span-4 bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-3 shadow-xs">
+        {!isCustomer && !isAdmin && <aside className={`profile-navigation ${isStoreOwner ? 'lg:col-span-3' : 'lg:col-span-4'} bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-3 shadow-xs`}>
           <nav aria-label="Quản lý tài khoản" className="space-y-1">
             {menuItems.map((item) => {
               const Icon = item.icon;
@@ -617,22 +617,21 @@ export const ProfilePage: React.FC = () => {
               <span>Đăng xuất</span>
             </button>
           </nav>
-        </aside>
+        </aside>}
 
         {/* ================================================================= */}
         {/* RIGHT CONTENT PANEL                                               */}
         {/* ================================================================= */}
-        <section className="profile-panel lg:col-span-8 space-y-6">
+        <section className={`profile-panel min-w-0 ${isAdmin ? 'lg:col-span-12' : isStoreOwner ? 'lg:col-span-9' : 'lg:col-span-8'} space-y-6`}>
           {/* Header Title & Subtitle with Status Badge */}
           <div className="profile-heading">
-            {user?.role === 'CUSTOMER' && <p className="customer-eyebrow">{activeTab === 'SECURITY' ? 'Bảo mật tài khoản' : 'Tài khoản của bạn'}</p>}
+            {isCustomer && activeTab !== 'INFO' && <p className="customer-eyebrow">{activeTab === 'SECURITY' ? 'Bảo mật tài khoản' : 'Tài khoản của bạn'}</p>}
             <div className="flex flex-wrap items-center gap-3">
               <h1 className="text-xl sm:text-2xl font-bold text-slate-900 dark:text-white tracking-tight leading-tight">
                 {activeTab === 'INFO' && (isStoreOwner ? 'Hồ sơ đại lý & Chủ cửa hàng' : 'Thông tin cá nhân')}
-                {activeTab === 'DEVICES' && (isStoreOwner ? 'Thiết bị đã cấp phát' : 'Nút bấm của tôi')}
-                {activeTab === 'ORDERS' && (isStoreOwner ? 'Đơn hàng từ nút bấm' : 'Lịch sử đặt hàng')}
+                {activeTab === 'DEVICES' && 'Nút bấm của tôi'}
+                {activeTab === 'ORDERS' && 'Lịch sử đặt hàng'}
                 {activeTab === 'ADDRESSES' && 'Địa chỉ đã lưu'}
-                {activeTab === 'WAREHOUSE' && 'Kho bãi & Điểm bán'}
                 {activeTab === 'NOTIFICATIONS' && 'Cấu hình chuông báo & Kênh nhận đơn'}
                 {activeTab === 'SECURITY' && 'Bảo mật & Đổi mật khẩu'}
               </h1>
@@ -643,7 +642,7 @@ export const ProfilePage: React.FC = () => {
                 </span>
               )}
             </div>
-            <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
+            {!(isCustomer && activeTab === 'INFO') && <p className="text-xs text-slate-500 dark:text-zinc-400 mt-1">
               {activeTab === 'INFO' &&
                 (isStoreOwner
                   ? 'Quản lý thông tin doanh nghiệp, người đại diện pháp luật và hotline chăm sóc khách hàng'
@@ -657,13 +656,13 @@ export const ProfilePage: React.FC = () => {
                   ? 'Lịch sử đơn hàng nhu yếu phẩm tiếp nhận trực tiếp từ các nút một-chạm của khách hàng'
                   : 'Lịch sử các đơn hàng nhu yếu phẩm được kích hoạt qua nút bấm')}
               {activeTab === 'ADDRESSES' && 'Thiết lập địa chỉ nhận hàng mặc định và ghi chú cho shipper giao tận cửa'}
-              {activeTab === 'WAREHOUSE' && 'Quản lý địa chỉ kho xuất hàng và danh sách các toà nhà/chung cư đại lý đang hỗ trợ giao hàng hỏa tốc'}
               {activeTab === 'NOTIFICATIONS' && 'Tùy chỉnh âm thanh chuông báo ngân và loa đọc đơn hàng tự động khi khách hàng bấm nút Smart Order Button'}
               {activeTab === 'SECURITY' && 'Quản lý mật khẩu, khóa phiên đăng nhập và an ninh phần cứng'}
-            </p>
+            </p>}
           </div>
 
           {/* =============================================================== */}
+
           {/* TAB 1: THÔNG TIN CÁ NHÂN / HỒ SƠ ĐẠI LÝ                          */}
           {/* =============================================================== */}
           {activeTab === 'INFO' && (
@@ -673,18 +672,18 @@ export const ProfilePage: React.FC = () => {
               animate={{ opacity: 1, y: 0 }}
               exit={{ opacity: 0, y: -8 }}
               transition={{ duration: 0.2 }}
-              className="profile-info bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-6"
+              className={isCustomer ? 'profile-info account-personal-card space-y-6' : 'profile-info bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-6'}
             >
-              <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 p-4 dark:border-sky-900 dark:bg-sky-950/25"><div><p className="text-sm font-semibold text-zinc-900 dark:text-white">Số điện thoại tài khoản</p><p className="mt-1 text-xs text-zinc-500">Xác nhận bằng tin nhắn để liên kết số điện thoại của bạn.</p></div><Link to="/phone-auth?mode=verify" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-[#287DA8]"><Phone className="h-4 w-4" />Xác minh số điện thoại</Link></div>
+              {!isCustomer && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 p-4 dark:border-sky-900 dark:bg-sky-950/25"><div><p className="text-sm font-semibold text-zinc-900 dark:text-white">Số điện thoại tài khoản</p><p className="mt-1 text-xs text-zinc-500">Xác nhận bằng tin nhắn để liên kết số điện thoại của bạn.</p></div><Link to="/phone-auth?mode=verify" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-[#287DA8]"><Phone className="h-4 w-4" />Xác minh số điện thoại</Link></div>}
 
               {/* Avatar / Store Logo Section */}
-              <div className="profile-avatar flex flex-col sm:flex-row sm:items-center gap-5">
+              <div className={isCustomer ? 'profile-avatar account-profile-card' : 'profile-avatar flex flex-col sm:flex-row sm:items-center gap-5'}>
                 {/* Big Avatar / Logo Circle */}
                 <div className="relative w-24 h-24 rounded-full bg-slate-900 text-white flex items-center justify-center font-bold text-2xl shadow-md shrink-0 overflow-hidden group">
                   {avatarPreview ? (
                     <img
                       src={avatarPreview}
-                      alt="Avatar"
+                      alt={isCustomer ? 'Ảnh đại diện' : 'Avatar'}
                       className="w-full h-full object-cover"
                     />
                   ) : (
@@ -692,16 +691,18 @@ export const ProfilePage: React.FC = () => {
                   )}
                 </div>
 
-                <div className="space-y-1.5">
+                {isCustomer && <div className="account-profile-identity"><h2>{user?.fullName ? cleanFullName(user.fullName) : 'Tài khoản của bạn'}</h2><p>{getRoleLabel(user?.role)}</p></div>}
+
+                <div className={isCustomer ? 'account-avatar-actions space-y-1.5' : 'space-y-1.5'}>
                   <div className="flex items-center gap-2.5">
                     <label className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold shadow-xs active:scale-[0.98] transition-all cursor-pointer flex items-center gap-1.5">
                       <Camera className="w-3.5 h-3.5" strokeWidth={1.75} />
-                      <span>{isStoreOwner ? 'Thay đổi logo đại lý' : 'Thay đổi ảnh'}</span>
+                      <span>{isStoreOwner ? 'Thay đổi logo đại lý' : isCustomer ? 'Đổi ảnh' : 'Thay đổi ảnh'}</span>
                       <input
                         type="file"
                         accept="image/*"
                         onChange={handleAvatarFileChange}
-                        className="hidden"
+                        className={isCustomer ? 'sr-only' : 'hidden'}
                       />
                     </label>
 
@@ -717,14 +718,20 @@ export const ProfilePage: React.FC = () => {
                   </div>
 
                   <p className="text-xs text-slate-400 dark:text-zinc-500 mt-2">
-                    Hỗ trợ định dạng PNG, JPG tối đa 2MB. Tỷ lệ khuyên dùng 1:1.
+                    {isCustomer ? 'PNG/JPG · Tối đa 2MB' : 'Hỗ trợ định dạng PNG, JPG tối đa 2MB. Tỷ lệ khuyên dùng 1:1.'}
                   </p>
                 </div>
               </div>
 
+              {isCustomer && <div className="account-phone-notice" role="status">
+                {customerPhoneVerified ? <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0" /> : <Phone aria-hidden="true" className="h-4 w-4 shrink-0" />}
+                <p>{customerPhoneVerified ? 'Số điện thoại đã xác minh' : 'Bảo vệ tài khoản bằng số điện thoại.'}</p>
+                {!customerPhoneVerified && <Link to="/phone-auth?mode=verify" aria-label="Xác minh số điện thoại">Xác minh<ChevronRight aria-hidden="true" className="h-3.5 w-3.5" /></Link>}
+              </div>}
+
               {/* Form Input Grid */}
-              <form onSubmit={handleSaveProfile} className="space-y-5">
-                {user?.role === 'CUSTOMER' && <div className="profile-section-heading"><h2>Thông tin liên hệ</h2><p>Thông tin được dùng để liên hệ và giao hàng cho bạn.</p></div>}
+              <form onSubmit={handleSaveProfile} aria-busy={isCustomer ? isSaving : undefined} className={isCustomer ? 'account-contact-card space-y-5' : 'space-y-5'}>
+                {isCustomer && <div className="profile-section-heading"><h2>Thông tin liên hệ</h2></div>}
                 {isStoreOwner ? (
                   /* ================= B2B STORE OWNER FORM ================= */
                   <>
@@ -839,16 +846,6 @@ export const ProfilePage: React.FC = () => {
                         placeholder="Nhập địa chỉ kho hàng & điểm kinh doanh chính..."
                         className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 text-sm text-slate-900 dark:text-white font-normal placeholder:text-slate-400 focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all resize-none"
                       />
-                      <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400 mt-1.5">
-                        <span>Đang phục vụ 4 cụm chung cư lân cận.</span>
-                        <button
-                          type="button"
-                          onClick={() => handleTabChange('WAREHOUSE')}
-                          className="text-[#0E6BA8] dark:text-[#38a5da] font-medium hover:underline cursor-pointer"
-                        >
-                          Xem danh sách
-                        </button>
-                      </div>
                     </div>
                   </>
                 ) : (
@@ -857,10 +854,11 @@ export const ProfilePage: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {/* Họ và tên */}
                       <div>
-                        <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
+                        <label htmlFor={isCustomer ? 'customer-profile-name' : undefined} className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
                           Họ và tên
                         </label>
                         <input
+                          id={isCustomer ? 'customer-profile-name' : undefined}
                           type="text"
                           required
                           value={fullName}
@@ -872,10 +870,11 @@ export const ProfilePage: React.FC = () => {
 
                       {/* Số điện thoại */}
                       <div>
-                        <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
+                        <label htmlFor={isCustomer ? 'customer-profile-phone' : undefined} className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
                           Số điện thoại
                         </label>
                         <input
+                          id={isCustomer ? 'customer-profile-phone' : undefined}
                           type="tel"
                           required
                           value={phone}
@@ -889,11 +888,12 @@ export const ProfilePage: React.FC = () => {
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                       {/* Email */}
                       <div>
-                        <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
+                        <label htmlFor={isCustomer ? 'customer-profile-email' : undefined} className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
                           Email
                         </label>
                         <div className="relative">
                           <input
+                          id={isCustomer ? 'customer-profile-email' : undefined}
                             type="email"
                             disabled
                             value={user?.email || 'an.nguyen@gmail.com'}
@@ -905,10 +905,11 @@ export const ProfilePage: React.FC = () => {
 
                       {/* Vai trò */}
                       <div>
-                        <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
+                        <label htmlFor={isCustomer ? 'customer-profile-role' : undefined} className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
                           Vai trò
                         </label>
                         <input
+                          id={isCustomer ? 'customer-profile-role' : undefined}
                           type="text"
                           disabled
                           value={getRoleLabel(user?.role)}
@@ -919,27 +920,26 @@ export const ProfilePage: React.FC = () => {
 
                     {/* Địa chỉ nhận hàng (Flat form) */}
                     <div>
-                      <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
+                      <label htmlFor={isCustomer ? 'customer-profile-address' : undefined} className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1.5">
                         Địa chỉ nhận hàng <span className="text-rose-500">*</span>
                       </label>
                       <textarea
+                          id={isCustomer ? 'customer-profile-address' : undefined}
                         rows={2}
                         value={deliveryAddress}
                         onChange={(e) => setDeliveryAddress(e.target.value)}
                         placeholder="Nhập địa chỉ giao hàng..."
                         className="w-full bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-lg px-3.5 py-2.5 text-sm text-slate-900 dark:text-white font-normal placeholder:text-slate-400 focus:outline-none focus:border-[#0E6BA8] focus:ring-2 focus:ring-[#0E6BA8]/20 transition-all resize-none"
                       />
-                      <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400 mt-1.5">
-                        <span>Đại lý phục vụ: <strong>{linkedStoreName}</strong></span>
-                        <span className="text-slate-300 dark:text-zinc-600">·</span>
-                        <span className="text-emerald-600 dark:text-emerald-400 font-medium">Đang kết nối</span>
-                      </div>
+                      {!isCustomer && <div className="flex items-center gap-1.5 text-xs text-slate-500 dark:text-zinc-400 mt-1.5"><span>Đại lý phục vụ: <strong>{linkedStoreName}</strong></span><span className="text-slate-300 dark:text-zinc-600">·</span><span className="text-emerald-600 dark:text-emerald-400 font-medium">Đang kết nối</span></div>}
                     </div>
                   </>
                 )}
 
+                {isCustomer && <div className="account-dealer-line"><Store aria-hidden="true" className="h-4 w-4 shrink-0" />{user?.store?.name ? <><span>Đại lý phục vụ: <strong>{user.store.name}</strong></span>{user.store.status && <span className="account-dealer-status">{({ ACTIVE: 'Đang hoạt động', SUSPENDED: 'Tạm ngừng', PENDING_APPROVAL: 'Chờ duyệt', REJECTED: 'Chưa được duyệt' } as Record<string, string>)[user.store.status] || user.store.status}</span>}</> : <span>Chưa có thông tin đại lý phục vụ.</span>}</div>}
+
                 {/* Form Buttons */}
-                <div className="flex items-center gap-3 pt-2">
+                <div className={isCustomer ? 'account-form-actions flex items-center gap-3 pt-2' : 'flex items-center gap-3 pt-2'}>
                   <button
                     type="submit"
                     disabled={isSaving}
@@ -961,9 +961,10 @@ export const ProfilePage: React.FC = () => {
           )}
 
           {/* =============================================================== */}
+
           {/* TAB 2: NÚT BẤM CỦA TÔI / THIẾT BỊ ĐÃ CẤP PHÁT                    */}
           {/* =============================================================== */}
-          {activeTab === 'DEVICES' && (
+          {activeTab === 'DEVICES' && !isStoreOwner && !isAdmin && (
             <motion.div
               key="tab-devices"
               initial={{ opacity: 0, y: 8 }}
@@ -982,7 +983,7 @@ export const ProfilePage: React.FC = () => {
                   to={isStoreOwner ? '/store/devices' : '/customer/home'}
                   className="text-xs font-semibold text-[#0E6BA8] hover:underline flex items-center gap-1"
                 >
-                  <span>{isStoreOwner ? 'Mở Quản lý Hạm Đội Nút Bấm' : 'Mở bảng điều khiển'}</span>
+                  <span>{isStoreOwner ? 'Mở danh sách nút bấm' : 'Mở bảng điều khiển'}</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </Link>
               </div>
@@ -1074,7 +1075,7 @@ export const ProfilePage: React.FC = () => {
           {/* =============================================================== */}
           {/* TAB 3: LỊCH SỬ ĐẶT HÀNG / ĐƠN HÀNG TỪ NÚT BẤM                   */}
           {/* =============================================================== */}
-          {activeTab === 'ORDERS' && (
+          {activeTab === 'ORDERS' && !isStoreOwner && (
             <motion.div
               key="tab-orders"
               initial={{ opacity: 0, y: 8 }}
@@ -1153,7 +1154,7 @@ export const ProfilePage: React.FC = () => {
           {/* =============================================================== */}
           {/* TAB 4: ĐỊA CHỈ ĐÃ LƯU (Customer)                                 */}
           {/* =============================================================== */}
-          {activeTab === 'ADDRESSES' && !isStoreOwner && (
+          {activeTab === 'ADDRESSES' && !isStoreOwner && !isCustomer && (
             <motion.div
               key="tab-addresses"
               initial={{ opacity: 0, y: 8 }}
@@ -1178,95 +1179,6 @@ export const ProfilePage: React.FC = () => {
                 <p className="text-[11px] text-slate-500">
                   Ghi chú cho Shipper: Giao tận cửa căn hộ, bấm chuông 1 lần.
                 </p>
-              </div>
-            </motion.div>
-          )}
-
-          {/* =============================================================== */}
-          {/* TAB 4: KHO BÃI & ĐIỂM BÁN (Store Owner)                           */}
-          {/* =============================================================== */}
-          {activeTab === 'WAREHOUSE' && isStoreOwner && (
-            <motion.div
-              key="tab-warehouse"
-              initial={{ opacity: 0, y: 8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -8 }}
-              transition={{ duration: 0.2 }}
-              className="bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-6 shadow-xs space-y-6"
-            >
-              {/* Kho hàng trung tâm */}
-              <div className="p-5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-850/50 space-y-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2.5">
-                    <div className="w-8 h-8 rounded-lg bg-[#0E6BA8]/10 text-[#0E6BA8] flex items-center justify-center">
-                      <Building2 className="w-4 h-4" />
-                    </div>
-                    <div>
-                      <h3 className="font-bold text-xs text-slate-900 dark:text-white">
-                        Kho Hàng Tổng Gia Định — Trạm Điều Phối 01
-                      </h3>
-                      <p className="text-[11px] text-slate-500">Trạm xuất hàng trung tâm</p>
-                    </div>
-                  </div>
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-semibold bg-emerald-50 text-emerald-700 border border-emerald-200">
-                    Đang mở cửa xuất hàng
-                  </span>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-xs">
-                  <div>
-                    <span className="text-[11px] text-slate-500 block">Địa chỉ kho:</span>
-                    <strong className="text-slate-900 dark:text-white font-medium">{deliveryAddress}</strong>
-                  </div>
-                  <div>
-                    <span className="text-[11px] text-slate-500 block">Hotline điều phối shipper:</span>
-                    <strong className="text-slate-900 dark:text-white font-medium tabular-nums">{storePhone}</strong>
-                  </div>
-                  <div>
-                    <span className="text-[11px] text-slate-500 block">Thời gian hoạt động:</span>
-                    <strong className="text-slate-900 dark:text-white font-medium tabular-nums">07:00 – 21:30 (Mỗi ngày)</strong>
-                  </div>
-                  <div>
-                    <span className="text-[11px] text-slate-500 block">Cam kết giao:</span>
-                    <strong className="text-slate-900 dark:text-white font-medium">Dưới 20 phút cho đơn nút bấm</strong>
-                  </div>
-                </div>
-              </div>
-
-              {/* Danh sách các cụm cư dân / Toà nhà liên kết */}
-              <div className="space-y-3">
-                <h4 className="text-xs font-bold uppercase tracking-wider text-slate-700 dark:text-zinc-300">
-                  Cụm chung cư liên kết giao hàng hỏa tốc
-                </h4>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  {[
-                    { name: 'Sunwah Pearl', address: '90 Nguyễn Hữu Cảnh', speed: '< 15 phút', activeButtons: 14 },
-                    { name: 'Vinhomes Central Park', address: '208 Nguyễn Hữu Cảnh', speed: '< 20 phút', activeButtons: 28 },
-                    { name: 'Saigon Pearl', address: '92 Nguyễn Hữu Cảnh', speed: '< 15 phút', activeButtons: 9 },
-                    { name: 'The Manor & Opal Tower', address: '91 Nguyễn Hữu Cảnh', speed: '< 20 phút', activeButtons: 11 },
-                  ].map((bld, idx) => (
-                    <div
-                      key={idx}
-                      className="p-3.5 rounded-xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-800/40 flex items-center justify-between"
-                    >
-                      <div className="space-y-0.5">
-                        <span className="font-semibold text-xs text-slate-900 dark:text-white block">
-                          {bld.name}
-                        </span>
-                        <span className="text-[11px] text-slate-400 block">{bld.address}</span>
-                      </div>
-                      <div className="text-right">
-                        <span className="inline-block px-2 py-0.5 rounded text-[10px] font-semibold bg-blue-50 text-[#0E6BA8] border border-blue-200 mb-0.5">
-                          {bld.speed}
-                        </span>
-                        <span className="text-[10px] text-slate-400 block tabular-nums">
-                          {bld.activeButtons} nút bấm
-                        </span>
-                      </div>
-                    </div>
-                  ))}
-                </div>
               </div>
             </motion.div>
           )}

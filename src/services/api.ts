@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { apiCooldownError, deferApiRequests, getApiRetryUntil, recordRateLimit, throwIfApiCoolingDown } from './request-backoff';
 
 export const resolveApiUrl = (): string => {
   if (typeof window !== 'undefined') {
@@ -37,7 +38,7 @@ export const resolveApiUrl = (): string => {
     return rawEnv.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '').replace(/\/api$/, '');
   }
 
-  return 'https://fragrant-mode-3a41.ptt24032004.workers.dev';
+  return 'https://backend-fae8.onrender.com';
 };
 
 export const API_URL = resolveApiUrl();
@@ -45,6 +46,7 @@ export const API_PREFIX = (import.meta as any).env?.VITE_API_PREFIX || '/api/v1'
 
 export const api = axios.create({
   baseURL: `${API_URL}${API_PREFIX}`,
+  timeout: 25000,
 });
 
 /**
@@ -91,70 +93,54 @@ export const isPublicAuthEndpoint = (url?: string): boolean => {
 
 let activeRefreshPromise: Promise<string | null> | null = null;
 
-/**
- * Proactively get a valid JWT, refreshing it if expired and refreshToken is present
- */
+export function apiSessionMarker(): string {
+  try { const user = JSON.parse(localStorage.getItem('smart_order_user') || '{}'); return String(user.id || user.userId || '') + ':' + (localStorage.getItem('smart_order_push_session') || ''); } catch { return ''; }
+}
+
+function clearRejectedSession(refreshToken: string | null) {
+  if (localStorage.getItem('smart_order_refresh_token') !== refreshToken) return;
+  localStorage.removeItem('smart_order_token');
+  localStorage.removeItem('smart_order_refresh_token');
+  localStorage.removeItem('smart_order_user');
+  delete api.defaults.headers.common['Authorization'];
+}
+
+// The request interceptor, 401 recovery and socket share exactly one refresh.
 export async function getOrRefreshValidToken(forceRefresh = false): Promise<string | null> {
   const token = localStorage.getItem('smart_order_token');
   const refreshToken = localStorage.getItem('smart_order_refresh_token');
-
-  if (!forceRefresh && token && !isTokenExpired(token)) {
-    return token;
-  }
-
-  // Token is missing, expired, or force refresh requested, and we have a valid refreshToken
-  if (refreshToken) {
-    if (!activeRefreshPromise) {
-      activeRefreshPromise = (async () => {
-        try {
-          const base = resolveApiUrl();
-          const res = await axios.post(`${base}${API_PREFIX}/auth/refresh`, {
-            refreshToken,
-          });
-
-          const newToken =
-            res.data?.accessToken ||
-            res.data?.token ||
-            res.data?.data?.accessToken ||
-            res.data?.data?.token;
-
-          if (newToken) {
-            localStorage.setItem('smart_order_token', newToken);
-            const newRefreshToken = res.data?.refreshToken || res.data?.data?.refreshToken;
-            if (newRefreshToken) {
-              localStorage.setItem('smart_order_refresh_token', newRefreshToken);
-            }
-            api.defaults.headers.common['Authorization'] = `Bearer ${newToken}`;
-            return newToken;
-          }
-        } catch (err: any) {
-          const status = err?.response?.status;
-          // ONLY clear tokens if server explicitly rejected refresh token (401/403/400).
-          // Do not wipe credentials on transient network drops or 5xx cold-starts.
-          if (status === 401 || status === 403 || status === 400) {
-            if (typeof window !== 'undefined') {
-              try {
-                localStorage.removeItem('smart_order_token');
-                localStorage.removeItem('smart_order_refresh_token');
-                localStorage.removeItem('smart_order_user');
-                delete api.defaults.headers.common['Authorization'];
-              } catch (_) {}
-            }
-          }
-        } finally {
-          activeRefreshPromise = null;
-        }
-        return null;
-      })();
-    }
-    return activeRefreshPromise;
-  }
-
-  return null;
+  if (!forceRefresh && token && !isTokenExpired(token)) return token;
+  if (!refreshToken || getApiRetryUntil()) return null;
+  if (activeRefreshPromise) return activeRefreshPromise;
+  const scope = apiSessionMarker();
+  activeRefreshPromise = (async () => {
+    try {
+      const base = resolveApiUrl();
+      const res = await axios.post(`${base}${API_PREFIX}/auth/refresh`, { refreshToken }, { timeout: 25000 });
+      if (apiSessionMarker() !== scope || localStorage.getItem('smart_order_refresh_token') !== refreshToken) return null;
+      if (res.data?.success === false) { deferApiRequests(15000); return null; }
+      const nextToken = res.data?.accessToken || res.data?.token || res.data?.data?.accessToken || res.data?.data?.token;
+      if (!nextToken || isTokenExpired(nextToken)) { deferApiRequests(15000); return null; }
+      localStorage.setItem('smart_order_token', nextToken);
+      const nextRefresh = res.data?.refreshToken || res.data?.data?.refreshToken;
+      if (nextRefresh) localStorage.setItem('smart_order_refresh_token', nextRefresh);
+      api.defaults.headers.common['Authorization'] = `Bearer ${nextToken}`;
+      return nextToken;
+    } catch (error: any) {
+      if (apiSessionMarker() !== scope || localStorage.getItem('smart_order_refresh_token') !== refreshToken) return null;
+      const status = error?.response?.status;
+      if (status === 401 || status === 403 || status === 400) clearRejectedSession(refreshToken);
+      else if (status === 429) recordRateLimit(error);
+      else deferApiRequests(15000);
+      return null;
+    } finally { activeRefreshPromise = null; }
+  })();
+  return activeRefreshPromise;
 }
 
 // Request interceptor to attach JWT Access Token proactively & ensure proper FormData handling
 api.interceptors.request.use(async (config) => {
+  throwIfApiCoolingDown(config);
   const currentBase = resolveApiUrl();
   if (config.baseURL && !config.baseURL.startsWith(currentBase)) {
     config.baseURL = `${currentBase}${API_PREFIX}`;
@@ -230,120 +216,41 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-let isRefreshing = false;
-let failedQueue: Array<{
-  resolve: (value?: any) => void;
-  reject: (reason?: any) => void;
-}> = [];
-
-const processQueue = (error: any, token: string | null = null) => {
-  failedQueue.forEach((prom) => {
-    if (error) {
-      prom.reject(error);
-    } else {
-      prom.resolve(token);
-    }
-  });
-  failedQueue = [];
-};
-
-// Response interceptor to handle unexpected 401 & fallback auto refresh token
+// A 429 pauses later requests; it is never retried automatically.
 api.interceptors.response.use(
-  (response) => response,
-  async (error) => {
+  response => response,
+  async error => {
     const originalRequest = error.config;
-
-    // Do not attempt refresh on auth endpoints (login, register, logout, refresh itself)
-    const isAuthEndpoint = isPublicAuthEndpoint(originalRequest?.url);
-
-    // Seamless Prefix Fallback: If 404 occurs on /api/v1, fallback to /api (or vice-versa)
+    if (error.isLocalCooldown) return Promise.reject(error);
+    if (error.response?.status === 429) { recordRateLimit(error); return Promise.reject(apiCooldownError(originalRequest)); }
+    if (!originalRequest) return Promise.reject(error);
+    const isAuthEndpoint = isPublicAuthEndpoint(originalRequest.url);
     if (error.response?.status === 404 && !originalRequest._prefixRetried && originalRequest.url) {
       originalRequest._prefixRetried = true;
       const currentBase = originalRequest.baseURL || `${API_URL}${API_PREFIX}`;
-      if (currentBase.includes('/api/v1')) {
-        originalRequest.baseURL = currentBase.replace('/api/v1', '/api');
-        return axios(originalRequest);
-      } else if (currentBase.endsWith('/api')) {
-        originalRequest.baseURL = currentBase.replace(/\/api$/, '/api/v1');
-        return axios(originalRequest);
-      }
+      if (currentBase.includes('/api/v1')) { originalRequest.baseURL = currentBase.replace('/api/v1','/api'); return axios(originalRequest); }
+      if (currentBase.endsWith('/api')) { originalRequest.baseURL = currentBase.replace(/\/api$/, '/api/v1'); return axios(originalRequest); }
     }
-
-    if (error.response?.status === 401 && !originalRequest._retry && !isAuthEndpoint) {
-      const refreshToken = localStorage.getItem('smart_order_refresh_token');
-
-      if (!refreshToken) {
-        localStorage.removeItem('smart_order_token');
-        localStorage.removeItem('smart_order_refresh_token');
-        localStorage.removeItem('smart_order_user');
-        const isPublicPath = ['/', '/shop', '/quick-setup'].includes(window.location.pathname);
-        if (!isPublicPath && !window.location.pathname.includes('/login')) {
-          window.location.href = '/login';
-        }
-        return Promise.reject(error);
-      }
-
-      if (isRefreshing) {
-        return new Promise((resolve, reject) => {
-          failedQueue.push({ resolve, reject });
-        })
-          .then((token) => {
-            if (originalRequest.headers && typeof originalRequest.headers.set === 'function') {
-              originalRequest.headers.set('Authorization', `Bearer ${token}`);
-            } else {
-              originalRequest.headers = originalRequest.headers || {};
-              originalRequest.headers['Authorization'] = `Bearer ${token}`;
-            }
-            return api(originalRequest);
-          })
-          .catch((err) => Promise.reject(err));
-      }
-
-      originalRequest._retry = true;
-      isRefreshing = true;
-
-      try {
-        const base = resolveApiUrl();
-        const res = await axios.post(`${base}${API_PREFIX}/auth/refresh`, {
-          refreshToken,
-        });
-
-        if (res.data?.success && (res.data?.accessToken || res.data?.token)) {
-          const newAccessToken = res.data.accessToken || res.data.token;
-          const newRefreshToken = res.data.refreshToken;
-
-          localStorage.setItem('smart_order_token', newAccessToken);
-          if (newRefreshToken) {
-            localStorage.setItem('smart_order_refresh_token', newRefreshToken);
-          }
-
-          api.defaults.headers.common['Authorization'] = `Bearer ${newAccessToken}`;
-          if (originalRequest.headers && typeof originalRequest.headers.set === 'function') {
-            originalRequest.headers.set('Authorization', `Bearer ${newAccessToken}`);
-          } else {
-            originalRequest.headers = originalRequest.headers || {};
-            originalRequest.headers['Authorization'] = `Bearer ${newAccessToken}`;
-          }
-
-          processQueue(null, newAccessToken);
-          return api(originalRequest);
-        } else {
-          throw new Error('Refresh failed');
-        }
-      } catch (refreshErr) {
-        processQueue(refreshErr, null);
-        localStorage.removeItem('smart_order_token');
-        localStorage.removeItem('smart_order_refresh_token');
-        localStorage.removeItem('smart_order_user');
-        if (!window.location.pathname.includes('/login')) {
-          window.location.href = '/login';
-        }
-        return Promise.reject(refreshErr);
-      } finally {
-        isRefreshing = false;
-      }
+    if (error.response?.status !== 401 || originalRequest._retry || isAuthEndpoint) return Promise.reject(error);
+    if (originalRequest._sessionMarker != null && originalRequest._sessionMarker !== apiSessionMarker()) return Promise.reject(new axios.CanceledError('Tài khoản đã thay đổi.'));
+    originalRequest._retry = true;
+    const sentToken = originalRequest.headers?.get?.('Authorization') || originalRequest.headers?.Authorization;
+    const currentToken = localStorage.getItem('smart_order_token');
+    const scope = apiSessionMarker();
+    const freshToken = currentToken && !isTokenExpired(currentToken) && sentToken !== `Bearer ${currentToken}` ? currentToken : await getOrRefreshValidToken(true);
+    if (apiSessionMarker() !== scope && localStorage.getItem('smart_order_token')) return Promise.reject(new axios.CanceledError('Tài khoản đã thay đổi.'));
+    if (freshToken) {
+      if (originalRequest.headers?.set) originalRequest.headers.set('Authorization', `Bearer ${freshToken}`);
+      else originalRequest.headers = { ...originalRequest.headers, Authorization: `Bearer ${freshToken}` };
+      return api(originalRequest);
     }
-
+    if (getApiRetryUntil()) return Promise.reject(apiCooldownError(originalRequest));
+    if (!localStorage.getItem('smart_order_refresh_token')) {
+      localStorage.removeItem('smart_order_token'); localStorage.removeItem('smart_order_user');
+      delete api.defaults.headers.common['Authorization'];
+      const publicPath = ['/', '/shop', '/quick-setup', '/phone-auth', '/login', '/register'].includes(window.location.pathname);
+      if (!publicPath) window.location.href = '/login';
+    }
     return Promise.reject(error);
   }
 );

@@ -26,6 +26,8 @@ function harness(initial = [original]) {
     setOrders: update => { state.orders = typeof update === 'function' ? update(state.orders) : update; },
     setPendingStatusUpdates: update => { state.pending = typeof update === 'function' ? update(state.pending) : update; },
     setNewOrderAlert: update => typeof update === 'function' && update(null), setChartData() {}, setLoading() {}, buildChartDataFromOrders: () => [],
+    setOrdersReady: value => { state.ready = value; },
+    setOrdersError: value => { state.readError = value; },
     toast: { success: message => state.success.push(message), error: message => state.errors.push(message) },
     publishOrderEvent: (type, payload) => state.events.push({ type, payload }),
     api: {
@@ -38,6 +40,20 @@ function harness(initial = [original]) {
   return { state, context, update: evaluate(callbacks.handleUpdateStatus, context), fetch: context.fetchOrders };
 }
 const accepted = (status, extra = {}) => ({ data: { success: true, data: { id: '1', orderStatus: status, ...extra } } });
+
+test('a failed dashboard read preserves the last orders and reports that they could not be refreshed', async () => {
+  const app = harness(); const previous = app.state.orders; const job = app.fetch();
+  app.state.reads[0].reject(new Error('Network unavailable')); await job;
+  assert.equal(app.state.orders, previous); assert.equal(app.state.ready, undefined);
+  assert.match(app.state.readError, /Chưa cập nhật/);
+});
+
+test('an invalid dashboard response cannot become a successful empty list', async () => {
+  const app = harness(); const job = app.fetch();
+  app.state.reads[0].resolve({ data: { success: false, data: [] } }); await job;
+  assert.equal(app.state.orders.length, 1); assert.equal(app.state.ready, undefined);
+  assert.match(app.state.readError, /Chưa cập nhật/);
+});
 
 test('accepting an order immediately updates both aliases so the next button appears before the API resolves', async () => {
   const app = harness(); const job = app.update('1', 'CONFIRMED');

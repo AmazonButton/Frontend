@@ -143,7 +143,7 @@
 /* Verification: calm instructions and a separate session status. */
 .customer-verification { padding: 12px 8px 28px; }
 .customer-verification > section:first-child { border-radius: 10px; border-color: var(--customer-line); background: white; padding: 24px; color: #0f172a; box-shadow: none; }
-.customer-verification > section:first-child h1 { color: #0f172a; }
+.customer-verification > section:first-child :is(h1, h2) { color: #0f172a; }
 .customer-verification > section:first-child p { color: #64748b; line-height: 1.65; }
 .customer-verification > section:first-child > div > div:first-child > div { color: #287DA8; }
 .customer-verification > section:first-child button { min-height: 44px; background: #0E6BA8; color: white; border-radius: 6px; box-shadow: none; }
@@ -157,24 +157,57 @@
 .customer-verification .verification-status > div:first-child { flex-wrap: wrap; gap: 12px; }
 .customer-verification .verification-status .grid { grid-template-columns: repeat(2, minmax(0,1fr)); gap: 16px; }
 
-/* Profile: a single navigation strip, a usable form, and focused password editing. */
-.customer-profile { max-width: 1140px; padding: 12px 8px 28px; }
+/* Account content uses the customer sidebar; store/admin presentation is unchanged. */
+.customer-profile { --account-surface: #fff; --account-muted-surface: #f8fafc; max-width: 960px; margin-inline: auto; padding: 12px 8px 32px; }
 .customer-profile .profile-layout { display: block; }
-.customer-profile .profile-navigation { margin-bottom: 28px; padding: 0 0 8px; border: 0; border-bottom: 1px solid var(--customer-line); border-radius: 0; background: transparent; box-shadow: none; }
-.customer-profile .profile-navigation nav { display: flex; gap: 4px; overflow-x: auto; align-items: center; padding-bottom: 4px; }
-.customer-profile .profile-navigation nav > div { display: none; }
-.customer-profile .profile-navigation button { width: auto; min-height: 44px; flex-shrink: 0; gap: 8px; border-radius: 6px; padding: 10px 12px; margin: 0; }
-.customer-profile .profile-navigation button > div.absolute { display: none; }
-.customer-profile .profile-navigation button > div { white-space: nowrap; }
-.customer-profile .profile-navigation button[aria-current=page] { box-shadow: none; }
-.customer-profile .profile-panel { max-width: 900px; }
-.customer-profile .profile-info, .customer-profile .profile-security { border-radius: 10px; padding: 28px; box-shadow: none; }
-.customer-profile .profile-avatar { flex-direction: row; padding-bottom: 24px; border-bottom: 1px solid var(--customer-line); align-items: center; }
-.customer-profile .profile-avatar > div:first-child { width: 64px; height: 64px; box-shadow: none; }
+.customer-profile .profile-panel { width: 100%; max-width: none; min-width: 0; }
+.customer-profile .profile-heading h1 { font-size: clamp(24px, 2.1vw, 28px); font-weight: 650; letter-spacing: -.025em; }
+.customer-profile .profile-heading > p:last-child { margin-top: 8px; max-width: 620px; font-size: 14px; line-height: 1.65; }
+.customer-profile .profile-info { padding: 0; border: 0; border-radius: 0; background: transparent; box-shadow: none; }
+.customer-profile .profile-info.account-personal-card { min-width: 0; border: 1px solid var(--customer-line); border-radius: 12px; background: var(--account-surface); padding: 24px; }
+.customer-profile .account-profile-card, .customer-profile .account-contact-card { min-width: 0; border: 0; border-radius: 0; background: transparent; padding: 0; }
+.customer-profile .account-profile-card { display: grid; grid-template-columns: 64px minmax(0, 1fr) auto; align-items: center; gap: 16px; }
+.customer-profile .account-profile-card > div:first-child { width: 64px; height: 64px; border-radius: 50%; box-shadow: none; }
+.customer-profile .account-profile-identity h2 { overflow-wrap: anywhere; font-size: 17px; font-weight: 600; line-height: 1.4; }
+.customer-profile .account-profile-identity > p { margin-top: 4px; font-size: 13px; color: #64748b; }
+.customer-profile .account-avatar-actions { min-width: 0; max-width: 272px; }
+.customer-profile .account-avatar-actions > div { flex-wrap: wrap; gap: 8px; }
+.customer-profile .account-avatar-actions :is(label, button) { min-height: 44px; display: inline-flex; align-items: center; border-radius: 8px; box-shadow: none; font-size: 13px; }
+.customer-profile .account-avatar-actions label { border: 1px solid var(--customer-line); background: transparent; color: #334155; }
+.customer-profile .account-avatar-actions label:hover { background: var(--account-muted-surface); }
+.customer-profile .account-avatar-actions label:focus-within { outline: 2px solid var(--customer-blue); outline-offset: 3px; }
+.customer-profile .account-avatar-actions > p { margin-top: 8px; font-size: 12px; line-height: 1.6; }
+.customer-profile .account-phone-notice { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; min-height: 44px; border: 0; padding: 0; background: transparent; color: #64748b; }
+.customer-profile .account-phone-notice p { flex: 1; min-width: 160px; color: #64748b; font-size: 13px; line-height: 1.6; }
+.customer-profile .account-phone-notice a { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; font-size: 13px; font-weight: 600; color: var(--customer-blue); }
+.customer-profile .account-contact-card > .grid { gap: 20px 24px; }
+.customer-profile .account-contact-card label { display: block; margin-bottom: 8px; font-size: 13px; font-weight: 600; }
+.customer-profile .account-contact-card :is(input:not([type=checkbox]):not([type=radio]), textarea) { width: 100%; min-width: 0; min-height: 44px; border-radius: 8px; font-size: 14px; line-height: 1.5; }
+.customer-profile .account-contact-card textarea { min-height: 88px; }
+.customer-profile .account-contact-card input:disabled { border-color: transparent; border-bottom-color: var(--customer-line); border-radius: 0; background: transparent; padding-left: 0; color: #64748b; }
+.customer-profile .account-dealer-line { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; color: #64748b; font-size: 13px; line-height: 1.65; }
+.customer-profile .account-dealer-line > svg { align-self: center; }
+.customer-profile .account-dealer-line strong { color: #374151; font-weight: 500; overflow-wrap: anywhere; }
+.customer-profile .account-dealer-status::before { content: '·'; margin-right: 8px; }
+.customer-profile .account-form-actions { flex-wrap: wrap; border-top: 0; padding-top: 4px; }
+.customer-profile .account-form-actions button { min-height: 44px; padding: 10px 20px; border-radius: 8px; font-size: 14px; box-shadow: none; }
+.customer-profile .account-form-actions button[type=button] { border: 1px solid var(--customer-line); background: transparent; }
+.customer-profile .profile-identity-verification { max-width: none; padding: 0; }
+.customer-profile .profile-identity-verification .verification-main { grid-template-columns: minmax(0, 1fr); }
+.customer-profile .profile-identity-verification .verification-status { order: 0; }
+.customer-profile .profile-security { border-radius: 10px; padding: 28px; box-shadow: none; }
 .customer-profile .profile-section-heading h2 { font-size: 15px; font-weight: 600; }
 .customer-profile .profile-section-heading p { margin-top: 4px; color: #64748b; font-size: 12px; }
-.customer-profile .profile-info form > div:last-child { padding-top: 20px; border-top: 1px solid var(--customer-line); flex-wrap: wrap; }
+.customer-profile .profile-info form > div:last-child { padding-top: 4px; border-top: 0; flex-wrap: wrap; }
 .customer-profile .profile-info form button { min-height: 44px; box-shadow: none; }
+@media (max-width: 767px) {
+  .customer-profile { padding: 8px 0 24px; }
+  .customer-profile .profile-info.account-personal-card { padding: 16px; }
+  .customer-profile .account-profile-card { grid-template-columns: 64px minmax(0, 1fr); gap: 16px; }
+  .customer-profile .account-avatar-actions { grid-column: 1 / -1; max-width: none; }
+  .customer-profile .account-contact-card > .grid { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  .customer-profile .account-phone-notice a { margin-left: 24px; }
+}
 .customer-security .profile-panel { max-width: 760px; }
 .customer-security .profile-security { display: flex; flex-direction: column; gap: 28px; }
 .customer-security .security-password-form { order: 1; width: 100%; max-width: 540px; margin: 0; }
@@ -225,12 +258,16 @@
   .customer-verification .verification-main { grid-template-columns: minmax(0,1fr); gap: 20px; }
   .customer-verification .verification-status, .customer-verification > section:first-child { padding: 20px; }
   .customer-verification.verification-complete .verification-status { order: 0; }
-  .customer-profile .profile-info, .customer-profile .profile-security { padding: 20px 16px; }
-  .customer-profile .profile-avatar { gap: 16px; align-items: flex-start; }
-  .customer-profile .profile-avatar > div:last-child > div { flex-wrap: wrap; }
+  .customer-profile .profile-security { padding: 20px 16px; }
   .customer-security .security-hardware { flex-direction: column; }
 }
 .dark .customer-ui { --customer-line: #27272a; color: #f8fafc; }
+.dark .customer-profile { --account-surface: #18181b; --account-muted-surface: #202024; }
+.dark .customer-profile .account-profile-identity > p, .dark .customer-profile .account-dealer-line { color: #a1a1aa; }
+.dark .customer-profile .account-avatar-actions label, .dark .customer-profile .account-dealer-line strong { color: #e2e8f0; }
+.dark .customer-profile .account-contact-card input:disabled { color: #a1a1aa; }
+.dark .customer-profile .account-phone-notice, .dark .customer-profile .account-phone-notice p { color: #a1a1aa; }
+.dark .customer-profile .account-phone-notice a { color: #7dd3fc; }
 .dark .customer-shop { background: #0c0f17; color: #f8fafc; }
 .dark .customer-shop .shop-intro { background: #131722; }
 .dark .customer-shop .shop-product { background: #131722; }
@@ -242,5 +279,5 @@
 .dark .customer-devices .device-card { background: #131722; }
 .dark .customer-devices :where(h1,h2,h3,.devices-status strong) { color: #f8fafc; }
 .dark .customer-verification > section:first-child { background: #131722; color: #f8fafc; }
-.dark .customer-verification > section:first-child h1 { color: #f8fafc; }
+.dark .customer-verification > section:first-child :is(h1, h2) { color: #f8fafc; }
 .dark .customer-ui :where(.devices-greeting,.shop-intro-description,.security-password-help,.profile-section-heading p) { color: #94a3b8; }

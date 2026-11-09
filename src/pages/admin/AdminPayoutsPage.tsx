@@ -2,7 +2,8 @@ import './admin-ui.css';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { motion, useReducedMotion } from 'framer-motion';
 import { ArrowDownToLine, Banknote, CheckCircle2, Loader2, RefreshCw, Search, Send, Wallet, XCircle } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, apiSessionMarker } from '../../services/api';
+import { useDashboardRefresh } from '../../hooks/useDashboardRefresh';
 import { card, primaryButton } from '../operations/OperationPrimitives';
 import { adminDate, adminField, adminMoney, adminSecondary, AdminWorkflowDialog, AdminWorkflowNotice, AdminWorkflowStatus } from './AdminWorkflowDialog';
 import { asItems, canPayout, checkedData, executeWithdrawalQueue, loadAdminPayoutOverview, payoutDestination, performWithdrawalAction, prepareWithdrawalBatch, withdrawalId, workflowError } from './admin-workflows.mjs';
@@ -52,6 +53,7 @@ export const AdminPayoutsPage: React.FC = () => {
     } finally { if (sequence === loadSequence.current) setLoading(false); }
   }, []);
   useEffect(() => { void load(); return () => { loadSequence.current += 1; }; }, [load]);
+  useDashboardRefresh(() => { if (!busyRef.current && !action && !batchOpen) return load(); }, 'admin-payouts:' + apiSessionMarker());
   const pending = withdrawals.filter(item => item.status === 'PENDING');
   const visible = withdrawals.filter(item => (filter === 'ALL' || item.status === filter) && `${item.withdrawalCode || ''} ${withdrawalId(item)} ${item.wallet?.store?.name || ''}`.toLowerCase().includes(query.toLowerCase()));
   const lock = () => { if (busyRef.current) return false; busyRef.current = true; setBusy(true); return true; };

@@ -75,3 +75,6 @@ Desktop.ini
 *.skill
 
 .vite/
+
+.vercel
+**/.vercel

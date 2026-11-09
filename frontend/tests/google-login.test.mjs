@@ -64,6 +64,7 @@ test('A Google access token uses the existing authenticated API contract and sto
 test('Google login never sends an inherited application JWT or tries to refresh the previous session', async () => {
   const interceptor = evaluate(callbacks.request, {
     resolveApiUrl: () => '', FormData,
+    throwIfApiCoolingDown() {}, apiSessionMarker: () => 'current-session',
     isPublicAuthEndpoint: url => url.includes('/auth/google'),
     getOrRefreshValidToken: () => assert.fail('Google login must not refresh an old app session'),
   });
@@ -81,6 +82,7 @@ test('Google login never sends an inherited application JWT or tries to refresh 
 test('Protected API calls continue to use the current application JWT', async () => {
   const interceptor = evaluate(callbacks.request, {
     resolveApiUrl: () => '', FormData,
+    throwIfApiCoolingDown() {}, apiSessionMarker: () => 'current-session',
     isPublicAuthEndpoint: () => false,
     getOrRefreshValidToken: async () => 'current-app-session',
   });

@@ -28,6 +28,8 @@ import { useSound } from '../../context/OrderSoundContext';
 import { getSocket, subscribeToCustomer } from '../../services/socket';
 import { Order } from '../../types';
 import { normalizeOrder, ORDER_EVENT, publishOrderEvent } from '../../services/order-events';
+import { dashboardOrderStatus, isActiveDashboardOrder, orderDashboardMetrics } from '../../services/dashboard-metrics';
+import { useDashboardRefresh } from '../../hooks/useDashboardRefresh';
 import { ShippingContact } from '../../components/orders/ShippingContact';
 
 type OrderFilter = 'ALL' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
@@ -38,13 +40,14 @@ const statusMeta: Record<string, { label: string; badge: string; icon: React.Ele
   CONFIRMED: { label: 'Đã tiếp nhận', badge: 'bg-sky-50 text-sky-700 border-sky-200', icon: PackageCheck },
   PREPARING: { label: 'Đang chuẩn bị', badge: 'bg-violet-50 text-violet-700 border-violet-200', icon: PackageCheck },
   OUT_FOR_DELIVERY: { label: 'Đang giao', badge: 'bg-blue-50 text-blue-700 border-blue-200', icon: Truck },
+  READY_FOR_DELIVERY: { label: 'Sẵn sàng giao', badge: 'bg-blue-50 text-blue-700 border-blue-200', icon: PackageCheck },
   SHIPPING: { label: 'Đang giao', badge: 'bg-blue-50 text-blue-700 border-blue-200', icon: Truck },
   COMPLETED: { label: 'Đã giao', badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: PackageCheck },
   CANCELLED: { label: 'Đã hủy', badge: 'bg-rose-50 text-rose-700 border-rose-200', icon: CircleAlert },
   REJECTED: { label: 'Không thể xử lý', badge: 'bg-rose-50 text-rose-700 border-rose-200', icon: CircleAlert },
 };
 
-const isActiveOrder = (status: string) => ['PENDING', 'CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY', 'SHIPPING'].includes(status);
+const isActiveOrder = isActiveDashboardOrder;
 
 const formatPrice = (value: number) => `${(value || 0).toLocaleString('vi-VN')} ₫`;
 
@@ -55,8 +58,27 @@ export const CustomerOrdersPage: React.FC = () => {
   const { playOrderChime } = useSound();
   const { user } = useAuth();
   const location = useLocation();
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [isLoading, setIsLoading] = useState(true);
+  const [orders, setOrders] = useState<Order[]>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = window.localStorage?.getItem('sob_cached_cust_orders') || window.sessionStorage?.getItem('sob_cached_cust_orders');
+        if (raw) {
+          const p = JSON.parse(raw);
+          if (Array.isArray(p) && p.length > 0) return p;
+        }
+      }
+    } catch {}
+    return [];
+  });
+  const [isLoading, setIsLoading] = useState(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const raw = window.localStorage?.getItem('sob_cached_cust_orders') || window.sessionStorage?.getItem('sob_cached_cust_orders');
+        return !raw;
+      }
+    } catch {}
+    return true;
+  });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [filter, setFilter] = useState<OrderFilter>('ALL');
@@ -92,7 +114,14 @@ export const CustomerOrdersPage: React.FC = () => {
           const data = response.data?.data ?? response.data;
           if (!Array.isArray(data)) throw new Error('Invalid order list');
           if (requests.generation !== generation) return;
-          setOrders(data.map(normalizeOrder));
+          const mappedOrders = data.map(normalizeOrder);
+          setOrders(mappedOrders);
+          try {
+            if (typeof window !== 'undefined') {
+              window.localStorage?.setItem('sob_cached_cust_orders', JSON.stringify(mappedOrders));
+              window.sessionStorage?.setItem('sob_cached_cust_orders', JSON.stringify(mappedOrders));
+            }
+          } catch {}
           setError(null);
         } catch {
           if (requests.generation !== generation) return;
@@ -183,7 +212,8 @@ export const CustomerOrdersPage: React.FC = () => {
     };
   }, [loadOrders, user?.id, user?.role, user?.customerProfileId]);
 
-  const getOrderStatus = (o: any) => o?.status || o?.orderStatus || 'PENDING';
+  const getOrderStatus = (o: any) => dashboardOrderStatus(o);
+  useDashboardRefresh(() => loadOrders(), 'customer-orders:' + user?.id + ':' + user?.customerProfileId, true);
 
   const confirmCancellation = async () => {
     if (!orderToCancel) return;
@@ -222,11 +252,7 @@ export const CustomerOrdersPage: React.FC = () => {
     }
   };
 
-  const summary = useMemo(() => ({
-    total: orders.length,
-    active: orders.filter((order) => isActiveOrder(getOrderStatus(order))).length,
-    completed: orders.filter((order) => getOrderStatus(order) === 'COMPLETED').length,
-  }), [orders]);
+  const summary = useMemo(() => orderDashboardMetrics(orders), [orders]);
 
   const filteredOrders = useMemo(() => {
     const normalizedQuery = query.trim().toLocaleLowerCase('vi-VN');
@@ -307,7 +333,7 @@ export const CustomerOrdersPage: React.FC = () => {
               <div className="flex items-center justify-between">
                 <div>
                   <p className="text-xs font-medium text-slate-500 dark:text-zinc-400">{item.label}</p>
-                  <p className="mt-1 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">{item.value}</p>
+                  <p className="mt-1 text-2xl font-bold tracking-tight text-slate-900 dark:text-white">{isLoading || (error && !orders.length) ? '—' : item.value}</p>
                 </div>
                 <div className={`w-9 h-9 rounded-xl flex items-center justify-center ${item.tone}`}><Icon className="w-4.5 h-4.5" /></div>
               </div>
@@ -352,7 +378,7 @@ export const CustomerOrdersPage: React.FC = () => {
 
         <div className="p-3 sm:p-4">
           {!isLoading && error && orders.length > 0 && <p role="status" className="mb-3 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">{error}</p>}
-          {isLoading ? (
+          {isLoading && orders.length === 0 ? (
             <div className="py-20 flex flex-col items-center text-center">
               <RefreshCw className="w-5 h-5 text-[#287DA8] animate-spin" />
               <p className="mt-3 text-sm font-medium text-slate-600 dark:text-zinc-300">Đang tải đơn hàng của bạn</p>

@@ -80,8 +80,9 @@ export const rentalsService = {
       }
     } catch (e) {
       console.warn('Could not fetch packages from API:', e);
+      throw e;
     }
-    return [];
+    throw new Error('Dữ liệu danh mục gói thuê không hợp lệ.');
   },
 
   /**
@@ -150,8 +151,9 @@ export const rentalsService = {
       }
     } catch (e) {
       console.warn('Could not fetch my rentals:', e);
+      throw e;
     }
-    return [];
+    throw new Error('Dữ liệu hợp đồng thuê không hợp lệ.');
   },
 
   /**

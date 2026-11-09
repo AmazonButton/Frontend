@@ -5,9 +5,11 @@ import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { api } from '../../services/api';
 import { toast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
+import { deviceDashboardMetrics, formatMetric } from '../../services/dashboard-metrics';
+import { useDashboardRefresh } from '../../hooks/useDashboardRefresh';
 import { DeviceProductRemoval } from '../../components/devices/DeviceProductRemoval';
 import { subscribeToStore, getSocket } from '../../services/socket';
-import { Device, Product, FleetStats, DeviceTelemetry, DeviceAuditLog } from '../../types';
+import { Device, Product, DeviceTelemetry, DeviceAuditLog } from '../../types';
 import { QRCodeSVG } from 'qrcode.react';
 import {
   Cpu,
@@ -244,13 +246,7 @@ export const StoreDevicesPage: React.FC = () => {
   }, []);
   const [devices, setDevices] = useState<Device[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
-  const [fleetStats, setFleetStats] = useState<FleetStats>({
-    total: 0,
-    online: 0,
-    offline: 0,
-    lowBattery: 0,
-    unconfigured: 0,
-  });
+  const [devicesReady, setDevicesReady] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -538,20 +534,18 @@ export const StoreDevicesPage: React.FC = () => {
     const results = await Promise.allSettled([
         api.get('/devices'),
         api.get('/products'),
-        api.get('/devices/fleet/stats'),
-    ]);
-    const [deviceResult, productResult, statsResult] = results;
-    const failedRequests = results.filter((result) => result.status === 'rejected');
 
-    if (deviceResult.status === 'fulfilled' && deviceResult.value.data?.success) {
-      setDevices(deviceResult.value.data.data);
+    ]);
+    const [deviceResult, productResult] = results;
+    const failedRequests = results.filter((result) => result.status === 'rejected' || result.value.data?.success !== true || !Array.isArray(result.value.data.data));
+
+    if (deviceResult.status === 'fulfilled' && deviceResult.value.data?.success && Array.isArray(deviceResult.value.data.data)) {
+      setDevices(deviceResult.value.data.data); setDevicesReady(true);
     }
-    if (productResult.status === 'fulfilled' && productResult.value.data?.success) {
+    if (productResult.status === 'fulfilled' && productResult.value.data?.success && Array.isArray(productResult.value.data.data)) {
       setProducts(productResult.value.data.data);
     }
-    if (statsResult.status === 'fulfilled' && statsResult.value.data?.success) {
-      setFleetStats(statsResult.value.data.data);
-    }
+
 
     if (failedRequests.length > 0) {
       setLoadError('Một phần dữ liệu hạm đội chưa tải được. Hệ thống sẽ tự thử lại.');
@@ -941,6 +935,8 @@ export const StoreDevicesPage: React.FC = () => {
   };
 
   // Filtered devices
+  useDashboardRefresh(() => fetchData(), 'store-devices:' + user?.id + ':' + user?.storeId, true);
+  const deviceMetrics = deviceDashboardMetrics(devices);
   const filteredDevices = devices.filter((device) => {
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch =
@@ -968,7 +964,7 @@ export const StoreDevicesPage: React.FC = () => {
         <div>
           <div className="flex items-center gap-2">
             <h1 className="text-base font-bold tracking-tight text-zinc-900 dark:text-zinc-100">
-              Quản Trị Hạm Đội Nút Bấm
+              Danh sách nút bấm
             </h1>
             <span className="flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
@@ -1084,7 +1080,7 @@ export const StoreDevicesPage: React.FC = () => {
           </span>
           <div className="mt-1 flex items-baseline gap-1.5">
             <span className="text-xl font-bold font-mono text-zinc-900 dark:text-zinc-100">
-              {fleetStats.total}
+              {formatMetric(!devicesReady ? null : (deviceMetrics.total))}
             </span>
             <span className="text-[10.5px] font-mono text-zinc-400">nút</span>
           </div>
@@ -1093,27 +1089,27 @@ export const StoreDevicesPage: React.FC = () => {
         <div className="p-3 sm:px-4 sm:py-2.5 flex flex-col justify-between">
           <div className="flex items-center justify-between">
             <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-              Đang Online
+              Đang hoạt động
             </span>
             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
           </div>
           <div className="mt-1 flex items-baseline gap-1.5">
             <span className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
-              {fleetStats.online}
+              {formatMetric(!devicesReady ? null : (deviceMetrics.active))}
             </span>
-            <span className="text-[10.5px] font-mono text-zinc-400">&lt;25s beat</span>
+            <span className="text-[10.5px] font-mono text-zinc-400">Theo trạng thái hệ thống</span>
           </div>
         </div>
 
         <div className="p-3 sm:px-4 sm:py-2.5 flex flex-col justify-between">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-            Deep Sleep
+            Chưa hoạt động
           </span>
           <div className="mt-1 flex items-baseline gap-1.5">
             <span className="text-xl font-bold font-mono text-zinc-700 dark:text-zinc-300">
-              {fleetStats.offline}
+              {formatMetric(!devicesReady ? null : (deviceMetrics.total - deviceMetrics.active))}
             </span>
-            <span className="text-[10.5px] font-mono text-zinc-400">&lt;15µA</span>
+            <span className="text-[10.5px] font-mono text-zinc-400">Theo trạng thái hệ thống</span>
           </div>
         </div>
 
@@ -1124,17 +1120,17 @@ export const StoreDevicesPage: React.FC = () => {
             </span>
             <span
               className={`w-1.5 h-1.5 rounded-full ${
-                fleetStats.lowBattery > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
+                deviceMetrics.lowBattery > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
               }`}
             ></span>
           </div>
           <div className="mt-1 flex items-baseline gap-1.5">
             <span
               className={`text-xl font-bold font-mono ${
-                fleetStats.lowBattery > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-900 dark:text-zinc-100'
+                deviceMetrics.lowBattery > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-900 dark:text-zinc-100'
               }`}
             >
-              {fleetStats.lowBattery}
+              {formatMetric(!devicesReady ? null : (deviceMetrics.batteryReadings ? deviceMetrics.lowBattery : null))}
             </span>
             <span className="text-[10.5px] font-mono text-zinc-400">&lt;20%</span>
           </div>
@@ -1142,15 +1138,15 @@ export const StoreDevicesPage: React.FC = () => {
 
         <div className="p-3 sm:px-4 sm:py-2.5 flex flex-col justify-between col-span-2 sm:col-span-1">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-            Chưa Gán SKU
+            Chưa gán sản phẩm
           </span>
           <div className="mt-1 flex items-baseline gap-1.5">
             <span
               className={`text-xl font-bold font-mono ${
-                fleetStats.unconfigured > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-900 dark:text-zinc-100'
+                deviceMetrics.unconfigured > 0 ? 'text-amber-600 dark:text-amber-400' : 'text-zinc-900 dark:text-zinc-100'
               }`}
             >
-              {fleetStats.unconfigured}
+              {formatMetric(!devicesReady ? null : (deviceMetrics.unconfigured))}
             </span>
             <span className="text-[10.5px] font-mono text-zinc-400">chờ gán</span>
           </div>
@@ -1446,93 +1442,9 @@ export const StoreDevicesPage: React.FC = () => {
                                   <span>Chỉnh sửa thông tin</span>
                                 </button>
 
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setAssigningDevice(device);
-                                    setSelectedProductId(assignedProduct?.id || '');
-                                    setAssignCustomName(device.customName || '');
-                                    setOpenMenuId(null);
-                                  }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
-                                >
-                                  <Tag className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
-                                  <span>Đổi SKU sản phẩm</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    setQrModalDevice(device);
-                                    setOpenMenuId(null);
-                                  }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
-                                >
-                                  <QrCode className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
-                                  <span>Xem & In Mã QR</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    handleInspect(device);
-                                    setOpenMenuId(null);
-                                  }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
-                                >
-                                  <Activity className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
-                                  <span>Telemetry & Nhật ký</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    handleOpenBehaviorModal(device);
-                                    setOpenMenuId(null);
-                                  }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer text-[#0E6BA8] dark:text-sky-400 font-medium"
-                                >
-                                  <Sliders className="w-3.5 h-3.5 text-[#0E6BA8] dark:text-sky-400" strokeWidth={1.5} />
-                                  <span>Hành vi nút (Behavior)</span>
-                                </button>
                               </div>
 
                               <div className="py-0.5">
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    handleUpdateBattery(device.deviceId, 100);
-                                    setOpenMenuId(null);
-                                  }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
-                                >
-                                  <Battery className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
-                                  <span>Sạc pin đầy 100%</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    handleExtendWarranty(device.deviceId, 12);
-                                    setOpenMenuId(null);
-                                  }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
-                                >
-                                  <Clock className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
-                                  <span>Gia hạn (+1 năm)</span>
-                                </button>
-
-                                <button
-                                  type="button"
-                                  onClick={() => {
-                                    handleRepair(device);
-                                    setOpenMenuId(null);
-                                  }}
-                                  className="w-full px-3 py-1.5 text-left hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 active:scale-[0.98] transition-all cursor-pointer"
-                                >
-                                  <RefreshCw className="w-3.5 h-3.5 text-zinc-400" strokeWidth={1.5} />
-                                  <span>Tái cấp Token ghép nối</span>
-                                </button>
 
                                 <button
                                   type="button"

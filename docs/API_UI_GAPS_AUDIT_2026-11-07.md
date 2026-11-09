@@ -1,5 +1,7 @@
 # Đối chiếu API backend với giao diện frontend — 07/11/2026
 
+> Đây là bản kiểm kê trước triển khai. Trạng thái sau khi bổ sung giao diện và các điều kiện còn thiếu nằm trong [báo cáo triển khai](API_UI_IMPLEMENTATION_2026-11-07.md).
+
 ## Phạm vi và cách đọc
 
 - Đọc controller NestJS trong `backend/src`, đối chiếu lời gọi HTTP, service, nơi sử dụng service và màn hình/route của cả `src` lẫn `frontend/src`.

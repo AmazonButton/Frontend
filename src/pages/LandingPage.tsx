@@ -159,6 +159,19 @@ const FEATURED_PRODUCTS = [
   },
 ];
 
+const getInitialStorefrontCatalog = (): any[] => {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const raw = window.sessionStorage.getItem('sob_cached_catalog_v1') || window.localStorage?.getItem?.('sob_cached_catalog_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    }
+  } catch {}
+  return [];
+};
+
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
   const prefersReducedMotion = useReducedMotion();
@@ -167,8 +180,9 @@ export const LandingPage: React.FC = () => {
   const [isPlaying, setIsPlaying] = useState(true);
   const [isMuted, setIsMuted] = useState(true);
   const [addedProductId, setAddedProductId] = useState<string | null>(null);
-  const [storefrontProducts, setStorefrontProducts] = useState<any[]>([]);
-  const [productsLoading, setProductsLoading] = useState(true);
+  const cachedCatalog = getInitialStorefrontCatalog();
+  const [storefrontProducts, setStorefrontProducts] = useState<any[]>(cachedCatalog);
+  const [productsLoading, setProductsLoading] = useState(cachedCatalog.length === 0);
   const [cartCount, setCartCount] = useState(0);
   const [cartPulse, setCartPulse] = useState(false);
   const [productSearch, setProductSearch] = useState('');
@@ -188,6 +202,12 @@ export const LandingPage: React.FC = () => {
             : (typeof p.category === 'string' ? p.category : 'Nhu yếu phẩm'),
         }));
         setStorefrontProducts(list);
+        try {
+          if (typeof window !== 'undefined' && window.sessionStorage) {
+            window.sessionStorage.setItem('sob_cached_catalog_v1', JSON.stringify(list));
+            window.localStorage?.setItem?.('sob_cached_catalog_v1', JSON.stringify(list));
+          }
+        } catch {}
       })
       .catch(() => { /* Keep the last loaded catalog during a transient failure. */ })
       .finally(() => { if (request === catalogRequest.current) setProductsLoading(false); });
@@ -363,6 +383,7 @@ export const LandingPage: React.FC = () => {
                     loop
                     muted={isMuted}
                     playsInline
+                    preload="metadata"
                     onPlay={() => setIsPlaying(true)}
                     onPause={() => setIsPlaying(false)}
                     className="w-full aspect-[16/9] object-cover block"
@@ -486,6 +507,44 @@ export const LandingPage: React.FC = () => {
               </div>
             </motion.li>
           </ol>
+        </div>
+      </section>
+
+      {/* ========================================================================= */}
+      {/* 5. SMART ORDER BUTTON PARTNER CTA SECTION (EDITORIAL PRODUCT-LED B2B)    */}
+      {/* ========================================================================= */}
+      <section id="partners" className="landing-partners scroll-mt-20 border-b border-slate-200/80 bg-white py-12 dark:border-zinc-800 dark:bg-zinc-950/40 sm:py-14">
+        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+          <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#287DA8] dark:text-sky-400">ĐỐI TÁC ĐỒNG HÀNH</p>
+          <h2 className="mt-2 max-w-4xl text-2xl font-bold leading-tight tracking-tight text-[#172234] dark:text-white sm:text-[1.8rem]">
+            Cùng các thương hiệu uy tín <span className="text-[#1B84D4] dark:text-sky-400">đưa nhu yếu phẩm đến mọi nhà.</span>
+          </h2>
+          <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600 dark:text-slate-400 sm:text-base">
+            Smart Order Button hợp tác với các nhà cung cấp và đơn vị phân phối uy tín, đảm bảo nguồn hàng chất lượng, minh bạch và ổn định.
+          </p>
+
+          <div className="landing-partner-carousel mt-5 flex min-w-0 items-center gap-2 sm:mt-6 sm:gap-3">
+            <button type="button" onClick={scrollBrandsLeft} aria-controls="partner-logo-carousel" aria-label="Cuộn danh sách đối tác sang trái" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:border-[#287DA8] hover:bg-slate-50 hover:text-[#287DA8] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#287DA8] dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300 dark:hover:bg-zinc-800">
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+            <div id="partner-logo-carousel" ref={brandScrollRef} role="list" aria-label="Logo các đối tác" className="min-w-0 flex-1 overflow-x-auto no-scrollbar scroll-smooth py-1">
+              <div className="flex w-max items-center gap-5 sm:gap-7">
+                {PARTNER_BRANDS.map((brand) => (
+                  <div key={brand.name} role="listitem" className="grid h-20 w-[132px] shrink-0 place-items-center px-2 sm:h-24 sm:w-[160px] sm:px-3">
+                    <img src={brand.logo} alt={brand.alt} className="max-h-12 max-w-full object-contain sm:max-h-14" loading="lazy" />
+                  </div>
+                ))}
+              </div>
+            </div>
+            <button type="button" onClick={scrollBrandsRight} aria-controls="partner-logo-carousel" aria-label="Cuộn danh sách đối tác sang phải" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:border-[#287DA8] hover:bg-slate-50 hover:text-[#287DA8] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#287DA8] dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300 dark:hover:bg-zinc-800">
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          </div>
+          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2.5 text-sm font-medium leading-5 text-slate-600 dark:text-slate-300 sm:mt-5">
+            <span className="inline-flex items-center gap-2"><CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />Hàng hóa chính hãng</span>
+            <span className="inline-flex items-center gap-2"><CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />Nguồn cung ổn định</span>
+            <span className="inline-flex items-center gap-2"><CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />Dịch vụ chuyên nghiệp</span>
+          </div>
         </div>
       </section>
 
@@ -627,44 +686,6 @@ export const LandingPage: React.FC = () => {
             })}
           </div>}
 
-        </div>
-      </section>
-
-      {/* ========================================================================= */}
-      {/* 5. SMART ORDER BUTTON PARTNER CTA SECTION (EDITORIAL PRODUCT-LED B2B)    */}
-      {/* ========================================================================= */}
-      <section id="partners" className="landing-partners scroll-mt-20 border-b border-slate-200/80 bg-white py-12 dark:border-zinc-800 dark:bg-zinc-950/40 sm:py-14">
-        <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
-          <p className="text-xs font-bold uppercase tracking-[0.12em] text-[#287DA8] dark:text-sky-400">ĐỐI TÁC ĐỒNG HÀNH</p>
-          <h2 className="mt-2 max-w-4xl text-2xl font-bold leading-tight tracking-tight text-[#172234] dark:text-white sm:text-[1.8rem]">
-            Cùng các thương hiệu uy tín <span className="text-[#1B84D4] dark:text-sky-400">đưa nhu yếu phẩm đến mọi nhà.</span>
-          </h2>
-          <p className="mt-2 max-w-3xl text-sm leading-relaxed text-slate-600 dark:text-slate-400 sm:text-base">
-            Smart Order Button hợp tác với các nhà cung cấp và đơn vị phân phối uy tín, đảm bảo nguồn hàng chất lượng, minh bạch và ổn định.
-          </p>
-
-          <div className="landing-partner-carousel mt-5 flex min-w-0 items-center gap-2 sm:mt-6 sm:gap-3">
-            <button type="button" onClick={scrollBrandsLeft} aria-controls="partner-logo-carousel" aria-label="Cuộn danh sách đối tác sang trái" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:border-[#287DA8] hover:bg-slate-50 hover:text-[#287DA8] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#287DA8] dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300 dark:hover:bg-zinc-800">
-              <ChevronLeft className="h-5 w-5" />
-            </button>
-            <div id="partner-logo-carousel" ref={brandScrollRef} role="list" aria-label="Logo các đối tác" className="min-w-0 flex-1 overflow-x-auto no-scrollbar scroll-smooth py-1">
-              <div className="flex w-max items-center gap-5 sm:gap-7">
-                {PARTNER_BRANDS.map((brand) => (
-                  <div key={brand.name} role="listitem" className="grid h-20 w-[132px] shrink-0 place-items-center px-2 sm:h-24 sm:w-[160px] sm:px-3">
-                    <img src={brand.logo} alt={brand.alt} className="max-h-12 max-w-full object-contain sm:max-h-14" loading="lazy" />
-                  </div>
-                ))}
-              </div>
-            </div>
-            <button type="button" onClick={scrollBrandsRight} aria-controls="partner-logo-carousel" aria-label="Cuộn danh sách đối tác sang phải" className="grid h-11 w-11 shrink-0 place-items-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:border-[#287DA8] hover:bg-slate-50 hover:text-[#287DA8] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#287DA8] dark:border-zinc-700 dark:bg-zinc-900 dark:text-slate-300 dark:hover:bg-zinc-800">
-              <ChevronRight className="h-5 w-5" />
-            </button>
-          </div>
-          <div className="mt-4 flex flex-wrap items-center gap-x-5 gap-y-2.5 text-sm font-medium leading-5 text-slate-600 dark:text-slate-300 sm:mt-5">
-            <span className="inline-flex items-center gap-2"><CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />Hàng hóa chính hãng</span>
-            <span className="inline-flex items-center gap-2"><CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />Nguồn cung ổn định</span>
-            <span className="inline-flex items-center gap-2"><CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-emerald-600 dark:text-emerald-400" />Dịch vụ chuyên nghiệp</span>
-          </div>
         </div>
       </section>
 

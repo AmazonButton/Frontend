@@ -31,10 +31,24 @@ const loadCart = (): CartLine[] => {
   }
 };
 
+const getInitialStorefrontCatalog = (): Product[] => {
+  try {
+    if (typeof window !== 'undefined' && window.sessionStorage) {
+      const raw = window.sessionStorage.getItem('sob_cached_catalog_v1') || window.localStorage?.getItem?.('sob_cached_catalog_v1');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    }
+  } catch {}
+  return [];
+};
+
 export const ShopPage: React.FC = () => {
   const { user } = useAuth();
   const location = useLocation();
-  const [products, setProducts] = useState<Product[]>([]);
+  const cachedProducts = getInitialStorefrontCatalog();
+  const [products, setProducts] = useState<Product[]>(cachedProducts);
   const [cart, setCart] = useState<CartLine[]>(loadCart);
   const [search, setSearch] = useState(() => {
     if (typeof window !== 'undefined') {
@@ -43,7 +57,7 @@ export const ShopPage: React.FC = () => {
     return '';
   });
   const [category, setCategory] = useState('Tất cả');
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(cachedProducts.length === 0);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -165,13 +179,21 @@ export const ShopPage: React.FC = () => {
             : (typeof p.category === 'string' ? p.category : 'Nhu yếu phẩm'),
         }));
         setProducts(list);
+        if (!search.trim()) {
+          try {
+            if (typeof window !== 'undefined' && window.sessionStorage) {
+              window.sessionStorage.setItem('sob_cached_catalog_v1', JSON.stringify(list));
+              window.localStorage?.setItem?.('sob_cached_catalog_v1', JSON.stringify(list));
+            }
+          } catch {}
+        }
       })
       .catch(() => { setError('Không tải được sản phẩm. Vui lòng thử lại sau.'); })
       .finally(() => { setLoading(false); });
   }, [search]);
 
   useEffect(() => {
-    setLoading(true);
+    if (products.length === 0) setLoading(true);
     fetchCatalog();
   }, [fetchCatalog]);
 

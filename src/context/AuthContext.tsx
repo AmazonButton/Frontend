@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import { User } from '../types';
-import { api, isTokenExpired, getOrRefreshValidToken } from '../services/api';
+import { api, apiSessionMarker, isTokenExpired, getOrRefreshValidToken } from '../services/api';
+import { apiCooldownError, getApiRetryUntil } from '../services/request-backoff';
 import { updateSocketAuth, clearSocketSubscriptions } from '../services/socket';
 import { clearPushToken, cleanupBrowserPushAfterLogout, currentPushUserId, invalidatePushSession, readPushOwner, readPushToken, unregisterWebPush } from '../services/web-push-state';
 import axios from 'axios';
@@ -11,6 +12,7 @@ interface AuthContextType {
   refreshToken: string | null;
   isLoading: boolean;
   isAuthenticated: boolean;
+  sessionError: string | null;
   login: (newToken: string, userData: User, newRefreshToken?: string) => void;
   logout: () => void | Promise<void>;
   refreshUser: () => Promise<void>;
@@ -19,6 +21,7 @@ interface AuthContextType {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const [sessionError, setSessionError] = useState<string | null>(null);
   const [user, setUser] = useState<User | null>(() => {
     const savedToken = localStorage.getItem('smart_order_token');
     const saved = localStorage.getItem('smart_order_user');
@@ -156,8 +159,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // Proactively verify or refresh the token BEFORE calling /auth/me
+    const sessionScope = apiSessionMarker();
     const validToken = await getOrRefreshValidToken();
+    if (apiSessionMarker() !== sessionScope && localStorage.getItem('smart_order_token')) return;
     if (!validToken) {
+      if (localStorage.getItem('smart_order_refresh_token')) {
+        setSessionError(getApiRetryUntil() ? apiCooldownError().message : 'Chưa kết nối được máy chủ. Vui lòng thử lại sau.');
+        setIsLoading(false);
+        return;
+      }
       localStorage.removeItem('smart_order_token');
       localStorage.removeItem('smart_order_refresh_token');
       localStorage.removeItem('smart_order_user');
@@ -173,10 +183,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const res = await api.get('/auth/me');
       if (res.data?.success && res.data?.data) {
+        if (apiSessionMarker() !== sessionScope) return;
+        setSessionError(null);
         const u = res.data.data;
+        const rawStore = u.store || (Array.isArray(u.ownedStores) ? u.ownedStores[0] : null);
         const normalizedUser: User = {
           ...u,
           customerProfileId: u.customerProfileId || u.customerProfile?.customerId || u.customerProfile?.id || null,
+          store: rawStore ? {
+            ...rawStore,
+            id: String(rawStore.storeId || rawStore.id || ''),
+            storeId: String(rawStore.storeId || rawStore.id || ''),
+            status: String(rawStore.status || 'ACTIVE'),
+          } : u.store || null,
         };
         setUser(normalizedUser);
         localStorage.setItem('smart_order_user', JSON.stringify(normalizedUser));
@@ -186,6 +205,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         updateSocketAuth(validToken);
       }
     } catch (e: any) {
+      if (e.response?.status === 429) setSessionError(e.response?.data?.message || 'Máy chủ đang bận. Vui lòng thử lại sau.');
       if (e.response?.status === 401) {
         // If /auth/me was rejected with 401, token is invalidated on server.
         // Clean local state directly; do not call /auth/logout with a rejected token.
@@ -208,6 +228,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [refreshUser]);
 
   const login = (newToken: string, userData: User, newRefreshToken?: string) => {
+    setSessionError(null);
     const previousPushOwner = readPushOwner();
     invalidatePushSession();
     if (previousPushOwner && previousPushOwner !== userData.id) {
@@ -223,6 +244,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setRefreshToken(newRefreshToken);
     }
 
+    const rawStore = userData.store || ((userData as any).ownedStores && (userData as any).ownedStores[0]) || null;
     const normalizedUser: User = {
       ...userData,
       customerProfileId:
@@ -230,6 +252,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         (userData as any).customerProfile?.customerId ||
         (userData as any).customerProfile?.id ||
         null,
+      store: rawStore ? {
+        ...rawStore,
+        id: String(rawStore.storeId || rawStore.id || ''),
+        storeId: String(rawStore.storeId || rawStore.id || ''),
+        status: String(rawStore.status || 'ACTIVE'),
+      } : userData.store || null,
     };
 
     clearSocketSubscriptions();
@@ -249,6 +277,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         refreshToken,
         isLoading,
         isAuthenticated,
+        sessionError,
         login,
         logout,
         refreshUser,

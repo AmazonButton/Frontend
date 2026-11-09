@@ -1,4 +1,8 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useDashboardRefresh } from '../../hooks/useDashboardRefresh';
+import { useAuth } from '../../context/AuthContext';
+import { formatMetric } from '../../services/dashboard-metrics';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ArrowDownToLine,
@@ -6,15 +10,11 @@ import {
   RefreshCw,
   Wallet,
   CreditCard,
-  Building2,
   CheckCircle2,
   Clock,
   AlertCircle,
   ArrowUpRight,
   ShieldCheck,
-  ChevronDown,
-  Search,
-  Check,
   Sparkles,
   ExternalLink,
 } from 'lucide-react';
@@ -24,92 +24,116 @@ import {
   type WalletTransactionItem,
   type WithdrawalItem,
 } from '../../services/wallet.service';
-import {
-  type VietnameseBank,
-} from '../../data/vietnameseBanks';
 import { api } from '../../services/api';
+import { createStoreFinanceFlow, financeStoreId, type FinanceBankAccount } from '../../services/store-finance-flow';
+import { readPendingWithdrawal, withdrawalRecipient, withdrawalStatusLabel, type PendingWithdrawal } from '../../services/store-withdrawals';
+
+const bankFlow = createStoreFinanceFlow(api);
 
 const formatVND = (value = 0) => `${Number(value).toLocaleString('vi-VN')} ₫`;
 
 const QUICK_AMOUNTS = [200000, 500000, 1000000, 2000000, 5000000];
 
 export const StoreWalletPage: React.FC = () => {
+  const { user } = useAuth();
+  return <StoreWalletWorkspace key={`${user?.id || ''}:${financeStoreId(user) || ''}`} />;
+};
+
+export const StoreWalletWorkspace: React.FC = () => {
+  const { user } = useAuth();
+  const storeId = financeStoreId(user);
+  const canManageBanks = user?.role === 'STORE_OWNER';
+  const canWithdraw = canManageBanks || user?.role === 'STORE_MANAGER';
+  const mounted = useRef(true);
+  const refreshRequest = useRef(0);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; refreshRequest.current++; }; }, []);
   const [wallet, setWallet] = useState<StoreWalletInfo | null>(null);
   const [transactions, setTransactions] = useState<WalletTransactionItem[]>([]);
   const [withdrawals, setWithdrawals] = useState<WithdrawalItem[]>([]);
 
-  // Bank form state
-  const [selectedBank, setSelectedBank] = useState<VietnameseBank | null>(null);
-  const [banks, setBanks] = useState<VietnameseBank[]>([]);
-  const [bankSearch, setBankSearch] = useState('');
-  const [isBankDropdownOpen, setIsBankDropdownOpen] = useState(false);
-  const [accountNumber, setAccountNumber] = useState('');
-  const [accountHolderName, setAccountHolderName] = useState('');
-  const [lookingUpAccount, setLookingUpAccount] = useState(false);
-  const accountLookupRequestId = useRef(0);
-  const [isEditingBank, setIsEditingBank] = useState(false);
-
-  // Withdrawal form state
-  const [amount, setAmount] = useState('');
-  const [withdrawalNote, setWithdrawalNote] = useState('');
+  const [recipient, setRecipient] = useState<FinanceBankAccount | null>(null);
+  const [accountsError, setAccountsError] = useState('');
+  const pendingStorageKey = 'smart_order_withdrawal:' + user?.id + ':' + storeId;
+  const [recovery] = useState(() => {
+    try { return { pending: readPendingWithdrawal(sessionStorage.getItem(pendingStorageKey)), error: '' }; }
+    catch { return { pending: null, error: 'Chưa đọc được yêu cầu rút tiền đang chờ. Vui lòng kiểm tra bộ nhớ trình duyệt hoặc liên hệ hỗ trợ trước khi tạo lệnh khác.' }; }
+  });
+  const [pending, setPending] = useState<PendingWithdrawal | null>(recovery.pending);
+  const pendingRef = useRef(pending);
+  const [storageError, setStorageError] = useState(recovery.error);
+  const withdrawingRef = useRef(false);
+  const [amount, setAmount] = useState(pending ? String(pending.amount) : '');
+  const savePending = (request: PendingWithdrawal | null) => {
+    if (request) sessionStorage.setItem(pendingStorageKey, JSON.stringify(request));
+    else sessionStorage.removeItem(pendingStorageKey);
+    pendingRef.current = request; setPending(request);
+  };
 
   // UI state
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
+  const [walletReady, setWalletReady] = useState(false);
+  const [loadedAt, setLoadedAt] = useState<string | null>(null);
+  const [transactionPage, setTransactionPage] = useState(1);
+  const [withdrawalPage, setWithdrawalPage] = useState(1);
+  const [transactionPagination, setTransactionPagination] = useState<any>(null);
+  const [withdrawalPagination, setWithdrawalPagination] = useState<any>(null);
   const [withdrawing, setWithdrawing] = useState(false);
   const [syncingId, setSyncingId] = useState<string | number | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [historyWarning, setHistoryWarning] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<'WITHDRAWALS' | 'TRANSACTIONS'>('WITHDRAWALS');
+  const [selectedWithdrawal, setSelectedWithdrawal] = useState('');
+  const [withdrawalDetail, setWithdrawalDetail] = useState<WithdrawalItem | null>(null);
+  const [detailError, setDetailError] = useState('');
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailRefresh, setDetailRefresh] = useState(0);
+  useEffect(() => {
+    if (!selectedWithdrawal || !storeId) return;
+    let stopped = false;
+    setDetailLoading(true); setDetailError(''); setWithdrawalDetail(null);
+    void walletService.getWithdrawal(selectedWithdrawal, storeId).then(result => {
+      if (!stopped) setWithdrawalDetail(result);
+    }).catch(error => {
+      if (!stopped) setDetailError(error?.response?.data?.message || error.message || 'Chưa tải được chi tiết lệnh rút tiền.');
+    }).finally(() => { if (!stopped) setDetailLoading(false); });
+    return () => { stopped = true; };
+  }, [selectedWithdrawal, storeId, loadedAt, detailRefresh]);
 
-  // Filter banks by search
-  const filteredBanks = useMemo(() => {
-    if (!bankSearch.trim()) return banks;
-    const q = bankSearch.toLowerCase().trim();
-    return banks.filter(
-      (b) =>
-        b.shortName.toLowerCase().includes(q) ||
-        b.code.toLowerCase().includes(q) ||
-        b.name.toLowerCase().includes(q) ||
-        b.bin.includes(q)
-    );
-  }, [bankSearch, banks]);
-
-  const handleSelectBank = (bank: VietnameseBank) => {
-    if (selectedBank?.bin === bank.bin) return;
-    accountLookupRequestId.current += 1;
-    setSelectedBank(bank);
-    setAccountNumber('');
-    setAccountHolderName('');
-    setLookingUpAccount(false);
-    setError(null);
-  };
-
-  const refresh = useCallback(async () => {
-    setError(null);
+  const refresh = useCallback(async (syncBankForm = true) => {
+    const request = ++refreshRequest.current;
+    setRefreshing(true);
+    if (syncBankForm) setError(null);
     setHistoryWarning(null);
     try {
-      const [walletResult, transactionsResult, withdrawalsResult, banksResult] = await Promise.allSettled([
+      const [walletResult, transactionsResult, withdrawalsResult, accountsResult] = await Promise.allSettled([
         walletService.getWallet(),
-        walletService.getTransactions(),
-        walletService.getWithdrawals(),
-        api.get('/banks'),
+        walletService.getTransactions(undefined, transactionPage),
+        walletService.getWithdrawals(undefined, withdrawalPage),
+        storeId && user?.role === 'STORE_OWNER' ? bankFlow.accounts(storeId) : Promise.reject(new Error('Chỉ chủ cửa hàng được quản lý tài khoản nhận tiền.')),
       ]);
+
+      if (!mounted.current || request !== refreshRequest.current) return;
 
       if (walletResult.status !== 'fulfilled') throw walletResult.reason;
 
       const nextWallet = walletResult.value.data as StoreWalletInfo;
+      if (!nextWallet || typeof nextWallet !== 'object' || Array.isArray(nextWallet)) throw new Error('Invalid wallet response');
+      if (storeId && String(nextWallet.storeId) !== storeId) throw new Error('API trả về ví không thuộc cửa hàng hiện tại.');
       setWallet(nextWallet);
+      setWalletReady(true); setLoadedAt(new Date().toISOString());
       const unavailableHistories: string[] = [];
       if (transactionsResult.status === 'fulfilled') {
         setTransactions(transactionsResult.value.data || []);
+        setTransactionPagination(transactionsResult.value.pagination || null);
       } else {
         setTransactions([]);
         unavailableHistories.push('biến động số dư');
       }
       if (withdrawalsResult.status === 'fulfilled') {
         setWithdrawals(withdrawalsResult.value.data || []);
+        setWithdrawalPagination(withdrawalsResult.value.pagination || null);
       } else {
         setWithdrawals([]);
         unavailableHistories.push('lịch sử rút tiền');
@@ -118,140 +142,93 @@ export const StoreWalletPage: React.FC = () => {
         setHistoryWarning(`Chưa tải được ${unavailableHistories.join(' và ')} từ máy chủ. Số dư ví vẫn được hiển thị.`);
       }
 
-      const realBanks = banksResult.status === 'fulfilled'
-        ? (banksResult.value.data?.data || []) as VietnameseBank[]
-        : [];
-      setBanks(realBanks);
-
-      if (nextWallet.bankAccount?.bankBin) {
-        const matched = realBanks.find((bank) => bank.bin === nextWallet.bankAccount?.bankBin);
-        if (matched) setSelectedBank(matched);
-        setAccountNumber(nextWallet.bankAccount.accountNumber || '');
-        setAccountHolderName(nextWallet.bankAccount.accountHolderName || '');
-        setIsEditingBank(false);
+      if (accountsResult.status === 'fulfilled' && storeId) {
+        try { setRecipient(withdrawalRecipient(accountsResult.value, storeId)); setAccountsError(''); }
+        catch (error: any) { setRecipient(null); setAccountsError(error.message); }
       } else {
-        setIsEditingBank(true);
+        setRecipient(null);
+        setAccountsError(canManageBanks
+          ? 'Chưa tải được tài khoản nhận tiền đã xác minh. Chủ cửa hàng có thể kiểm tra tại mục Ngân hàng.'
+          : 'Tài khoản nhận do hệ thống chọn trong danh sách đã xác minh của cửa hàng. Xem tài khoản thực nhận tại lịch sử sau khi hệ thống ghi nhận lệnh rút.');
       }
     } catch (err: any) {
+      if (!mounted.current || request !== refreshRequest.current) return;
+      setWalletReady(false);
       setError(
         err.response?.data?.message ||
+          err.message ||
           'Không thể tải dữ liệu ví cửa hàng. Vui lòng thử lại sau.'
       );
     } finally {
-      setLoading(false);
+      if (mounted.current && request === refreshRequest.current) { setLoading(false); setRefreshing(false); }
     }
-  }, []);
+  }, [storeId, user?.role, canManageBanks, transactionPage, withdrawalPage]);
 
   useEffect(() => {
-    refresh();
+    void refresh(false);
   }, [refresh]);
 
-  useEffect(() => {
-    const cleanAccountNumber = accountNumber.trim();
-    if (!selectedBank || cleanAccountNumber.length < 5) return;
-    const requestId = ++accountLookupRequestId.current;
-
-    const timer = window.setTimeout(async () => {
-      setLookingUpAccount(true);
-      setError(null);
-      try {
-        const response = await walletService.lookupBankAccount(selectedBank.bin, cleanAccountNumber);
-        if (requestId === accountLookupRequestId.current && response?.data?.accountName) {
-          setAccountHolderName(response.data.accountName);
-        }
-      } catch (err: any) {
-        void err // Bank lookup may fail for unknown accounts;
-      } finally {
-        if (requestId === accountLookupRequestId.current) setLookingUpAccount(false);
-      }
-    }, 550);
-
-    return () => window.clearTimeout(timer);
-  }, [selectedBank, accountNumber]);
-
-  // Handle save bank info
-  const handleSaveBank = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedBank) {
-      setError('Vui lòng chọn ngân hàng từ danh sách.');
-      return;
-    }
-    if (!accountNumber.trim()) {
-      setError('Vui lòng nhập số tài khoản ngân hàng.');
-      return;
-    }
-    if (!accountHolderName.trim()) {
-      setError('Vui lòng nhập họ và tên chủ tài khoản.');
-      return;
-    }
-
-    setSaving(true);
-    setError(null);
-    setNotice(null);
-
-    try {
-      await walletService.updateBankAccount({
-        bankName: selectedBank.shortName,
-        bankBin: selectedBank.bin,
-        accountNumber: accountNumber.trim(),
-        accountHolderName: accountHolderName.trim().toUpperCase(),
-      });
-      setNotice('Đã lưu thông tin tài khoản ngân hàng thụ hưởng thành công!');
-      setIsEditingBank(false);
-      await refresh();
-    } catch (err: any) {
-      setError(err.response?.data?.message || 'Không thể lưu tài khoản ngân hàng.');
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  // Handle request withdrawal
+  // A retry reuses the exact request and key; it never becomes a second withdrawal.
   const handleRequestWithdrawal = async (e: React.FormEvent) => {
     e.preventDefault();
-    const withdrawAmount = Number(amount);
-    const available = wallet?.availableBalance ?? wallet?.balance ?? 0;
-
-    if (!withdrawAmount || withdrawAmount <= 0) {
-      setError('Vui lòng nhập số tiền hợp lệ lớn hơn 0 ₫.');
-      return;
+    if (withdrawingRef.current || refreshing || storageError || !storeId || !canWithdraw) return;
+    const previous = pendingRef.current;
+    const withdrawAmount = previous?.amount ?? Number(amount);
+    if (!Number.isSafeInteger(withdrawAmount) || withdrawAmount < 50000) {
+      setError('Số tiền rút phải là số nguyên, tối thiểu 50.000 ₫.'); return;
     }
-    if (withdrawAmount > available) {
-      setError(`Số dư khả dụng không đủ. Bạn chỉ có thể rút tối đa ${formatVND(available)}.`);
-      return;
+    if (!previous && (!walletReady || canManageBanks && (!recipient || accountsError))) {
+      setError('Hãy tải lại ví và xác minh tài khoản nhận tiền trước khi rút.'); return;
     }
-    if (!wallet?.bankAccount?.accountNumber) {
-      setError('Vui lòng lưu thông tin tài khoản ngân hàng thụ hưởng trước khi tạo lệnh rút.');
-      return;
+    if (previous && Date.now() - previous.createdAt >= 24 * 60 * 60 * 1000) {
+      setError('Yêu cầu đã chờ quá lâu để gửi lại an toàn. Vui lòng kiểm tra lịch sử và liên hệ hỗ trợ; chưa tạo lệnh rút mới.'); return;
     }
-
-    setWithdrawing(true);
-    setError(null);
-    setNotice(null);
-
+    withdrawingRef.current = true; setWithdrawing(true); setError(null); setNotice(null);
+    let dispatched = false;
     try {
-      const response = await walletService.requestWithdrawal({
-        amount: withdrawAmount,
-        note: withdrawalNote.trim() || undefined,
-      });
-
-      const resData = response.data;
-      setNotice(
-        resData?.providerMessage ||
-          `Đã tạo lệnh rút tiền ${formatVND(withdrawAmount)} thành công! Trạng thái: ${
-            resData?.status === 'COMPLETED' ? 'Đã chuyển thành công' : 'Đang xử lý chi'
-          }.`
-      );
+      const freshAccount = canManageBanks ? withdrawalRecipient(await bankFlow.accounts(storeId), storeId) : null;
+      if (!mounted.current) return;
+      setRecipient(freshAccount); setAccountsError('');
+      if (canManageBanks && (!freshAccount || String(freshAccount.id) !== String(previous?.accountId ?? recipient?.id))) {
+        throw new Error('Tài khoản nhận tiền đã thay đổi hoặc chưa xác định được. Hãy kiểm tra tài khoản mặc định tại mục Ngân hàng trước khi tiếp tục.');
+      }
+      if (!previous) {
+        const response = await walletService.getWallet();
+        if (!mounted.current) return;
+        const freshWallet = response.data;
+        if (String(freshWallet.storeId) !== storeId) throw new Error('Thông tin ví không thuộc cửa hàng hiện tại.');
+        setWallet(freshWallet);
+        const available = freshWallet.availableBalance ?? freshWallet.balance;
+        if (!Number.isFinite(available) || withdrawAmount > available) throw new Error('Số dư khả dụng chưa đủ để rút số tiền này.');
+      }
+      const request = previous || { key: 'wd_' + crypto.randomUUID(), amount: withdrawAmount, accountId: freshAccount ? String(freshAccount.id) : null, createdAt: Date.now() };
+      // Persist before dispatch so a reload cannot lose an uncertain financial request.
+      try { savePending(request); } catch { setStorageError('Chưa lưu được mã yêu cầu rút tiền. Vui lòng cho phép lưu trữ trình duyệt trước khi tiếp tục.'); return; }
+      if (!mounted.current) return;
+      dispatched = true;
+      const response = await walletService.requestWithdrawal({ amount: request.amount, idempotencyKey: request.key });
+      if (!mounted.current) return;
+      const result = response.data;
+      if (!/^[1-9]\d*$/.test(String(result?.withdrawalId ?? result?.id)) || String(result?.storeId) !== storeId || Number(result?.amount) !== request.amount) {
+        throw new Error('Chưa nhận được kết quả rút tiền khớp với yêu cầu.');
+      }
+      try { savePending(null); } catch { setStorageError('Yêu cầu đã được ghi nhận nhưng chưa xóa được mã chờ trên trình duyệt. Vui lòng liên hệ hỗ trợ trước khi tạo lệnh khác.'); }
+      setNotice('Yêu cầu rút ' + formatVND(request.amount) + ': ' + withdrawalStatusLabel(result.status) + '. Tài khoản nhận: ' + (result.bankName || '') + ' · ' + (result.bankAccountMasked || result.bankAccountNumber || 'Xem lịch sử') + '.');
       setAmount('');
-      setWithdrawalNote('');
       await refresh();
     } catch (err: any) {
-      setError(
-        err.response?.data?.message ||
-          'Không thể xử lý yêu cầu rút tiền. Vui lòng kiểm tra lại số dư hoặc cấu hình PayOS Payout.'
-      );
+      if (!mounted.current) return;
+      const status = err?.response?.status;
+      if (dispatched && [400, 401, 403, 404, 422].includes(status)) {
+        try { savePending(null); } catch { setStorageError('Chưa cập nhật được mã yêu cầu trên trình duyệt. Vui lòng liên hệ hỗ trợ.'); }
+      }
+      setError(dispatched && (!status || status >= 500 || status === 409)
+        ? 'Chưa xác nhận được kết quả rút tiền. Hãy kiểm tra lịch sử hoặc dùng “Kiểm tra lại yêu cầu” để dùng lại đúng mã cũ; chưa tạo thêm lệnh rút.'
+        : err.response?.data?.message || err.message || 'Chưa thể gửi yêu cầu rút tiền.');
+      if (dispatched) await refresh(false);
     } finally {
-      setWithdrawing(false);
+      withdrawingRef.current = false;
+      if (mounted.current) setWithdrawing(false);
     }
   };
 
@@ -261,7 +238,7 @@ export const StoreWalletPage: React.FC = () => {
     try {
       await walletService.syncWithdrawalStatus(id);
       await refresh();
-      setNotice('Đã cập nhật trạng thái mới nhất từ PayOS!');
+      setNotice('Đã cập nhật trạng thái lệnh rút từ hệ thống.');
     } catch (err: any) {
       setError(
         err.response?.data?.message || 'Không thể đồng bộ trạng thái lệnh rút.'
@@ -271,8 +248,9 @@ export const StoreWalletPage: React.FC = () => {
     }
   };
 
-  const availableBalance = wallet?.availableBalance ?? wallet?.balance ?? 0;
-  const pendingBalance = wallet?.pendingBalance ?? 0;
+  useDashboardRefresh(() => { if (!withdrawingRef.current && !syncingId) return refresh(false); }, 'wallet:' + user?.id + ':' + user?.storeId);
+  const availableBalance = wallet?.availableBalance ?? wallet?.balance;
+  const activePagination = activeTab === 'WITHDRAWALS' ? withdrawalPagination : transactionPagination;
 
   if (loading) {
     return (
@@ -286,7 +264,7 @@ export const StoreWalletPage: React.FC = () => {
   }
 
   return (
-    <div className="mx-auto max-w-6xl space-y-6 p-4 text-zinc-900 dark:text-zinc-100 sm:p-6 lg:p-8">
+    <div className="mx-auto w-full max-w-7xl space-y-6 text-zinc-900 dark:text-zinc-100">
       {/* ── Top Header ── */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between border-b border-zinc-200 pb-5 dark:border-zinc-800">
         <div>
@@ -296,17 +274,18 @@ export const StoreWalletPage: React.FC = () => {
             </h1>
             <span className="inline-flex items-center gap-1.5 rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300">
               <span className="h-1.5 w-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
-              PayOS Payout 24/7
+              Số dư & giao dịch
             </span>
           </div>
           <p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">
-            Doanh thu bán hàng từ nút Smart Order Button được ghi nhận tự động. Bạn có thể rút trực tiếp về tài khoản ngân hàng bất kỳ lúc nào.
+            Theo dõi số dư, các khoản đang giữ và yêu cầu rút tiền của cửa hàng.
           </p>
         </div>
 
         <button
           type="button"
-          onClick={refresh}
+          onClick={() => void refresh()}
+          disabled={refreshing || withdrawing || !!syncingId}
           className="inline-flex items-center gap-1.5 self-start rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
         >
           <RefreshCw className="h-3.5 w-3.5" />
@@ -315,6 +294,7 @@ export const StoreWalletPage: React.FC = () => {
       </div>
 
       {/* ── Alerts ── */}
+      {loadedAt && <p className="text-xs text-zinc-500 dark:text-zinc-400">Lần tải gần nhất: {new Date(loadedAt).toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}{!walletReady && ' · Chưa xác nhận lại số dư. Vui lòng tải lại trước khi rút tiền.'}</p>}
       <AnimatePresence>
         {error && (
           <motion.div
@@ -365,14 +345,14 @@ export const StoreWalletPage: React.FC = () => {
               Số Dư Khả Dụng
             </span>
             <span className="rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-400">
-              Có thể rút ngay
+              {walletReady ? 'Đã cập nhật' : 'Chưa xác nhận lại'}
             </span>
           </div>
           <div className="mt-3 font-mono text-3xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50">
-            {formatVND(availableBalance)}
+            {formatMetric(wallet?.availableBalance ?? wallet?.balance, true)}
           </div>
           <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-            Cộng từ các đơn hàng Smart Button khách đã thanh toán.
+            Số dư khả dụng được hệ thống ghi nhận cho cửa hàng.
           </p>
         </div>
 
@@ -388,7 +368,7 @@ export const StoreWalletPage: React.FC = () => {
             </span>
           </div>
           <div className="mt-3 font-mono text-3xl font-extrabold tracking-tight text-amber-600 dark:text-amber-400">
-            {formatVND(pendingBalance)}
+            {formatMetric(wallet?.pendingBalance, true)}
           </div>
           <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
             Số tiền trong các lệnh rút đang được ngân hàng đối soát.
@@ -403,315 +383,42 @@ export const StoreWalletPage: React.FC = () => {
               Hạn Mức Chi PayOS
             </span>
             <span className="rounded-md bg-indigo-50 px-2 py-0.5 text-[10px] font-bold text-indigo-700 dark:bg-indigo-950/50 dark:text-indigo-400">
-              {wallet?.payosPayoutConnected ? 'Sẵn sàng' : 'Chưa kích hoạt'}
+              {wallet?.payosPayoutConnected === true ? 'Đã kết nối' : wallet?.payosPayoutConnected === false ? 'Chưa kết nối' : 'Chưa có thông tin'}
             </span>
           </div>
           <div className="mt-3 font-mono text-3xl font-extrabold tracking-tight text-zinc-900 dark:text-zinc-50">
-            {wallet?.payosPayoutConnected
-              ? formatVND(wallet.payosPayoutBalance)
-              : '--- ₫'}
+            {formatMetric(wallet?.payosPayoutBalance, true)}
           </div>
           <p className="mt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-            Số dư thanh khoản thực trên cổng PayOS giải ngân tự động.
+            Hạn mức do cổng chi trả cung cấp, nếu hệ thống đã kết nối.
           </p>
         </div>
       </div>
 
       {/* ── Main Operations Grid ── */}
       <div className="grid gap-6 lg:grid-cols-12">
-        {/* ── LEFT: Bank Account Management (5 cols) ── */}
-        <div className="space-y-4 lg:col-span-5">
+        <section aria-labelledby="wallet-recipient-title" className="space-y-4 lg:col-span-5">
           <div className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-xs dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="flex items-center justify-between border-b border-zinc-100 pb-3.5 dark:border-zinc-800">
-              <div className="flex items-center gap-2">
-                <CreditCard className="h-4 w-4 text-[#287DA8]" />
-                <h2 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">
-                  Tài Khoản Nhận Tiền
-                </h2>
+            <h2 id="wallet-recipient-title" className="flex items-center gap-2 text-sm font-bold"><CreditCard className="h-4 w-4 text-[#287DA8]" />Tài khoản nhận tiền đã xác minh</h2>
+            {accountsError ? <p role="alert" className="mt-4 text-sm text-amber-700 dark:text-amber-300">{accountsError}</p> : recipient ? <div className="mt-4 space-y-4">
+              <div className="rounded-2xl bg-[#0F2347] p-5 text-white">
+                <p className="font-semibold">{recipient.bankName}</p>
+                <p className="mt-4 break-all font-mono text-xl tracking-wider">{recipient.accountNumberMasked}</p>
+                <p className="mt-3 text-sm font-semibold">{recipient.accountName}</p>
+                <p className="mt-4 flex items-center gap-2 text-xs text-emerald-300"><ShieldCheck className="h-4 w-4" />Đã xác minh chính chủ{recipient.isDefault ? ' · Mặc định' : ''}</p>
               </div>
-              {wallet?.bankAccount && !isEditingBank && (
-                <button
-                  type="button"
-                  onClick={() => setIsEditingBank(true)}
-                  className="text-xs font-semibold text-[#287DA8] hover:underline"
-                >
-                  Thay đổi
-                </button>
-              )}
-            </div>
-
-            {/* If bank is saved and not editing -> Show Sleek Virtual Bank Card */}
-            {wallet?.bankAccount && !isEditingBank ? (
-              <div className="mt-4 space-y-4">
-                <div className="relative overflow-hidden rounded-2xl bg-gradient-to-tr from-[#0B1527] via-[#0F2347] to-[#1E3A8A] p-5 text-white shadow-lg">
-                  {/* Card Background Accents */}
-                  <div className="pointer-events-none absolute -right-10 -top-10 h-32 w-32 rounded-full bg-blue-500/10 blur-2xl" />
-                  <div className="pointer-events-none absolute -bottom-10 -left-10 h-32 w-32 rounded-full bg-emerald-500/10 blur-2xl" />
-
-                  <div className="flex items-start justify-between">
-                    <div className="flex items-center gap-2.5">
-                      {selectedBank?.logo ? (
-                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/95 p-1 shadow-xs">
-                          <img
-                            src={selectedBank.logo}
-                            alt={selectedBank.shortName}
-                            className="max-h-full max-w-full object-contain"
-                          />
-                        </div>
-                      ) : (
-                        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-white/10">
-                          <Building2 className="h-5 w-5 text-white" />
-                        </div>
-                      )}
-                      <div>
-                        <div className="text-xs font-bold uppercase tracking-wider text-white">
-                          {wallet.bankAccount.bankName}
-                        </div>
-                        <div className="text-[10px] text-blue-200/80">
-                          Mã BIN: {wallet.bankAccount.bankBin}
-                        </div>
-                      </div>
-                    </div>
-                    <span className="flex items-center gap-1 rounded-full bg-emerald-500/20 px-2 py-0.5 text-[10px] font-semibold text-emerald-300 backdrop-blur-xs">
-                      <ShieldCheck className="h-3 w-3" />
-                      Đã xác thực
-                    </span>
-                  </div>
-
-                  <div className="mt-6">
-                    <div className="text-[10px] font-medium tracking-wider text-blue-200/70 uppercase">
-                      Số tài khoản
-                    </div>
-                    <div className="mt-0.5 font-mono text-xl font-bold tracking-widest text-white">
-                      {wallet.bankAccount.accountNumber.replace(
-                        /(\d{4})(?=\d)/g,
-                        '$1 '
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="mt-4 flex items-end justify-between border-t border-white/10 pt-3">
-                    <div>
-                      <div className="text-[9px] font-medium tracking-wider text-blue-200/70 uppercase">
-                        Chủ tài khoản
-                      </div>
-                      <div className="text-xs font-bold tracking-wide uppercase text-white">
-                        {wallet.bankAccount.accountHolderName}
-                      </div>
-                    </div>
-                    <div className="text-[10px] font-medium text-blue-200/60">
-                      NAPAS 247
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-2 rounded-xl bg-zinc-50 p-3 text-xs text-zinc-600 dark:bg-zinc-800/60 dark:text-zinc-400">
-                  <ShieldCheck className="h-4 w-4 shrink-0 text-emerald-600" />
-                  <span>
-                    Tiền rút sẽ được chuyển thẳng về tài khoản này qua mạng lưới liên ngân hàng <strong>NAPAS 24/7</strong>.
-                  </span>
-                </div>
-              </div>
-            ) : (
-              /* Bank Editing Form */
-              <form onSubmit={handleSaveBank} className="mt-4 space-y-4">
-                {/* Bank Select with Dropdown & Search */}
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                    Ngân hàng thụ hưởng <span className="text-rose-500">*</span>
-                  </label>
-                  <div className="relative mt-1.5">
-                    <button
-                      type="button"
-                      onClick={() => setIsBankDropdownOpen(!isBankDropdownOpen)}
-                      className="flex w-full items-center justify-between rounded-xl border border-zinc-200 bg-white px-3 py-2.5 text-left text-xs shadow-2xs hover:border-[#287DA8] focus:outline-hidden focus:ring-2 focus:ring-[#287DA8]/20 dark:border-zinc-700 dark:bg-zinc-800"
-                    >
-                      {selectedBank ? (
-                        <div className="flex items-center gap-2.5">
-                          <img
-                            src={selectedBank.logo}
-                            alt={selectedBank.shortName}
-                            className="h-5 w-5 object-contain"
-                          />
-                          <div>
-                            <span className="font-bold text-zinc-900 dark:text-zinc-100">
-                              {selectedBank.shortName}
-                            </span>
-                            <span className="ml-1.5 text-[11px] text-zinc-400">
-                              ({selectedBank.code} - BIN: {selectedBank.bin})
-                            </span>
-                          </div>
-                        </div>
-                      ) : (
-                        <span className="text-zinc-400">
-                          Chọn ngân hàng (Vietcombank, Techcombank, MB...)
-                        </span>
-                      )}
-                      <ChevronDown className="h-4 w-4 text-zinc-400" />
-                    </button>
-
-                    {/* Dropdown Menu */}
-                    {isBankDropdownOpen && (
-                      <div className="absolute z-30 mt-1 max-h-64 w-full overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-xl dark:border-zinc-700 dark:bg-zinc-800">
-                        <div className="border-b border-zinc-100 p-2 dark:border-zinc-700">
-                          <div className="flex items-center gap-2 rounded-lg border border-transparent bg-zinc-100 px-2.5 py-1.5 text-xs transition-colors focus-within:border-[#287DA8]/40 focus-within:bg-white focus-within:ring-2 focus-within:ring-[#287DA8]/15 dark:bg-zinc-700/60 dark:focus-within:bg-zinc-800">
-                            <Search className="h-3.5 w-3.5 text-zinc-400" />
-                            <input
-                              type="text"
-                              value={bankSearch}
-                              onChange={(e) => setBankSearch(e.target.value)}
-                              placeholder="Tìm tên ngân hàng hoặc mã..."
-                              className="w-full min-w-0 bg-transparent text-xs text-zinc-900 placeholder:text-zinc-400 outline-none focus:outline-none focus:ring-0 dark:text-zinc-100"
-                              autoFocus
-                            />
-                          </div>
-                        </div>
-
-                        <div className="max-h-48 overflow-y-auto divide-y divide-zinc-50 dark:divide-zinc-700/40">
-                          {filteredBanks.map((b) => (
-                            <button
-                              key={b.bin}
-                              type="button"
-                              onClick={() => {
-                                handleSelectBank(b);
-                                setIsBankDropdownOpen(false);
-                                setBankSearch('');
-                              }}
-                              className="flex w-full items-center justify-between px-3 py-2 text-left text-xs transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-700/60"
-                            >
-                              <div className="flex items-center gap-2.5">
-                                <img
-                                  src={b.logo}
-                                  alt={b.shortName}
-                                  loading="lazy"
-                                  decoding="async"
-                                  width={20}
-                                  height={20}
-                                  className="h-5 w-5 object-contain"
-                                />
-                                <div>
-                                  <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                                    {b.shortName}
-                                  </div>
-                                  <div className="text-[10px] text-zinc-400 line-clamp-1">
-                                    {b.name}
-                                  </div>
-                                </div>
-                              </div>
-                              <span className="font-mono text-[10px] font-bold text-zinc-400">
-                                {b.bin}
-                              </span>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </div>
-
-                {/* Popular Banks Quick-Pick Chips */}
-                <div>
-                  <div className="text-[11px] font-medium text-zinc-400">
-                    Ngân hàng phổ biến:
-                  </div>
-                  <div className="mt-1.5 flex flex-wrap gap-1.5">
-                    {banks.slice(0, 6).map((b) => (
-                      <button
-                        key={b.bin}
-                        type="button"
-                        onClick={() => handleSelectBank(b)}
-                        className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-[11px] font-semibold transition-all ${
-                          selectedBank?.bin === b.bin
-                            ? 'bg-[#287DA8] text-white shadow-2xs'
-                            : 'border border-zinc-200 bg-zinc-50 text-zinc-600 hover:border-zinc-300 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
-                        }`}
-                      >
-                        <img
-                          src={b.logo}
-                          alt={b.shortName}
-                          loading="lazy"
-                          decoding="async"
-                          width={14}
-                          height={14}
-                          className="h-3.5 w-3.5 object-contain"
-                        />
-                        {b.shortName}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Account Number */}
-                <div>
-                  <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                    Số tài khoản <span className="text-rose-500">*</span>
-                  </label>
-                  <input
-                    required
-                    type="text"
-                    inputMode="numeric"
-                    value={accountNumber}
-                    onChange={(e) =>
-                      setAccountNumber(e.target.value.replace(/[^0-9a-zA-Z]/g, ''))
-                    }
-                    placeholder="Ví dụ: 1903678912301"
-                    className="mt-1.5 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs font-mono font-medium shadow-2xs focus:border-[#287DA8] focus:outline-hidden focus:ring-2 focus:ring-[#287DA8]/20 dark:border-zinc-700 dark:bg-zinc-800"
-                  />
-                </div>
-
-                {/* Account Holder Name */}
-                <div>
-                  <div className="flex items-center justify-between">
-                    <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                      Họ và tên chủ tài khoản <span className="text-rose-500">*</span>
-                    </label>
-                    {lookingUpAccount && (
-                      <span className="text-[11px] text-[#287DA8] flex items-center gap-1 font-medium animate-pulse">
-                        <RefreshCw className="w-3 h-3 animate-spin" /> Đang tra cứu...
-                      </span>
-                    )}
-                  </div>
-                  <input
-                    required
-                    type="text"
-                    value={accountHolderName}
-                    onChange={(e) => setAccountHolderName(e.target.value.toUpperCase())}
-                    placeholder="NGUYEN VAN A (viết hoa không dấu)"
-                    className="mt-1.5 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs uppercase font-medium shadow-2xs focus:border-[#287DA8] focus:outline-hidden focus:ring-2 focus:ring-[#287DA8]/20 dark:border-zinc-700 dark:bg-zinc-800"
-                  />
-                  <p className="mt-1 text-[11px] text-zinc-400">
-                    Tên chủ tài khoản được tự động tra cứu, bạn có thể chỉnh sửa nếu cần.
-                  </p>
-                </div>
-
-                <div className="flex items-center gap-2 pt-2">
-                  <button
-                    type="submit"
-                    disabled={saving}
-                    className="flex-1 rounded-xl bg-[#287DA8] px-4 py-2.5 text-xs font-bold text-white shadow-sm hover:bg-[#20698e] disabled:opacity-50 transition-colors"
-                  >
-                    {saving ? 'Đang lưu...' : 'Lưu tài khoản thụ hưởng'}
-                  </button>
-
-                  {wallet?.bankAccount && (
-                    <button
-                      type="button"
-                      onClick={() => setIsEditingBank(false)}
-                      className="rounded-xl border border-zinc-200 px-3 py-2.5 text-xs font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
-                    >
-                      Hủy
-                    </button>
-                  )}
-                </div>
-              </form>
-            )}
+              <p className="text-xs leading-5 text-zinc-500">Hệ thống dùng tài khoản đã xác minh để xử lý lệnh rút. Tài khoản nhận thực tế được ghi nhận trong lịch sử của từng lệnh.</p>
+            </div> : <p className="mt-4 text-sm leading-6 text-zinc-500">Chưa xác định được tài khoản nhận tiền. Hãy xác minh tài khoản và chọn tài khoản mặc định nếu có nhiều tài khoản đã xác minh.</p>}
+            {user?.role === 'STORE_OWNER' && <Link to="/store/finance#store-bank-accounts" className="mt-4 inline-flex min-h-10 items-center gap-2 text-sm font-semibold text-[#287DA8]">Quản lý & xác minh ngân hàng<ExternalLink className="h-4 w-4" /></Link>}
+            <button type="button" disabled={refreshing || withdrawing} onClick={() => refresh(false)} className="mt-3 block text-xs font-semibold text-[#287DA8] disabled:opacity-50">Tải lại tài khoản nhận tiền</button>
           </div>
-        </div>
+        </section>
 
         {/* ── RIGHT: Withdrawal Form (7 cols) ── */}
         <div className="space-y-4 lg:col-span-7">
           <form
             onSubmit={handleRequestWithdrawal}
+            noValidate={!!pending}
             className="rounded-2xl border border-zinc-200 bg-white p-5 shadow-xs dark:border-zinc-800 dark:bg-zinc-900"
           >
             <div className="flex items-center justify-between border-b border-zinc-100 pb-3.5 dark:border-zinc-800">
@@ -723,10 +430,12 @@ export const StoreWalletPage: React.FC = () => {
               </div>
               <span className="flex items-center gap-1 text-[11px] font-semibold text-emerald-600 dark:text-emerald-400">
                 <Sparkles className="h-3 w-3" />
-                Miễn phí giao dịch
+                Yêu cầu rút tiền
               </span>
             </div>
 
+            {storageError && <p role="alert" className="mt-4 rounded-xl bg-amber-50 p-3 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{storageError}</p>}
+            {pending && <p role="status" className="mt-4 rounded-xl bg-amber-50 p-3 text-sm leading-6 text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">Có yêu cầu rút {formatVND(pending.amount)} đang chờ xác nhận. Kiểm tra lịch sử hoặc dùng “Kiểm tra lại yêu cầu”; giữ nguyên số tiền để tránh tạo lệnh trùng.</p>}
             <div className="mt-4 space-y-4">
               {/* Amount Input */}
               <div>
@@ -735,7 +444,7 @@ export const StoreWalletPage: React.FC = () => {
                     Số tiền cần rút (VNĐ) <span className="text-rose-500">*</span>
                   </label>
                   <span className="text-[11px] text-zinc-500">
-                    Số dư: <strong className="text-zinc-800 dark:text-zinc-200">{formatVND(availableBalance)}</strong>
+                    Số dư: <strong className="text-zinc-800 dark:text-zinc-200">{formatMetric(availableBalance, true)}</strong>
                   </span>
                 </div>
 
@@ -745,7 +454,8 @@ export const StoreWalletPage: React.FC = () => {
                     type="number"
                     min="50000"
                     step="1000"
-                    max={availableBalance || undefined}
+                    max={availableBalance}
+                    disabled={!!pending || withdrawing || !!storageError}
                     value={amount}
                     onChange={(e) => setAmount(e.target.value)}
                     placeholder="Nhập số tiền (tối thiểu 50.000 ₫)"
@@ -767,15 +477,17 @@ export const StoreWalletPage: React.FC = () => {
                     <button
                       key={val}
                       type="button"
+                      disabled={!!pending || withdrawing || !!storageError}
                       onClick={() => setAmount(String(val))}
                       className="rounded-lg border border-zinc-200 bg-zinc-50 px-2.5 py-1 text-xs font-medium text-zinc-700 hover:border-[#287DA8] hover:text-[#287DA8] dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300"
                     >
                       {formatVND(val)}
                     </button>
                   ))}
-                  {availableBalance > 0 && (
+                  {availableBalance != null && availableBalance > 0 && (
                     <button
                       type="button"
+                      disabled={!!pending || withdrawing || !!storageError}
                       onClick={() => setAmount(String(availableBalance))}
                       className="rounded-lg border border-emerald-300 bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 hover:bg-emerald-100 dark:border-emerald-800 dark:bg-emerald-950/40 dark:text-emerald-300"
                     >
@@ -785,64 +497,49 @@ export const StoreWalletPage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Note */}
-              <div>
-                <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                  Ghi chú lệnh rút (Tùy chọn)
-                </label>
-                <input
-                  type="text"
-                  maxLength={100}
-                  value={withdrawalNote}
-                  onChange={(e) => setWithdrawalNote(e.target.value)}
-                  placeholder="Ví dụ: Rút doanh thu đợt 1 tháng 10"
-                  className="mt-1.5 w-full rounded-xl border border-zinc-200 bg-white px-3 py-2 text-xs shadow-2xs focus:border-[#287DA8] focus:outline-hidden focus:ring-2 focus:ring-[#287DA8]/20 dark:border-zinc-700 dark:bg-zinc-800"
-                />
-              </div>
-
               {/* Summary Box */}
               <div className="rounded-xl border border-zinc-100 bg-zinc-50/70 p-3.5 text-xs space-y-1.5 dark:border-zinc-800 dark:bg-zinc-800/40">
                 <div className="flex justify-between text-zinc-500">
                   <span>Tài khoản nhận:</span>
                   <span className="font-semibold text-zinc-900 dark:text-zinc-100">
-                    {wallet?.bankAccount
-                      ? `${wallet.bankAccount.bankName} - ${wallet.bankAccount.accountNumber}`
-                      : 'Chưa cấu hình tài khoản'}
+                    {recipient
+                      ? `${recipient.bankName} - ${recipient.accountNumberMasked}`
+                      : canManageBanks ? 'Chưa cấu hình tài khoản' : 'Do hệ thống xác định khi ghi nhận lệnh'}
                   </span>
                 </div>
                 <div className="flex justify-between text-zinc-500">
                   <span>Thời gian xử lý:</span>
                   <span className="font-semibold text-emerald-600 dark:text-emerald-400">
-                    Ngay tức thì (Tự động 24/7)
+                    Theo trạng thái xử lý của hệ thống
                   </span>
                 </div>
                 <div className="flex justify-between text-zinc-500">
                   <span>Phí rút tiền:</span>
-                  <span className="font-semibold text-emerald-600">0 ₫</span>
+                  <span className="font-semibold text-zinc-500">Chưa có thông tin từ hệ thống</span>
                 </div>
               </div>
 
               <button
                 type="submit"
-                disabled={withdrawing || !wallet?.bankAccount || availableBalance <= 0}
+                disabled={withdrawing || refreshing || !!storageError || !canWithdraw || (!pending && (!walletReady || canManageBanks && (!recipient || !!accountsError) || availableBalance == null || availableBalance < 50000))}
                 className="inline-flex w-full items-center justify-center gap-2 rounded-xl bg-zinc-900 py-3 text-sm font-bold text-white shadow-md hover:bg-zinc-800 disabled:opacity-40 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-200 transition-all cursor-pointer"
               >
                 {withdrawing ? (
                   <>
                     <RefreshCw className="h-4 w-4 animate-spin" />
-                    Đang gửi yêu cầu chi qua PayOS...
+                    Đang gửi yêu cầu rút tiền…
                   </>
                 ) : (
                   <>
                     <ArrowDownToLine className="h-4 w-4" />
-                    Xác nhận rút {amount ? formatVND(Number(amount)) : 'tiền'} về tài khoản
+                    {pending ? 'Kiểm tra lại yêu cầu' : 'Xác nhận rút'} {amount ? formatVND(Number(amount)) : 'tiền'} về tài khoản
                   </>
                 )}
               </button>
 
-              {!wallet?.bankAccount && (
+              {canManageBanks && !recipient && !pending && (
                 <p className="text-center text-xs text-amber-600">
-                  Vui lòng lưu thông tin tài khoản nhận tiền ở cột bên trái trước khi rút.
+                  Vui lòng xác minh tài khoản nhận tiền và kiểm tra tài khoản mặc định trước khi rút.
                 </p>
               )}
             </div>
@@ -869,7 +566,7 @@ export const StoreWalletPage: React.FC = () => {
                   : 'border-transparent text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
               }`}
             >
-              Lịch Sử Rút Tiền ({withdrawals.length})
+              Lịch Sử Rút Tiền ({!wallet || historyWarning?.includes('lịch sử rút tiền') ? '—' : withdrawalPagination?.totalItems ?? withdrawals.length})
             </button>
             <button
               type="button"
@@ -880,7 +577,7 @@ export const StoreWalletPage: React.FC = () => {
                   : 'border-transparent text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200'
               }`}
             >
-              Biến Động Số Dư Ví ({transactions.length})
+              Biến Động Số Dư Ví ({!wallet || historyWarning?.includes('biến động số dư') ? '—' : transactionPagination?.totalItems ?? transactions.length})
             </button>
           </div>
         </div>
@@ -895,7 +592,7 @@ export const StoreWalletPage: React.FC = () => {
             ) : (
               withdrawals.map((item) => {
                 const isPending = ['PENDING', 'PROCESSING'].includes(item.status);
-                const isSuccess = ['COMPLETED', 'SUCCESS'].includes(item.status);
+                const isSuccess = ['COMPLETED', 'SUCCESS', 'SUCCEEDED'].includes(item.status);
                 const isFailed = ['FAILED', 'REJECTED'].includes(item.status);
 
                 return (
@@ -934,7 +631,7 @@ export const StoreWalletPage: React.FC = () => {
                               ? 'Đã chuyển thành công'
                               : isPending
                               ? 'Đang xử lý chi'
-                              : 'Thất bại'}
+                              : isFailed ? 'Thất bại' : item.status}
                           </span>
                         </div>
 
@@ -952,6 +649,7 @@ export const StoreWalletPage: React.FC = () => {
                     </div>
 
                     <div className="flex items-center gap-2 self-end sm:self-center">
+                      <button type="button" onClick={() => setSelectedWithdrawal(String(item.id))} className="min-h-10 rounded-lg border border-zinc-200 px-3 font-semibold dark:border-zinc-700">Chi tiết</button>
                       {isPending && (
                         <button
                           type="button"
@@ -974,6 +672,20 @@ export const StoreWalletPage: React.FC = () => {
             )}
           </div>
         )}
+
+        {activeTab === 'WITHDRAWALS' && selectedWithdrawal && <section aria-label="Chi tiết lệnh rút tiền" aria-busy={detailLoading} className="m-4 rounded-xl border border-zinc-200 p-4 dark:border-zinc-700">
+          <div className="flex flex-wrap items-center justify-between gap-3"><h3 className="text-sm font-semibold">Lệnh rút #{selectedWithdrawal}</h3><button type="button" onClick={() => { setSelectedWithdrawal(''); setWithdrawalDetail(null); }} className="min-h-10 px-3 text-sm">Đóng chi tiết</button></div>
+          {detailLoading && <p role="status" className="mt-3 text-sm text-zinc-500">Đang tải chi tiết lệnh rút…</p>}
+          {detailError && <div role="alert" className="mt-3 text-sm text-rose-600"><p>{detailError}</p><button type="button" onClick={() => setDetailRefresh(value => value + 1)} className="mt-2 min-h-10 font-semibold underline">Thử lại</button></div>}
+          {withdrawalDetail && <><dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2 lg:grid-cols-3">
+            <div><dt className="text-xs text-zinc-500">Trạng thái hệ thống</dt><dd className="mt-1 font-semibold">{withdrawalStatusLabel(withdrawalDetail.status)}</dd></div>
+            <div><dt className="text-xs text-zinc-500">Số tiền yêu cầu</dt><dd className="mt-1">{formatMetric(withdrawalDetail.amount, true)}</dd></div>
+            <div><dt className="text-xs text-zinc-500">Phí / Số tiền chuyển</dt><dd className="mt-1">{formatMetric(withdrawalDetail.fee, true)} / {formatMetric(withdrawalDetail.netAmount, true)}</dd></div>
+            <div><dt className="text-xs text-zinc-500">Tài khoản nhận đã ghi nhận</dt><dd className="mt-1">{withdrawalDetail.bankName} · {withdrawalDetail.accountNumber}<br />{withdrawalDetail.accountHolderName}</dd></div>
+            <div><dt className="text-xs text-zinc-500">Mã lệnh</dt><dd className="mt-1 break-all">{withdrawalDetail.withdrawalCode || '—'}</dd></div>
+            <div><dt className="text-xs text-zinc-500">Mã chi tiền</dt><dd className="mt-1 break-all">{withdrawalDetail.providerPayoutId || '—'}</dd></div>
+          </dl>{(withdrawalDetail.failureReason || withdrawalDetail.rejectionReason) && <p className="mt-4 text-sm text-amber-700 dark:text-amber-300">{withdrawalDetail.failureReason || withdrawalDetail.rejectionReason}</p>}</>}
+        </section>}
 
         {/* Tab 2: Transactions */}
         {activeTab === 'TRANSACTIONS' && (
@@ -1004,7 +716,7 @@ export const StoreWalletPage: React.FC = () => {
                     </div>
                     <div>
                       <div className="font-semibold text-zinc-900 dark:text-zinc-100">
-                        {tx.description || (tx.amount >= 0 ? 'Doanh thu đơn hàng Smart Button' : 'Rút tiền về tài khoản')}
+                        {tx.description || tx.type || 'Giao dịch ví'}
                       </div>
                       <div className="mt-0.5 text-[11px] text-zinc-400">
                         {new Date(tx.createdAt).toLocaleString('vi-VN')} ·{' '}
@@ -1028,6 +740,7 @@ export const StoreWalletPage: React.FC = () => {
             )}
           </div>
         )}
+        {activePagination && <nav aria-label="Phân trang lịch sử ví" className="flex items-center justify-between gap-3 border-t border-zinc-100 p-4 text-xs dark:border-zinc-800"><span>Trang {activePagination.page} / {Math.max(1, activePagination.totalPages)}</span><div className="flex gap-2"><button type="button" disabled={refreshing || activePagination.page <= 1} onClick={() => activeTab === 'WITHDRAWALS' ? setWithdrawalPage(activePagination.page - 1) : setTransactionPage(activePagination.page - 1)} className="min-h-10 rounded-lg border border-zinc-200 px-3 disabled:opacity-40 dark:border-zinc-700">Trang trước</button><button type="button" disabled={refreshing || !activePagination.hasNextPage} onClick={() => activeTab === 'WITHDRAWALS' ? setWithdrawalPage(activePagination.page + 1) : setTransactionPage(activePagination.page + 1)} className="min-h-10 rounded-lg border border-zinc-200 px-3 disabled:opacity-40 dark:border-zinc-700">Trang sau</button></div></nav>}
       </div>
     </div>
   );

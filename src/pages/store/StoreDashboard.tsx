@@ -12,14 +12,19 @@ import { useSound } from '../../context/OrderSoundContext';
 import { toast } from '../../context/ToastContext';
 import { Order } from '../../types';
 import { mergeOrderUpdate, normalizeOrder, normalizeOrderEvent, ORDER_EVENT, publishOrderEvent } from '../../services/order-events';
+import { orderDashboardMetrics, formatMetric } from '../../services/dashboard-metrics';
 import { ShippingContact } from '../../components/orders/ShippingContact';
 import { subscribeRentalChannelEvents } from '../../services/rental-notifications';
 import { getUserStoreId } from '../../services/order-reconciliation';
+import { useStoreListingAccess } from '../../hooks/useStoreListingAccess';
+import { getStoreSuspendedNotice } from '../../services/store-status';
 import {
+  AlertTriangle,
   Wallet,
   ShoppingBag,
   Clock,
   CheckCircle2,
+  XCircle,
   Truck,
   Phone,
   MapPin,
@@ -73,17 +78,59 @@ const buildChartDataFromOrders = (orders: Order[]) => {
 
 export const StoreDashboard: React.FC = () => {
   const location = useLocation();
-  const { user, token } = useAuth();
+  const { user, token, logout } = useAuth();
+  const suspendedNotice = getStoreSuspendedNotice(user);
+  const isSuspended = suspendedNotice.isSuspended;
+  const [showSuspendedModal, setShowSuspendedModal] = useState<boolean>(() => isSuspended);
+
+  useEffect(() => {
+    if (isSuspended) {
+      setShowSuspendedModal(true);
+    }
+  }, [isSuspended]);
+  const listingAccess = useStoreListingAccess(user);
   const storeId = getUserStoreId(user);
   const { playOrderChime, announceStoreOrder, testStoreBankSpeaker } = useSound();
 
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [orders, setOrders] = useState<Order[]>(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const key = 'sob_cached_orders_' + (user?.storeId || 'store');
+        const raw = window.localStorage?.getItem(key) || window.sessionStorage?.getItem(key) || window.sessionStorage?.getItem('sob_cached_store_orders');
+        if (raw) {
+          const p = JSON.parse(raw);
+          if (Array.isArray(p) && p.length > 0) return p;
+        }
+      }
+    } catch {}
+    return [];
+  });
   const latestOrdersRef = useRef(orders);
   latestOrdersRef.current = orders;
   const [pendingStatusUpdates, setPendingStatusUpdates] = useState<Record<string, string>>({});
   const statusUpdatesRef = useRef(new Map<string, { previous: Order; displayStatus: string }>());
   const orderListRevision = useRef(0);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const key = 'sob_cached_orders_' + (user?.storeId || 'store');
+        const raw = window.localStorage?.getItem(key) || window.sessionStorage?.getItem(key) || window.sessionStorage?.getItem('sob_cached_store_orders');
+        return !raw;
+      }
+    } catch {}
+    return true;
+  });
+  const [ordersReady, setOrdersReady] = useState(() => {
+    try {
+      if (typeof window !== 'undefined') {
+        const key = 'sob_cached_orders_' + (user?.storeId || 'store');
+        const raw = window.localStorage?.getItem(key) || window.sessionStorage?.getItem(key) || window.sessionStorage?.getItem('sob_cached_store_orders');
+        return Boolean(raw);
+      }
+    } catch {}
+    return false;
+  });
+  const [ordersError, setOrdersError] = useState('');
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
   useEffect(() => {
@@ -125,7 +172,8 @@ export const StoreDashboard: React.FC = () => {
     try {
       const orderRes = await api.get('/orders');
       if (revision !== orderListRevision.current) return;
-      if (orderRes.data.success) {
+      if (orderRes.data?.success && Array.isArray(orderRes.data.data)) {
+        setOrdersReady(true); setOrdersError('');
         const fetchedOrders: Order[] = orderRes.data.data.map((raw: any) => {
           const order = normalizeOrder(raw);
           const pending = statusUpdatesRef.current.get(order.id);
@@ -133,6 +181,13 @@ export const StoreDashboard: React.FC = () => {
         });
         setOrders(fetchedOrders);
         setChartData(buildChartDataFromOrders(fetchedOrders));
+        try {
+          if (typeof window !== 'undefined') {
+            const key = 'sob_cached_orders_' + (user?.storeId || 'store');
+            window.localStorage?.setItem(key, JSON.stringify(fetchedOrders));
+            window.sessionStorage?.setItem('sob_cached_store_orders', JSON.stringify(fetchedOrders));
+          }
+        } catch {}
 
         // Auto-dismiss newOrderAlert if the order has already been accepted (status !== 'PENDING')
         setNewOrderAlert((currentAlert: any) => {
@@ -148,8 +203,11 @@ export const StoreDashboard: React.FC = () => {
           }
           return currentAlert;
         });
+      } else {
+        throw new Error('Invalid order list');
       }
     } catch (_) {
+      setOrdersError('Chưa cập nhật được đơn hàng. Dữ liệu đã tải được giữ lại.');
       toast.error('Không tải được dữ liệu đơn hàng. Vui lòng thử lại.');
     } finally {
       setLoading(false);
@@ -157,7 +215,8 @@ export const StoreDashboard: React.FC = () => {
   };
 
   useEffect(() => {
-    if (!token) return;
+    const activeToken = token || (typeof window !== 'undefined' ? localStorage.getItem('smart_order_token') : null);
+    if (!activeToken) return;
     setPendingStatusUpdates({});
     fetchOrders();
 
@@ -335,6 +394,7 @@ export const StoreDashboard: React.FC = () => {
 
     // Socket.IO provides immediate updates; this is a low-frequency fallback if it disconnects.
     const pollTimer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       fetchOrders();
     }, 15000);
 
@@ -355,7 +415,7 @@ export const StoreDashboard: React.FC = () => {
       unsubRentals();
       if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
     };
-  }, [user]);
+  }, [user, token]);
 
   const handleUpdateStatus = async (orderId: string, nextStatus: string) => {
     if (statusUpdatesRef.current.has(orderId)) return;
@@ -541,9 +601,7 @@ export const StoreDashboard: React.FC = () => {
   });
 
   // Metrics calculations
-  const totalRevenue = orders
-    .filter((o) => o.status !== 'CANCELLED' && o.status !== 'REJECTED')
-    .reduce((sum, o) => sum + o.totalAmount, 0);
+  const totalRevenue = orderDashboardMetrics(orders).provisionalSales;
 
   const pendingCount = orders.filter((o) => o.status === 'PENDING').length;
   const inProgressCount = orders.filter((o) => ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY', 'SHIPPING', 'READY_FOR_DELIVERY'].includes(o.status)).length;
@@ -784,9 +842,106 @@ export const StoreDashboard: React.FC = () => {
         </div>
       </div>
 
+            {/* Cửa hàng bị ngừng hoạt động notice banner */}
+      {isSuspended && (
+        <div className="mb-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-900 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200 shadow-sm">
+          <div className="flex items-start gap-3">
+            <XCircle className="h-5 w-5 shrink-0 text-rose-600 dark:text-rose-400 mt-0.5" />
+            <div className="flex-1">
+              <div className="flex items-center gap-2">
+                <h3 className="font-bold text-sm text-rose-900 dark:text-rose-100">
+                  Tài khoản của bạn bị ngừng hoạt động
+                </h3>
+                <span className="rounded-full bg-rose-100 px-2 py-0.5 text-[10px] font-bold text-rose-700 dark:bg-rose-900/60 dark:text-rose-300">
+                  TẠM NGỪNG HOẠT ĐỘNG
+                </span>
+              </div>
+              <p className="mt-1 text-xs text-rose-800 dark:text-rose-300">
+                {suspendedNotice.reason}
+              </p>
+              <p className="mt-1 text-[11px] text-rose-700/80 dark:text-rose-400/80">
+                Cửa hàng hiện không thể nhận đơn hàng hoặc đăng bán sản phẩm lên sàn Smart Order Button. Hãy liên hệ với ban quản trị hệ thống để được hỗ trợ mở khóa.
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowSuspendedModal(true)}
+              className="shrink-0 rounded-lg border border-rose-300 bg-white px-3 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-50 dark:border-rose-800 dark:bg-zinc-900 dark:text-rose-300 transition-colors cursor-pointer"
+            >
+              Xem chi tiết
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Modal popup cảnh báo tài khoản bị ngừng hoạt động */}
+      {showSuspendedModal && isSuspended && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-xs p-4">
+          <div className="relative w-full max-w-md rounded-2xl border border-rose-200 bg-white p-6 shadow-2xl dark:border-rose-900 dark:bg-zinc-900">
+            <div className="flex items-center gap-3 text-rose-600 dark:text-rose-400">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-rose-100 dark:bg-rose-950/60">
+                <XCircle className="h-6 w-6" />
+              </div>
+              <div>
+                <h2 className="text-base font-bold text-zinc-900 dark:text-white">
+                  Tài khoản của bạn bị ngừng hoạt động
+                </h2>
+                <p className="text-xs text-zinc-500">Thông báo từ Quản trị viên</p>
+              </div>
+            </div>
+            <div className="mt-4 rounded-xl bg-rose-50 p-3.5 text-xs text-rose-900 dark:bg-rose-950/30 dark:text-rose-200">
+              <p className="font-semibold">{suspendedNotice.reason}</p>
+              <p className="mt-1.5 opacity-90">
+                Cửa hàng {suspendedNotice.storeName ? `"${suspendedNotice.storeName}"` : ''} tạm thời bị khóa các tính năng bán hàng và nhận đơn trên sàn Smart Order Button.
+              </p>
+            </div>
+            <p className="mt-3 text-xs text-zinc-500 dark:text-zinc-400">
+              Nếu bạn có bất kỳ thắc mắc nào hoặc muốn mở lại hoạt động của cửa hàng, vui lòng liên hệ với ban quản trị hệ thống.
+            </p>
+            <div className="mt-5 flex justify-end gap-2.5">
+              <button
+                type="button"
+                onClick={() => setShowSuspendedModal(false)}
+                className="rounded-lg border border-zinc-200 bg-white px-4 py-2 text-xs font-semibold text-zinc-700 shadow-2xs hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 cursor-pointer"
+              >
+                Đã hiểu
+              </button>
+              <button
+                type="button"
+                onClick={() => void logout()}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-xs font-semibold text-white shadow-xs hover:bg-rose-700 cursor-pointer"
+              >
+                Đăng xuất
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Newly registered store package alert */}
+      {user?.role === 'STORE_OWNER' && !listingAccess.isGrandfathered && !listingAccess.allowed && listingAccess.requiresSubscription && (
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          <div className="flex items-center gap-3">
+            <AlertTriangle className="h-5 w-5 shrink-0 text-amber-600 dark:text-amber-400" />
+            <div>
+              <p className="font-semibold">Cửa hàng chưa kích hoạt gói dịch vụ</p>
+              <p className="mt-0.5 text-xs text-amber-800/90 dark:text-amber-300/90">
+                Cửa hàng cần đăng ký gói dịch vụ để có thể đăng tải sản phẩm và nhận đơn hàng trên sàn thương mại Smart Order Button.
+              </p>
+            </div>
+          </div>
+          <Link
+            to="/store/service-plans"
+            className="inline-flex min-h-9 items-center rounded-lg bg-[#287DA8] px-3.5 text-xs font-semibold text-white shadow-xs hover:bg-[#206588] transition-colors"
+          >
+            Đăng ký gói dịch vụ ngay →
+          </Link>
+        </div>
+      )}
       {/* ── Metrics Strip ── */}
       <div className="w-full">
-        <div className="store-orders-metrics">
+        {ordersError && <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{ordersError}</p>}
+      <div className="store-orders-metrics">
           {[
             {
               label: 'Chờ xử lý',
@@ -836,12 +991,12 @@ export const StoreDashboard: React.FC = () => {
               </div>
               {m.revenue !== undefined ? (
                 <div className="store-orders-metric-value text-zinc-900 dark:text-zinc-100">
-                  {Number(m.revenue || 0).toLocaleString()}
-                  <span className="store-orders-currency">₫</span>
+                  {formatMetric(!ordersReady ? null : m.revenue)}
+                  {ordersReady && m.revenue !== null && <span className="store-orders-currency">₫</span>}
                 </div>
               ) : (
                 <div className={`store-orders-metric-value ${m.valueColor}`}>
-                  {m.value}
+                  {!ordersReady ? '—' : m.value}
                 </div>
               )}
               <p className="store-orders-metric-description">{m.sub}</p>
@@ -969,7 +1124,7 @@ export const StoreDashboard: React.FC = () => {
 
         {/* Table */}
         <div ref={tableTopRef} className="store-orders-table-panel overflow-hidden scroll-mt-20">
-          {loading ? (
+          {loading && orders.length === 0 ? (
             <div className="store-orders-placeholder text-center">
               <div className="inline-flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-300">
                 <span className="w-2 h-2 rounded-full bg-zinc-300 dark:bg-zinc-600 animate-pulse inline-block"></span>

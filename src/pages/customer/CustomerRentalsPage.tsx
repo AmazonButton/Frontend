@@ -1,5 +1,5 @@
 // @refresh reset
-import React, { useState, useEffect, useCallback, useMemo } from 'react';
+import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
@@ -51,6 +51,10 @@ export const CustomerRentalsPage: React.FC = () => {
   const [packages, setPackages] = useState<RentalPackageItem[]>([]);
   const [myRentals, setMyRentals] = useState<CustomerRentalContract[]>([]);
   const [isLoading, setIsLoading] = useState(true);
+  const [isRentalsLoading, setIsRentalsLoading] = useState(true);
+  const [packagesError, setPackagesError] = useState('');
+  const [rentalsError, setRentalsError] = useState('');
+  const dataRequest = useRef(0);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
   // Modal checkout state
@@ -70,20 +74,27 @@ export const CustomerRentalsPage: React.FC = () => {
 
   // Fetch packages and my rentals
   const fetchData = useCallback(async () => {
-    try {
-      const isCust = user?.role === 'CUSTOMER' || Boolean(user?.customerProfileId);
-      const [pkgs, rentals] = await Promise.all([
-        rentalsService.listPackages().catch(() => []),
-        isCust ? rentalsService.getMyRentals().catch(() => []) : Promise.resolve([]),
-      ]);
-      setPackages(pkgs || []);
-      setMyRentals(rentals || []);
-    } catch (e) {
-      console.warn('Error loading rental data:', e);
-    } finally {
-      setIsLoading(false);
-      setIsRefreshing(false);
-    }
+    const request = ++dataRequest.current;
+    const isCurrent = () => request === dataRequest.current;
+    const isCust = user?.role === 'CUSTOMER' || Boolean(user?.customerProfileId);
+    setIsLoading(true);
+    setIsRentalsLoading(true);
+    // Each section settles independently: a contracts error must not block packages.
+    await Promise.all([
+      rentalsService.listPackages().then(pkgs => {
+        if (isCurrent()) { setPackages(pkgs); setPackagesError(''); }
+      }).catch(() => {
+        if (isCurrent()) setPackagesError('Chưa tải được các gói thuê nút bấm. Vui lòng thử lại.');
+      }).finally(() => { if (isCurrent()) setIsLoading(false); }),
+      (isCust ? rentalsService.getMyRentals() : Promise.resolve([])).then(rentals => {
+        if (isCurrent()) { setMyRentals(rentals); setRentalsError(''); }
+      }).catch((error) => {
+        if (isCurrent()) setRentalsError(error?.response?.status === 500
+          ? 'Máy chủ gặp lỗi khi tải hợp đồng thuê (HTTP 500). Vui lòng thử lại sau hoặc liên hệ hỗ trợ. Bạn vẫn có thể xem các gói thuê.'
+          : 'Chưa tải được hợp đồng thuê. Vui lòng thử lại.');
+      }).finally(() => { if (isCurrent()) setIsRentalsLoading(false); }),
+    ]);
+    if (isCurrent()) setIsRefreshing(false);
   }, [user?.role, user?.customerProfileId]);
 
   useEffect(() => {
@@ -96,6 +107,7 @@ export const CustomerRentalsPage: React.FC = () => {
     });
 
     return () => {
+      dataRequest.current++;
       unsub();
     };
   }, [fetchData]);
@@ -249,6 +261,28 @@ export const CustomerRentalsPage: React.FC = () => {
     }
   };
 
+  if (isLoading && packages.length === 0) {
+    return (
+      <section role="status" aria-live="polite" aria-busy="true" aria-label="Đang tải gói thuê nút bấm" className="customer-ui customer-rentals min-h-[65vh] px-4 py-12 sm:px-6">
+        <div className="mx-auto max-w-6xl">
+          <div className="flex min-h-32 flex-col items-center justify-center gap-3 text-[#0E6BA8] dark:text-sky-300">
+            <RefreshCw aria-hidden="true" className="h-7 w-7 motion-safe:animate-spin" />
+            <p className="text-sm font-medium">Đang tải các gói thuê nút bấm…</p>
+          </div>
+          <div aria-hidden="true" className="grid gap-6 md:grid-cols-3 motion-safe:animate-pulse">
+            {[0, 1, 2].map(index => <div key={index} className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+              <div className="h-12 w-12 rounded-2xl bg-slate-100 dark:bg-zinc-800" />
+              <div className="h-5 w-2/3 rounded bg-slate-100 dark:bg-zinc-800" />
+              <div className="h-9 w-1/2 rounded bg-slate-100 dark:bg-zinc-800" />
+              <div className="h-24 rounded-xl bg-slate-100 dark:bg-zinc-800" />
+              <div className="h-11 rounded-xl bg-slate-100 dark:bg-zinc-800" />
+            </div>)}
+          </div>
+        </div>
+      </section>
+    );
+  }
+
   return (
     <div className={`min-h-screen bg-slate-50/60 dark:bg-zinc-950 text-slate-900 dark:text-zinc-100 pb-16 ${user?.role === 'CUSTOMER' ? 'customer-ui customer-rentals' : ''}`}>
       {/* Top Breadcrumb & Page Banner */}
@@ -283,6 +317,7 @@ export const CustomerRentalsPage: React.FC = () => {
 
             {/* Quick Actions */}
             <div className="flex flex-wrap items-center gap-2.5 shrink-0">
+              {user?.role === 'CUSTOMER' && <button type="button" onClick={() => navigate('/customer/banking')} className="inline-flex min-h-10 items-center gap-1.5 rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800"><CreditCard className="h-3.5 w-3.5" />Ngân hàng nhận hoàn cọc</button>}
               <button
                 type="button"
                 onClick={handleRefresh}
@@ -420,7 +455,13 @@ export const CustomerRentalsPage: React.FC = () => {
             </div>
 
             {/* Packages Grid */}
-            {packages.length === 0 ? (
+            {packagesError ? (
+              <div role="alert" className="rounded-3xl border border-amber-200 bg-white p-10 text-center dark:border-amber-900 dark:bg-zinc-900">
+                <AlertCircle aria-hidden="true" className="mx-auto mb-3 h-6 w-6 text-amber-600" />
+                <p className="text-sm">{packagesError}</p>
+                <button type="button" onClick={handleRefresh} disabled={isRefreshing} className="mt-4 rounded-xl bg-[#0E6BA8] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Thử lại</button>
+              </div>
+            ) : packages.length === 0 ? (
               <div className="py-16 px-6 text-center rounded-3xl bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 space-y-3">
                 <div className="w-12 h-12 rounded-2xl bg-sky-50 dark:bg-sky-950/40 text-[#0E6BA8] dark:text-[#38a5da] mx-auto flex items-center justify-center">
                   <Cpu className="w-6 h-6" />
@@ -555,10 +596,17 @@ export const CustomerRentalsPage: React.FC = () => {
             transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
             className="space-y-4"
           >
-            {isLoading ? (
+            {isRentalsLoading ? (
               <div className="p-12 text-center text-slate-500 dark:text-zinc-400 space-y-2">
                 <RefreshCw className="w-6 h-6 animate-spin mx-auto text-[#0E6BA8]" />
                 <p className="text-xs font-medium">Đang tải danh sách hợp đồng thuê nút...</p>
+              </div>
+            ) : rentalsError ? (
+              <div role="alert" className="rounded-3xl border border-amber-200 bg-white p-10 text-center dark:border-amber-900 dark:bg-zinc-900">
+                <AlertCircle aria-hidden="true" className="mx-auto mb-3 h-6 w-6 text-amber-600" />
+                <h3 className="font-semibold">Chưa tải được hợp đồng thuê</h3>
+                <p className="mx-auto mt-2 max-w-xl text-sm text-slate-500 dark:text-zinc-400">{rentalsError}</p>
+                <button type="button" onClick={handleRefresh} disabled={isRefreshing} className="mt-4 rounded-xl bg-[#0E6BA8] px-4 py-2 text-sm font-semibold text-white disabled:opacity-50">Thử lại</button>
               </div>
             ) : myRentals.length === 0 ? (
               <div className="p-12 text-center bg-white dark:bg-zinc-900 rounded-3xl border border-slate-200 dark:border-zinc-800 space-y-4">

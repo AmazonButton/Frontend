@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { motion } from 'framer-motion';
+import { motion, useReducedMotion } from 'framer-motion';
 
 export interface NavItem {
   id: string;
@@ -27,6 +27,7 @@ export const HeaderNavigation: React.FC<HeaderNavigationProps> = ({
 }) => {
   const location = useLocation();
   const navigate = useNavigate();
+  const prefersReducedMotion = useReducedMotion();
 
   // Active item determined by route / scroll
   const [activeId, setActiveId] = useState<string>('features');
@@ -50,14 +51,14 @@ export const HeaderNavigation: React.FC<HeaderNavigationProps> = ({
             const offsetPosition = elementPosition + window.pageYOffset - headerOffset;
             window.scrollTo({
               top: Math.max(0, offsetPosition),
-              behavior: 'smooth'
+              behavior: prefersReducedMotion ? 'auto' : 'smooth'
             });
           }, 150);
           return () => clearTimeout(timer);
         }
       }
     }
-  }, [isLandingPage, location.hash]);
+  }, [isLandingPage, location.hash, prefersReducedMotion]);
 
   // Track active section on scroll when on Landing Page (ScrollSpy)
   useEffect(() => {
@@ -75,22 +76,16 @@ export const HeaderNavigation: React.FC<HeaderNavigationProps> = ({
 
       const navbarOffset = 120; // Trigger line below sticky header
 
-      for (let i = NAV_ITEMS.length - 1; i >= 0; i--) {
-        const item = NAV_ITEMS[i];
+      // Keep the preceding section selected through gaps, including How it works.
+      let currentId = NAV_ITEMS[0].id;
+      for (const item of NAV_ITEMS) {
         const element = document.getElementById(item.sectionId);
-        if (element) {
-          const rect = element.getBoundingClientRect();
-          if (rect.top <= navbarOffset && rect.bottom > navbarOffset - 80) {
-            setActiveId(item.id);
-            return;
-          }
+        if (element && element.getBoundingClientRect().top <= navbarOffset) {
+          currentId = item.id;
         }
       }
-
-      // Default to features if near top
-      if (window.scrollY < 200) {
-        setActiveId('features');
-      }
+      setActiveId(currentId);
+      setHoveredId(null);
     };
 
     window.addEventListener('scroll', handleScroll, { passive: true });
@@ -101,7 +96,7 @@ export const HeaderNavigation: React.FC<HeaderNavigationProps> = ({
 
   const handleNavClick = (e: React.MouseEvent<HTMLAnchorElement>, item: NavItem) => {
     e.preventDefault();
-    setActiveId(item.id);
+    setHoveredId(null);
 
     if (onMobileSelect) {
       onMobileSelect();
@@ -120,7 +115,7 @@ export const HeaderNavigation: React.FC<HeaderNavigationProps> = ({
 
       window.scrollTo({
         top: Math.max(0, offsetPosition),
-        behavior: 'smooth'
+        behavior: prefersReducedMotion ? 'auto' : 'smooth'
       });
 
       // Update URL hash without jumping
@@ -141,6 +136,7 @@ export const HeaderNavigation: React.FC<HeaderNavigationProps> = ({
             <a
               key={item.id}
               href={item.href}
+              aria-current={isSelected ? 'location' : undefined}
               onClick={(e) => handleNavClick(e, item)}
               className={`px-4 py-2.5 text-sm font-semibold rounded-xl transition-all duration-200 ${
                 isSelected
@@ -178,7 +174,8 @@ export const HeaderNavigation: React.FC<HeaderNavigationProps> = ({
                 layoutId="header-active-pill"
                 className="absolute inset-0 rounded-xl bg-slate-100/90 dark:bg-zinc-800/80 border border-slate-200/70 dark:border-zinc-700/60 shadow-xs pointer-events-none"
                 transition={{
-                  type: 'spring',
+                  type: prefersReducedMotion ? 'tween' : 'spring',
+                  ...(prefersReducedMotion ? { duration: 0 } : {}),
                   stiffness: 400,
                   damping: 32,
                   mass: 0.8
@@ -189,6 +186,7 @@ export const HeaderNavigation: React.FC<HeaderNavigationProps> = ({
             {/* Nav Link Item */}
             <a
               href={item.href}
+              aria-current={isSelected ? 'location' : undefined}
               onClick={(e) => handleNavClick(e, item)}
               className={`relative z-10 block px-3.5 py-1.5 text-xs font-semibold rounded-xl transition-colors duration-200 select-none outline-none focus-visible:ring-2 focus-visible:ring-slate-400 ${
                 isSelected

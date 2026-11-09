@@ -1,3 +1,4 @@
+import { readAdminDashboard } from '../src/services/dashboard-metrics.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -44,14 +45,14 @@ for (const prefix of ['../src/', '../../src/']) {
         assert.ok(Object.hasOwn(data, path), `Unexpected request: ${path}`);
         return { data: { success: true, data: data[path] } };
       } },
-      DEFAULT_AUDIT_LOGS: [], toast: { error: message => errors.push(message) },
+      adminRead: { current: 0 }, apiSessionMarker: () => 'admin-session', readAdminDashboard, toast: { error: message => errors.push(message) },
     };
-    for (const key of ['PendingStores', 'Stats', 'AuditLogs', 'UnassignedDevices', 'AllStores', 'UsersList', 'SubscriptionPlans', 'Loading']) context[`set${key}`] = value => { state[key] = value; };
+    for (const key of ['PendingStores', 'Stats', 'AuditLogs', 'UnassignedDevices', 'AllStores', 'UsersList', 'SubscriptionPlans', 'Loading', 'PendingReady', 'StatsError']) context[`set${key}`] = value => { state[key] = value; };
     await evaluate(fetchCallback, context)();
     assert.deepEqual(calls.sort(), Object.keys(data).sort());
     assert.equal(state.PendingStores, data['/admin/stores/pending']);
     assert.equal(state.Stats, data['/admin/stats']);
-    assert.equal(state.AuditLogs, data['/admin/audit-logs']);
+    assert.deepEqual(Array.from(state.AuditLogs), data['/admin/audit-logs']);
     assert.equal(state.UnassignedDevices, data['/devices/unassigned']);
     assert.equal(state.AllStores, data['/admin/stores']);
     assert.equal(state.UsersList[0].id, 'kept-user');
@@ -64,7 +65,8 @@ for (const prefix of ['../src/', '../../src/']) {
   test(`${prefix}removed and invalid section links show Overview while retained sections still work`, () => {
     for (const section of [null, 'SECURITY', 'UNKNOWN', 'OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS']) {
       let active = 'DEVICES';
-      const context = { searchParams: new URLSearchParams(section ? { section } : {}), setActiveTab: value => { active = value; } };
+      const replacements = [];
+      const context = { searchParams: new URLSearchParams(section ? { section } : {}), setActiveTab: value => { active = value; }, setSearchParams: (params, options) => replacements.push({ params, options }) };
       const expected = !section || ['SECURITY', 'UNKNOWN'].includes(section) ? 'OVERVIEW' : section;
       assert.equal(evaluate(initialTab, context)(), expected);
       evaluate(sectionEffect, context)();

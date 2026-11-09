@@ -4,8 +4,7 @@ import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../context/AuthContext';
 import { useTheme } from '../context/ThemeContext';
 import { useSound } from '../context/OrderSoundContext';
-import { LogOut, Shield, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, BadgeCheck, User as UserIcon, Volume2, VolumeX, Bluetooth, Menu, X, ShoppingCart, ReceiptText, ChevronDown } from 'lucide-react';
-import { WhiteDeviceAirPodsModal } from '../components/devices/WhiteDeviceAirPodsModal';
+import { LogOut, Shield, Store, Smartphone, Sun, Moon, Wifi, CheckCircle2, BadgeCheck, User as UserIcon, Volume2, VolumeX, Menu, X, ShoppingCart, ReceiptText, ChevronDown } from 'lucide-react';
 import { HeaderNavigation } from '../components/common/HeaderNavigation';
 import { LogoutConfirmModal } from '../components/common/LogoutConfirmModal';
 import { NotificationBellPopover } from '../components/common/NotificationBellPopover';
@@ -15,11 +14,10 @@ const MotionLink = (motion.create || motion)(Link);
 export const Navbar: React.FC = () => {
   const { user, logout } = useAuth();
   const { theme, toggleTheme } = useTheme();
-  const { isSoundEnabled, toggleSound, testSound } = useSound();
+  const { isSoundEnabled, toggleSound } = useSound();
   const navigate = useNavigate();
   const location = useLocation();
 
-  const [showAirPodsModal, setShowAirPodsModal] = useState(false);
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [isScrolled, setIsScrolled] = useState(false);
@@ -214,7 +212,41 @@ export const Navbar: React.FC = () => {
         <div className="flex items-center gap-2 sm:gap-3">
           {user ? (
             <div ref={userMenuRef} className="flex items-center gap-1.5 sm:gap-2">
-              <NotificationBellPopover />
+              {user.role === 'STORE_OWNER' && location.pathname !== '/store/dashboard' && (
+                <Link
+                  to="/store/dashboard"
+                  aria-label="Quản lý cửa hàng"
+                  className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg bg-[#287DA8] px-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#206588] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287DA8] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-900"
+                >
+                  <Store aria-hidden="true" className="h-4 w-4" />
+                  <span className="sm:hidden">Quản lý</span>
+                  <span className="hidden sm:inline">Quản lý cửa hàng</span>
+                </Link>
+              )}
+              <div role="group" aria-label="Thông báo và giao diện" className="flex shrink-0 items-center gap-0.5 sm:gap-1">
+                <NotificationBellPopover />
+                {isStoreUser && (
+                  <button
+                    type="button"
+                    onClick={toggleSound}
+                    aria-pressed={isSoundEnabled}
+                    aria-label="Chuông đơn hàng"
+                    title={isSoundEnabled ? 'Chuông đơn hàng đang bật — bấm để tắt' : 'Chuông đơn hàng đang tắt — bấm để bật'}
+                    className={`flex h-10 w-10 items-center justify-center rounded-lg transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287DA8] cursor-pointer ${isSoundEnabled ? 'bg-emerald-50 text-emerald-600 hover:bg-emerald-100 dark:bg-emerald-950/40 dark:text-emerald-400' : 'text-slate-400 hover:bg-slate-100 hover:text-slate-700 dark:text-zinc-500 dark:hover:bg-zinc-800'}`}
+                  >
+                    {isSoundEnabled ? <Volume2 aria-hidden="true" className="h-4 w-4" /> : <VolumeX aria-hidden="true" className="h-4 w-4" />}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={toggleTheme}
+                  aria-label={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}
+                  title={theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}
+                  className="flex h-10 w-10 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287DA8] dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-white cursor-pointer"
+                >
+                  {theme === 'dark' ? <Sun aria-hidden="true" className="h-4 w-4 text-amber-400" /> : <Moon aria-hidden="true" className="h-4 w-4" />}
+                </button>
+              </div>
 
               <div className="relative">
                 <button
@@ -261,6 +293,18 @@ export const Navbar: React.FC = () => {
                       </div>
 
                       <div className="py-1">
+                        {user.role === 'STORE_OWNER' && (
+                          <Link
+                            role="menuitem"
+                            to="/store/dashboard"
+                            aria-current={location.pathname === '/store/dashboard' ? 'page' : undefined}
+                            onClick={() => setUserMenuOpen(false)}
+                            className="flex min-h-10 items-center gap-2 rounded-lg px-3 text-xs font-semibold text-[#287DA8] hover:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287DA8] dark:text-sky-300 dark:hover:bg-sky-950/30"
+                          >
+                            <Store aria-hidden="true" className="h-3.5 w-3.5" />
+                            Vào dashboard
+                          </Link>
+                        )}
                         <Link
                           role="menuitem"
                           to={getProfileRoute(user.role)}
@@ -271,50 +315,8 @@ export const Navbar: React.FC = () => {
                           {isStoreUser ? 'Hồ sơ cửa hàng' : 'Hồ sơ của tôi'}
                         </Link>
 
-                        {isStoreUser && (
-                          <>
-                            <button
-                              type="button"
-                              onClick={() => {
-                                setUserMenuOpen(false);
-                                setShowAirPodsModal(true);
-                              }}
-                              className="flex min-h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white cursor-pointer"
-                            >
-                              <Bluetooth className="w-3.5 h-3.5 text-sky-500" />
-                              Nút Trắng Bluetooth
-                            </button>
-
-                            <button
-                              type="button"
-                              onClick={() => {
-                                toggleSound();
-                              }}
-                              className="flex min-h-9 w-full items-center justify-between rounded-lg px-3 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white cursor-pointer"
-                            >
-                              <span className="flex items-center gap-2">
-                                {isSoundEnabled ? <Volume2 className="w-3.5 h-3.5 text-emerald-500" /> : <VolumeX className="w-3.5 h-3.5 text-slate-400" />}
-                                Chuông đơn hàng
-                              </span>
-                              <span className={`text-[10px] font-bold px-1.5 py-0.5 rounded ${isSoundEnabled ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40' : 'bg-slate-100 text-slate-400 dark:bg-zinc-800'}`}>
-                                {isSoundEnabled ? 'BẬT' : 'TẮT'}
-                              </span>
-                            </button>
-                          </>
-                        )}
-
-                        <button
-                          role="menuitem"
-                          type="button"
-                          onClick={toggleTheme}
-                          className="flex min-h-9 w-full items-center gap-2 rounded-lg px-3 text-left text-xs font-medium text-slate-600 hover:bg-slate-50 hover:text-slate-900 dark:text-zinc-300 dark:hover:bg-zinc-800 dark:hover:text-white cursor-pointer"
-                        >
-                          {theme === 'dark' ? <Sun className="w-3.5 h-3.5 text-amber-400" /> : <Moon className="w-3.5 h-3.5 text-slate-600" />}
-                          {theme === 'dark' ? 'Chuyển sang giao diện sáng' : 'Chuyển sang giao diện tối'}
-                        </button>
                       </div>
 
-                      {user && ['STAFF_DELIVERY', 'STAFF_ORDER', 'STORE_OWNER', 'STORE_MANAGER', 'SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(user.role) && <Link role="menuitem" to="/driver/deliveries" onClick={() => setUserMenuOpen(false)} className="flex min-h-11 items-center gap-2 px-3 text-sm font-medium text-[#287DA8] hover:bg-sky-50 dark:hover:bg-zinc-800">Đi tới giao hàng</Link>}
                       <div className="my-1 border-t border-slate-100 dark:border-zinc-800" />
 
                       <button
@@ -394,12 +396,6 @@ export const Navbar: React.FC = () => {
       </AnimatePresence>
 
       
-
-      {/* Apple AirPods-Style Bluetooth Modal */}
-      <WhiteDeviceAirPodsModal
-        isOpen={showAirPodsModal}
-        onClose={() => setShowAirPodsModal(false)}
-      />
 
       {/* Designer Logout Confirmation Modal */}
       <LogoutConfirmModal

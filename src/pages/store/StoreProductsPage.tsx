@@ -1,3 +1,4 @@
+import { formatMetric } from '../../services/dashboard-metrics';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
@@ -7,6 +8,10 @@ import { notifyCatalogChanged } from '../../services/catalog-sync';
 import { toast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { getSocket, subscribeToStore } from '../../services/socket';
+import { useDashboardRefresh } from '../../hooks/useDashboardRefresh';
+import { useStoreListingAccess } from '../../hooks/useStoreListingAccess';
+import { isStoreSuspended } from '../../services/store-status';
+import { Link } from 'react-router-dom';
 import { Product } from '../../types';
 import {
   Package,
@@ -123,8 +128,10 @@ export const extractProductErrorMessage = (err: any, defaultMsg: string): string
 
 export const StoreProductsPage: React.FC = () => {
   const { user } = useAuth();
-  const [products, setProducts] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
+  const listingAccess = useStoreListingAccess(user);
+  const isSuspended = isStoreSuspended(user);
+  const [products, setProducts] = useState<Product[]>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_store_products') : null; if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; } } catch {} return []; });
+  const [loading, setLoading] = useState(() => { try { return !(typeof window !== 'undefined' && window.sessionStorage?.getItem('sob_cached_store_products')); } catch { return true; } });
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
 
@@ -142,6 +149,8 @@ export const StoreProductsPage: React.FC = () => {
   const [submitLoading, setSubmitLoading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const productRequest = useRef(0);
+  const [productsReady, setProductsReady] = useState(() => { try { return Boolean(typeof window !== 'undefined' && window.sessionStorage?.getItem('sob_cached_store_products')); } catch { return false; } });
+  const [productsError, setProductsError] = useState('');
 
   // Edit Product Modal State
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
@@ -176,7 +185,8 @@ export const StoreProductsPage: React.FC = () => {
       const res = await api.get('/products');
       if (request !== productRequest.current) return;
       if (res.data?.success && Array.isArray(res.data?.data)) {
-        setProducts(
+        setProductsReady(true); setProductsError('');
+        const mappedList =
           res.data.data.map((p: any) => ({
             ...p,
             id: String(p.id || p.productId),
@@ -190,21 +200,24 @@ export const StoreProductsPage: React.FC = () => {
             reservedStock: Number(p.reservedStock ?? p.inventory?.reservedQuantity ?? 0),
             minStockAlert: Number(p.minStockAlert ?? p.inventory?.minStockAlert ?? 5),
             imageUrl: p.imageUrl || p.thumbnailUrl || (p.images?.[0]?.imageUrl || ''),
-          }))
-        );
+          }));
+        setProducts(mappedList);
+        try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_store_products', JSON.stringify(mappedList)); } catch {}
       } else {
-        setProducts([]);
+        throw new Error('Invalid product list');
       }
     } catch (e) {
       if (request !== productRequest.current) return;
+      setProductsError('Chưa cập nhật được tồn kho. Dữ liệu đã tải được giữ lại; mục chưa tải hiển thị —.');
       toast.error('Không tải được danh sách sản phẩm. Vui lòng thử lại.');
-      setProducts([]);
+
     } finally {
       if (request === productRequest.current) setLoading(false);
     }
   };
 
   useEffect(() => {
+    if (products.length === 0) { setProductsReady(false); } setProductsError('');
     fetchProducts();
 
     if (user?.storeId) {
@@ -223,6 +236,7 @@ export const StoreProductsPage: React.FC = () => {
     socket.on('ORDER_CREATED', handleRefresh);
 
     return () => {
+      ++productRequest.current;
       socket.off('PRODUCT_CREATED', handleRefresh);
       socket.off('PRODUCT_UPDATED', handleRefresh);
       socket.off('PRODUCT_DELETED', handleRefresh);
@@ -289,6 +303,10 @@ export const StoreProductsPage: React.FC = () => {
     if (submitLoading) return;
 
     const currentUser = typeof user !== 'undefined' ? user : undefined;
+    if (currentUser?.role === 'STORE_OWNER') {
+      try { if (!await listingAccess.assertAllowed(true)) return; }
+      catch (error: any) { toast.error(error.message || 'Vui lòng kiểm tra gói dịch vụ trước khi đăng sản phẩm.'); return; }
+    }
     if (currentUser && !currentUser.storeId && currentUser.role !== 'SUPER_ADMIN') {
       const msg = 'Tài khoản hiện tại chưa được liên kết với cửa hàng nào để tạo sản phẩm. Vui lòng đăng nhập bằng tài khoản Chủ cửa hàng (STORE_OWNER).';
       if (typeof toast?.error === 'function') {
@@ -363,6 +381,7 @@ export const StoreProductsPage: React.FC = () => {
         resetAddForm();
         notifyCatalogChanged();
         toast.success('Thêm sản phẩm thành công.');
+        if (currentUser?.role === 'STORE_OWNER') void listingAccess.refresh();
         setSearchQuery('');
         setCategoryFilter('ALL');
         await fetchProducts();
@@ -476,6 +495,10 @@ export const StoreProductsPage: React.FC = () => {
     if (!statusConfirmation) return;
     const isCurrentlyInactive = statusConfirmation.currentStatus === 'INACTIVE';
     const nextStatus = isCurrentlyInactive ? 'ACTIVE' : 'INACTIVE';
+    if (user?.role === 'STORE_OWNER' && nextStatus === 'ACTIVE') {
+      try { if (!await listingAccess.assertAllowed(false)) return; }
+      catch (error: any) { toast.error(error.message || 'Gói dịch vụ chưa đủ điều kiện đăng bán.'); return; }
+    }
     const actionLabel = isCurrentlyInactive ? 'kích hoạt lại' : 'ngừng kinh doanh (vô hiệu hóa)';
 
     setStatusUpdating(true);
@@ -536,11 +559,12 @@ export const StoreProductsPage: React.FC = () => {
     }
   };
 
+  useDashboardRefresh(() => { if (!submitLoading && !editLoading && !savingPrice && !statusUpdating) return fetchProducts(); }, 'products:' + user?.id + ':' + user?.storeId, true);
   // Metrics summary
   const totalSkus = (products || []).length;
   const totalStockCount = (products || []).reduce((acc, p) => acc + (Number(p.stock) || 0), 0);
   const totalReserved = (products || []).reduce((acc, p) => acc + (Number(p.reservedStock) || 0), 0);
-  const lowStockProducts = (products || []).filter((p) => (Number(p.stock) || 0) <= (Number(p.minStockAlert) || 5));
+  const lowStockProducts = (products || []).filter((p) => (Number(p.stock) || 0) <= (Number(p.minStockAlert ?? 5)));
 
   // Filtered products
   const filteredProducts = useMemo(() => {
@@ -596,12 +620,22 @@ export const StoreProductsPage: React.FC = () => {
         <div className="flex items-center gap-2.5">
           <motion.button
             type="button"
+            disabled={isSuspended || (user?.role === 'STORE_OWNER' && !listingAccess.allowed)}
+            title={user?.role === 'STORE_OWNER' && !listingAccess.allowed ? listingAccess.reason : undefined}
             whileTap={{ scale: 0.96 }}
             onClick={() => {
+              if (isSuspended) {
+                toast.error('Tài khoản của bạn bị ngừng hoạt động. Không thể tạo sản phẩm mới.');
+                return;
+              }
+              if (user?.role === 'STORE_OWNER' && !listingAccess.allowed) {
+                toast.error(listingAccess.reason || 'Cửa hàng chưa đăng ký gói dịch vụ. Vui lòng đăng ký gói dịch vụ để có thể đăng sản phẩm bán lên sàn.');
+                return;
+              }
               resetAddForm();
               setShowAddModal(true);
             }}
-            className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#287DA8] hover:bg-[#206588] text-white text-xs font-semibold shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg bg-[#287DA8] hover:bg-[#206588] text-white text-xs font-semibold shadow-[0_2px_8px_rgba(40,125,168,0.25)] transition-all cursor-pointer disabled:cursor-not-allowed disabled:opacity-50"
           >
             <Plus className="w-3.5 h-3.5" />
             <span>Thêm Sản Phẩm Mới</span>
@@ -609,6 +643,66 @@ export const StoreProductsPage: React.FC = () => {
         </div>
       </div>
 
+      {productsError && <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/30 dark:text-amber-300">{productsError}</p>}
+      {user?.role === 'STORE_OWNER' && (
+        <section aria-label="Điều kiện đăng sản phẩm" className={`rounded-xl border p-4 text-sm ${
+          listingAccess.allowed
+            ? 'border-emerald-200 bg-emerald-50/60 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-300'
+            : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200'
+        }`}>
+          <div className="flex flex-wrap items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                {listingAccess.isGrandfathered ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200">
+                    🛡️ Cửa hàng hiện hữu (Miễn trừ gói dịch vụ)
+                  </span>
+                ) : listingAccess.allowed ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200">
+                    ✅ Gói dịch vụ còn hiệu lực
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/60 dark:text-amber-200">
+                    ⚠️ Yêu cầu gói dịch vụ
+                  </span>
+                )}
+                <span className="font-semibold text-xs text-zinc-600 dark:text-zinc-400">
+                  {listingAccess.isGrandfathered
+                    ? 'Quyền đăng sản phẩm: Không giới hạn'
+                    : listingAccess.allowed
+                    ? `${listingAccess.totalProducts ?? 0}/${listingAccess.subscription?.plan?.maxProducts ?? '—'} sản phẩm`
+                    : 'Quyền đăng sản phẩm: Đang bị khóa'}
+                </span>
+              </div>
+              <p className="mt-1.5 text-xs text-zinc-700 dark:text-zinc-300">
+                {listingAccess.checking
+                  ? 'Đang kiểm tra gói dịch vụ…'
+                  : listingAccess.isGrandfathered
+                  ? 'Cửa hàng của bạn thuộc nhóm cửa hàng thành viên ban đầu, được miễn trừ bắt buộc đăng ký gói và toàn quyền đăng bán sản phẩm không giới hạn.'
+                  : listingAccess.allowed
+                  ? `Cửa hàng đang sử dụng ${listingAccess.subscription?.plan?.planName || 'gói dịch vụ'}. Bạn có thể đăng mới hoặc mở bán lại sản phẩm trong giới hạn của gói.`
+                  : (listingAccess.reason || 'Cửa hàng chưa đăng ký gói dịch vụ. Vui lòng đăng ký gói dịch vụ để có thể đăng sản phẩm bán lên sàn.')}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                disabled={listingAccess.checking}
+                onClick={() => void listingAccess.refresh()}
+                className="inline-flex min-h-9 items-center justify-center rounded-lg border border-current/20 px-3 text-xs font-semibold hover:bg-black/5 dark:hover:bg-white/5 disabled:opacity-50 transition-colors"
+              >
+                Kiểm tra lại
+              </button>
+              <Link
+                to={user?.role === 'STORE_OWNER' && !listingAccess.allowed ? '/store/service-plans' : '/store/finance#subscription-current'}
+                className="inline-flex min-h-9 items-center justify-center rounded-lg bg-[#287DA8] px-3.5 text-xs font-semibold text-white shadow-xs hover:bg-[#206588] transition-colors"
+              >
+                {listingAccess.allowed ? 'Quản lý gói dịch vụ' : 'Đăng ký gói dịch vụ ngay →'}
+              </Link>
+            </div>
+          </div>
+        </section>
+      )}
       {/* 2. Unified Inline Metrics Bar */}
       <div className="grid grid-cols-2 sm:grid-cols-4 bg-white dark:bg-[#09090B] border border-zinc-200 dark:border-zinc-800 rounded-xl divide-y sm:divide-y-0 sm:divide-x divide-zinc-200 dark:divide-zinc-800">
         <div className="p-3.5 flex flex-col justify-between">
@@ -617,7 +711,7 @@ export const StoreProductsPage: React.FC = () => {
           </span>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-2xl font-bold font-mono text-zinc-900 dark:text-zinc-100">
-              {totalSkus}
+              {formatMetric(productsReady ? totalSkus : null)}
             </span>
             <span className="text-[11px] font-mono text-zinc-400">mã hàng</span>
           </div>
@@ -629,7 +723,7 @@ export const StoreProductsPage: React.FC = () => {
           </span>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-2xl font-bold font-mono text-zinc-900 dark:text-zinc-100">
-              {totalStockCount.toLocaleString()}
+              {formatMetric(productsReady ? totalStockCount : null)}
             </span>
             <span className="text-[11px] font-mono text-zinc-400">đơn vị</span>
           </div>
@@ -641,7 +735,7 @@ export const StoreProductsPage: React.FC = () => {
           </span>
           <div className="mt-1 flex items-baseline gap-2">
             <span className="text-2xl font-bold font-mono text-zinc-900 dark:text-zinc-100">
-              {totalReserved}
+              {formatMetric(productsReady ? totalReserved : null)}
             </span>
             <span className="text-[11px] font-mono text-zinc-400">chờ xuất kho</span>
           </div>
@@ -666,7 +760,7 @@ export const StoreProductsPage: React.FC = () => {
                   : 'text-zinc-900 dark:text-zinc-100'
               }`}
             >
-              {lowStockProducts.length}
+              {formatMetric(productsReady ? lowStockProducts.length : null)}
             </span>
             <span className="text-[11px] text-zinc-400">
               {lowStockProducts.length > 0 ? 'cần nhập thêm' : 'ổn định'}
@@ -788,6 +882,7 @@ export const StoreProductsPage: React.FC = () => {
                           >
                             {prod.imageUrl ? (
                               <img
+                                crossOrigin={/^https:\/\/res\.cloudinary\.com\//i.test(prod.imageUrl) ? 'anonymous' : undefined}
                                 src={prod.imageUrl}
                                 alt={prod.name}
                                 loading="lazy"
@@ -1182,6 +1277,7 @@ export const StoreProductsPage: React.FC = () => {
                         {imageUrl ? (
                           <>
                             <img
+                              crossOrigin={/^https:\/\/res\.cloudinary\.com\//i.test(imageUrl) ? 'anonymous' : undefined}
                               src={imageUrl}
                               alt="Xem trước ảnh sản phẩm"
                               className="w-full h-full object-contain p-1"
@@ -1423,6 +1519,7 @@ export const StoreProductsPage: React.FC = () => {
                         {editImageUrl ? (
                           <>
                             <img
+                              crossOrigin={/^https:\/\/res\.cloudinary\.com\//i.test(editImageUrl) ? 'anonymous' : undefined}
                               src={editImageUrl}
                               alt="Xem trước ảnh"
                               className="w-full h-full object-contain p-1"

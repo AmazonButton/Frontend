@@ -3,10 +3,8 @@ import ReactDOM from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
 import { motion, LayoutGroup, AnimatePresence } from 'framer-motion';
 import {
-  BadgeCheck,
   BarChart3,
   Cpu,
-  Key,
   Landmark,
   Layers,
   LayoutDashboard,
@@ -24,6 +22,12 @@ import {
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSidebar } from '../context/SidebarContext';
+import { CustomerAccountNavigation, CUSTOMER_ACCOUNT_LINKS } from '../components/customer/CustomerAccountNavigation';
+import { StoreFinanceNavigation } from '../components/store/StoreFinanceNavigation';
+import { StoreRevenueNavigation } from '../components/store/StoreRevenueNavigation';
+import { AdminPackageNavigation } from '../components/admin/AdminPackageNavigation';
+import { AdminAccountNavigation } from '../components/admin/AdminAccountNavigation';
+import { AdminRevenueNavigation } from '../components/admin/AdminRevenueNavigation';
 
 type NavigationItem = {
   to: string;
@@ -33,39 +37,28 @@ type NavigationItem = {
 
 const storeLinks: NavigationItem[] = [
   { to: '/store/dashboard', label: 'Đơn hàng trực tiếp', icon: ShoppingBag },
-  { to: '/store/devices', label: 'Hạm đội nút bấm', icon: Cpu },
+  { to: '/store/devices', label: 'Danh sách nút bấm', icon: Cpu },
   { to: '/store/rentals', label: 'Gói thuê nút IoT', icon: Cpu },
-  { to: '/store/device-templates', label: 'Mẫu thiết bị', icon: Layers },
   { to: '/store/products', label: 'Sản phẩm & tồn kho', icon: Package },
   { to: '/store/analytics', label: 'Báo cáo doanh thu', icon: BarChart3 },
-  { to: '/store/wallet', label: 'Ví & rút tiền', icon: Wallet },
-  { to: '/store/profile?tab=SECURITY', label: 'Đổi mật khẩu', icon: Key },
 ];
 
 const customerLinks: NavigationItem[] = [
   { to: '/shop', label: 'Mua sắm', icon: ShoppingCart },
   { to: '/customer/home', label: 'Nút của tôi', icon: Smartphone },
-  { to: '/customer/pair-device', label: 'Thêm nút bằng mã', icon: Cpu },
   { to: '/customer/rentals', label: 'Thuê nút bấm', icon: Cpu },
   { to: '/customer/orders', label: 'Đơn hàng', icon: ReceiptText },
-  { to: '/customer/verification', label: 'Xác minh eKYC', icon: BadgeCheck },
   { to: '/customer/profile', label: 'Tài khoản', icon: UserRound },
-  { to: '/customer/profile?tab=SECURITY', label: 'Đổi mật khẩu', icon: Key },
 ];
 
 const adminLinks: NavigationItem[] = [
   { to: '/admin/dashboard', label: 'Tổng quan', icon: LayoutDashboard },
   { to: '/admin/dashboard?section=STORES', label: 'Cửa hàng', icon: Store },
-  { to: '/admin/dashboard?section=PLANS', label: 'Gói dịch vụ', icon: Wallet },
   { to: '/admin/dashboard?section=RENTALS', label: 'Gói thuê nút bấm', icon: Cpu },
-  { to: '/admin/dashboard?section=CATALOG', label: 'Danh mục sản phẩm', icon: Layers },
   { to: '/admin/dashboard?section=DEVICES', label: 'Kho nút bấm', icon: Cpu },
   { to: '/admin/dashboard?section=RBAC', label: 'Tài khoản & phân quyền', icon: UserRound },
-  { to: '/admin/dashboard?section=TELEMETRY', label: 'Thiết bị & pin', icon: Smartphone },
   { to: '/admin/dashboard?section=ANALYTICS', label: 'Báo cáo & doanh thu', icon: BarChart3 },
   { to: '/admin/dashboard?section=NOTIFICATIONS', label: 'Cài đặt thông báo', icon: ShoppingBag },
-  { to: '/admin/payouts', label: 'Theo dõi chi trả', icon: Wallet },
-  { to: '/admin/identity', label: 'Xác minh danh tính', icon: BadgeCheck },
   { to: '/admin/rental-activation', label: 'Kích hoạt hợp đồng thuê', icon: Cpu },
   { to: '/admin/profile', label: 'Tài khoản', icon: UserRound },
 ];
@@ -79,17 +72,19 @@ export const Sidebar: React.FC = () => {
 
   useEffect(() => {
     if (mobileMenuRef.current) mobileMenuRef.current.open = false;
-  }, [location.pathname, location.search]);
+  }, [location.pathname, location.search, location.hash]);
 
   const isCustomer = user?.role === 'CUSTOMER';
+  const accountTab = new URLSearchParams(location.search).get('tab') || 'INFO';
+  const selectedAccountTab = location.pathname === '/customer/verification' ? 'VERIFICATION' : accountTab;
   const isAdmin = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '');
   const links = isCustomer
     ? customerLinks
     : isAdmin
       ? adminLinks
       : [
-          ...storeLinks,
-          ...(['STORE_OWNER', 'STORE_MANAGER', 'STAFF_ORDER'].includes(user?.role || '') ? [{ to: '/driver/deliveries', label: 'Giao hàng', icon: Truck }, { to: '/driver/shifts', label: 'Ca & bàn giao', icon: ReceiptText }] : []),
+          ...storeLinks.filter(link => !(user?.role === 'STORE_OWNER' && link.to === '/store/rentals')),
+          ...(['STORE_OWNER', 'STORE_MANAGER', 'STAFF_ORDER'].includes(user?.role || '') ? [{ to: '/driver/deliveries', label: 'Giao hàng', icon: Truck }] : []),
           ...(['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role || '')
             ? [{ to: '/store/finance', label: 'Gói & ngân hàng', icon: Landmark }]
             : []),
@@ -111,7 +106,7 @@ export const Sidebar: React.FC = () => {
     }
     if (search) return location.pathname === pathname && location.search === `?${search}`;
     if (path.includes('profile')) {
-      return location.pathname === pathname && (!location.search || location.search === '?tab=INFO');
+      return location.pathname === pathname && (pathname === '/customer/profile' || !location.search || location.search === '?tab=INFO');
     }
     return location.pathname === path || location.pathname.startsWith(`${path}/`);
   };
@@ -126,11 +121,11 @@ export const Sidebar: React.FC = () => {
     }}>
       <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 px-4 py-3 text-sm font-semibold text-zinc-800 dark:text-zinc-100 [&::-webkit-details-marker]:hidden">
         <Menu size={20} className="shrink-0" />
-        <span className="min-w-0 break-words">{links.find((item) => isLinkActive(item.to))?.label || 'Menu điều hướng'}</span>
+        <span className="min-w-0 break-words">{isAdmin && location.pathname === '/admin/payouts' ? 'Theo dõi chi trả' : isAdmin && location.pathname === '/admin/dashboard' && ['PLANS', 'RENTALS'].includes(new URLSearchParams(location.search).get('section') || '') ? 'Gói nút bấm' : !isCustomer && !isAdmin && ['/store/finance', '/store/service-plans'].includes(location.pathname) ? 'Gói & ngân hàng' : isCustomer && ['/customer/profile', '/profile', '/customer/verification'].includes(location.pathname) ? CUSTOMER_ACCOUNT_LINKS.find(item => item.tab === selectedAccountTab)?.label || 'Tài khoản' : links.find((item) => isLinkActive(item.to))?.label || 'Menu điều hướng'}</span>
         <span className="ml-auto shrink-0 text-xs text-zinc-500">Menu</span>
       </summary>
       <nav aria-label="Điều hướng trên điện thoại" className="grid gap-1 px-3 pb-3 sm:grid-cols-2">
-        {links.map(({ to, label, icon: Icon }) => (
+        {links.map(({ to, label, icon: Icon }) => to === '/admin/dashboard?section=ANALYTICS' ? <AdminRevenueNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/admin/profile' ? <AdminAccountNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/admin/dashboard?section=RENTALS' ? <AdminPackageNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/analytics' ? <StoreRevenueNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/finance' ? <StoreFinanceNavigation key={to} mobile canRegister={user?.role === 'STORE_OWNER'} onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : isCustomer && to === '/customer/profile' ? <CustomerAccountNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : (
           <Link key={to} to={to} aria-current={isLinkActive(to) ? 'page' : undefined}
             onClick={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }}
             className={`flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm ${isLinkActive(to) ? 'bg-sky-50 font-semibold text-sky-700 dark:bg-sky-950 dark:text-sky-300' : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900'}`}>
@@ -185,6 +180,12 @@ export const Sidebar: React.FC = () => {
         <LayoutGroup id="sidebar-navigation">
           <nav className="px-3.5 space-y-1 mt-1">
             {links.map((item) => {
+              if (item.to === '/admin/dashboard?section=ANALYTICS') return <AdminRevenueNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
+              if (item.to === '/admin/profile') return <AdminAccountNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
+              if (item.to === '/admin/dashboard?section=RENTALS') return <AdminPackageNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
+              if (item.to === '/store/analytics') return <StoreRevenueNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
+              if (item.to === '/store/finance') return <StoreFinanceNavigation key={item.to} canRegister={user?.role === 'STORE_OWNER'} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
+              if (isCustomer && item.to === '/customer/profile') return <CustomerAccountNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
               const Icon = item.icon;
               const isActive = isLinkActive(item.to);
               return (

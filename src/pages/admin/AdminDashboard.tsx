@@ -1,6 +1,8 @@
 import './admin-ui.css';
 import { ADMIN_SECTIONS, adminActionLabel, adminEntityLabel, adminTriggerLabel } from './admin-presentation';
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
+import { apiSessionMarker } from '../../services/api';
+import { loadStoresSubscriptionOverview, type AdminStoreSubscriptionItem } from '../../services/admin-store-subscriptions';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useSearchParams } from 'react-router-dom';
@@ -297,6 +299,7 @@ const renderAuditLogDetails = (log: AuditLog) => {
 };
 
 export const AdminDashboard: React.FC = () => {
+  const adminRead = useRef(0);
   const [searchParams, setSearchParams] = useSearchParams();
   // Navigation tabs organized sequentially by physical IoT operational lifecycle
   const [activeTab, setActiveTab] = useState<
@@ -416,9 +419,9 @@ export const AdminDashboard: React.FC = () => {
     durationDays: '30',
     maxProducts: '50',
   });
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<any>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_admin_stats') : null; return raw ? JSON.parse(raw) : null; } catch { return null; } });
   const [auditLogs, setAuditLogs] = useState<AuditLog[]>(DEFAULT_AUDIT_LOGS);
-  const [loading, setLoading] = useState(true);
+  const [loading, setLoading] = useState(() => { try { return !(typeof window !== 'undefined' && window.sessionStorage?.getItem('sob_cached_admin_stats')); } catch { return true; } });
 
   // Reject modal state
   const [rejectingStoreId, setRejectingStoreId] = useState<string | null>(null);
@@ -427,7 +430,89 @@ export const AdminDashboard: React.FC = () => {
 
   // Device Batch Inventory & Allocation State
   const [unassignedDevices, setUnassignedDevices] = useState<any[]>([]);
-  const [allStores, setAllStores] = useState<any[]>([]);
+  const [allStores, setAllStores] = useState<any[]>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_admin_stores') : null; if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; } } catch {} return []; });
+  const [storeSubs, setStoreSubs] = useState<AdminStoreSubscriptionItem[]>([]);
+  const [storeSubsLoading, setStoreSubsLoading] = useState(false);
+  const [storeSubsSearch, setStoreSubsSearch] = useState('');
+  const [storeSubsFilter, setStoreSubsFilter] = useState<'ALL' | 'SUBSCRIBED' | 'UNSUBSCRIBED' | 'EXEMPT'>('ALL');
+  const [storesFilter, setStoresFilter] = useState<'ALL' | 'ACTIVE' | 'SUSPENDED' | 'PENDING'>('ALL');
+  const [storesSearch, setStoresSearch] = useState('');
+
+  const loadStoreSubscriptions = useCallback(async (storesList?: any[]) => {
+    const list = storesList || allStores;
+    if (!list || list.length === 0) return;
+    setStoreSubsLoading(true);
+    try {
+      const items = await loadStoresSubscriptionOverview(api, list);
+      setStoreSubs(items);
+    } catch {
+      // silently handle
+    } finally {
+      setStoreSubsLoading(false);
+    }
+  }, [allStores]);
+
+  useEffect(() => {
+    if (allStores.length > 0 && plansSubTab === 'STORE_PLANS') {
+      void loadStoreSubscriptions(allStores);
+    }
+  }, [allStores, plansSubTab, loadStoreSubscriptions]);
+
+  const filteredStoreSubs = useMemo(() => {
+    return storeSubs.filter((item) => {
+      if (storeSubsFilter === 'SUBSCRIBED' && item.statusCategory !== 'SUBSCRIBED') return false;
+      if (storeSubsFilter === 'UNSUBSCRIBED' && item.statusCategory !== 'UNSUBSCRIBED') return false;
+      if (storeSubsFilter === 'EXEMPT' && item.statusCategory !== 'EXEMPT') return false;
+      if (storeSubsSearch.trim()) {
+        const q = storeSubsSearch.toLowerCase().trim();
+        const match =
+          item.storeName.toLowerCase().includes(q) ||
+          item.storeCode.toLowerCase().includes(q) ||
+          item.ownerName.toLowerCase().includes(q) ||
+          item.email.toLowerCase().includes(q) ||
+          item.phone.toLowerCase().includes(q);
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [storeSubs, storeSubsFilter, storeSubsSearch]);
+
+  const filteredAllStores = useMemo(() => {
+    return allStores.filter((s) => {
+      if (storesFilter === 'ACTIVE' && s.status !== 'ACTIVE') return false;
+      if (storesFilter === 'SUSPENDED' && s.status !== 'SUSPENDED') return false;
+      if (storesFilter === 'PENDING' && !['INACTIVE', 'PENDING_APPROVAL', 'PENDING'].includes(s.status)) return false;
+      if (storesSearch.trim()) {
+        const q = storesSearch.toLowerCase().trim();
+        const match =
+          (s.name && s.name.toLowerCase().includes(q)) ||
+          (s.code && s.code.toLowerCase().includes(q)) ||
+          (s.ownerName && s.ownerName.toLowerCase().includes(q)) ||
+          (s.owner?.fullName && s.owner.fullName.toLowerCase().includes(q)) ||
+          (s.phone && String(s.phone).includes(q)) ||
+          (s.email && s.email.toLowerCase().includes(q)) ||
+          (s.address && s.address.toLowerCase().includes(q));
+        if (!match) return false;
+      }
+      return true;
+    });
+  }, [allStores, storesFilter, storesSearch]);
+
+  const storesStats = useMemo(() => {
+    const total = allStores.length;
+    const active = allStores.filter(s => s.status === 'ACTIVE').length;
+    const suspended = allStores.filter(s => s.status === 'SUSPENDED').length;
+    const pending = allStores.filter(s => ['INACTIVE', 'PENDING_APPROVAL', 'PENDING'].includes(s.status)).length;
+    return { total, active, suspended, pending };
+  }, [allStores]);
+
+  const storeSubsMetrics = useMemo(() => {
+    const total = storeSubs.length;
+    const subscribed = storeSubs.filter(s => s.statusCategory === 'SUBSCRIBED').length;
+    const exempt = storeSubs.filter(s => s.statusCategory === 'EXEMPT').length;
+    const unsubscribed = storeSubs.filter(s => s.statusCategory === 'UNSUBSCRIBED').length;
+    return { total, subscribed, exempt, unsubscribed };
+  }, [storeSubs]);
   const [selectedDeviceIds, setSelectedDeviceIds] = useState<string[]>([]);
   const [showBatchModal, setShowBatchModal] = useState(false);
   const [showAllocateModal, setShowAllocateModal] = useState(false);
@@ -638,6 +723,8 @@ export const AdminDashboard: React.FC = () => {
   ]);
 
   const fetchAdminData = async () => {
+    const marker = typeof apiSessionMarker === 'function' ? apiSessionMarker() : null;
+    const request = ++adminRead.current;
     try {
       const [pendingRes, statsRes, logsRes, unassignedRes, storesRes, usersRes, plansRes] = await Promise.all([
         api.get('/admin/stores/pending'),
@@ -649,8 +736,10 @@ export const AdminDashboard: React.FC = () => {
         api.get('/admin/plans').catch(() => ({ data: { success: false, data: [] } })),
       ]);
 
+      if (adminRead.current !== request || (marker && typeof apiSessionMarker === 'function' && apiSessionMarker() !== marker)) return;
+
       if (pendingRes.data.success) setPendingStores(pendingRes.data.data);
-      if (statsRes.data.success) setStats(statsRes.data.data);
+      if (statsRes.data.success) { setStats(statsRes.data.data); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_admin_stats', JSON.stringify(statsRes.data.data)); } catch {} }
       if (logsRes.data?.success && Array.isArray(logsRes.data.data) && logsRes.data.data.length > 0) {
         const backendLogs = logsRes.data.data;
         if (backendLogs.length >= 8) {
@@ -664,7 +753,7 @@ export const AdminDashboard: React.FC = () => {
         setAuditLogs(DEFAULT_AUDIT_LOGS);
       }
       if (unassignedRes.data.success) setUnassignedDevices(unassignedRes.data.data || []);
-      if (storesRes.data.success) setAllStores(storesRes.data.data || []);
+      if (storesRes.data.success) { setAllStores(storesRes.data.data || []); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_admin_stores', JSON.stringify(storesRes.data.data || [])); } catch {} }
       if (usersRes.data?.success && Array.isArray(usersRes.data.data) && usersRes.data.data.length > 0) {
         const mapped = usersRes.data.data.map((u: any) => ({
           ...u,
@@ -678,9 +767,12 @@ export const AdminDashboard: React.FC = () => {
         setSubscriptionPlans(plansRes.data.data);
       }
     } catch (e) {
+      if (adminRead.current !== request || (marker && typeof apiSessionMarker === 'function' && apiSessionMarker() !== marker)) return;
       toast.error('Không tải được dữ liệu admin. Vui lòng thử lại.');
     } finally {
-      setLoading(false);
+      if (adminRead.current === request && (!marker || typeof apiSessionMarker !== 'function' || apiSessionMarker() === marker)) {
+        setLoading(false);
+      }
     }
   };
 
@@ -1248,19 +1340,78 @@ export const AdminDashboard: React.FC = () => {
           </div>
 
           {/* Active Stores Fleet Directory */}
-          <div className="space-y-2.5">
+          <div className="space-y-4">
             <div className="admin-section-heading">
               <div className="flex items-center gap-2">
                 <StoreIcon className="w-4 h-4 text-zinc-700 dark:text-zinc-300" />
-                <h3 className="text-xs font-semibold text-zinc-900 dark:text-white   ">
-                  Danh sách cửa hàng ({allStores.length})
+                <h3 className="text-xs font-semibold text-zinc-900 dark:text-white">
+                  Tất cả cửa hàng trong hệ thống ({allStores.length})
                 </h3>
               </div>
-              <span className="text-[11px] text-zinc-600 ">Mạng lưới phân phối ủy quyền</span>
+              <span className="text-[11px] text-zinc-600">Dữ liệu thời gian thực từ máy chủ</span>
             </div>
 
-            {allStores.length === 0 ? (
-              <p className="text-xs text-zinc-600 py-6 text-center ">Chưa có trạm đại lý nào được kích hoạt.</p>
+            {/* Thống kê cửa hàng */}
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+              <div className="rounded-lg border border-zinc-100 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/40">
+                <p className="text-[11px] font-medium text-zinc-500">Tổng cửa hàng</p>
+                <p className="mt-1 text-lg font-bold text-zinc-900 dark:text-white">{storesStats.total}</p>
+                <p className="text-[10px] text-zinc-400">Đã đăng ký tài khoản</p>
+              </div>
+              <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-3 dark:border-emerald-950/40 dark:bg-emerald-950/20">
+                <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">Đang hoạt động</p>
+                <p className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-200">{storesStats.active}</p>
+                <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80">Kinh doanh bình thường</p>
+              </div>
+              <div className="rounded-lg border border-rose-100 bg-rose-50/50 p-3 dark:border-rose-950/40 dark:bg-rose-950/20">
+                <p className="text-[11px] font-medium text-rose-800 dark:text-rose-300">Ngừng hoạt động</p>
+                <p className="mt-1 text-lg font-bold text-rose-700 dark:text-rose-200">{storesStats.suspended}</p>
+                <p className="text-[10px] text-rose-600/80 dark:text-rose-400/80">Đã bị khóa / ngừng</p>
+              </div>
+              <div className="rounded-lg border border-amber-100 bg-amber-50/50 p-3 dark:border-amber-950/40 dark:bg-amber-950/20">
+                <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">Chờ phê duyệt</p>
+                <p className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-200">{storesStats.pending}</p>
+                <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80">Đơn mới nộp</p>
+              </div>
+            </div>
+
+            {/* Thanh lọc & tìm kiếm */}
+            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[
+                  { key: 'ALL', label: `Tất cả (${storesStats.total})` },
+                  { key: 'ACTIVE', label: `Đang hoạt động (${storesStats.active})` },
+                  { key: 'SUSPENDED', label: `Ngừng hoạt động (${storesStats.suspended})` },
+                  { key: 'PENDING', label: `Chờ duyệt (${storesStats.pending})` },
+                ].map((tab) => (
+                  <button
+                    key={tab.key}
+                    type="button"
+                    onClick={() => setStoresFilter(tab.key as any)}
+                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
+                      storesFilter === tab.key
+                        ? 'bg-[#0E6BA8] text-white shadow-2xs'
+                        : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300'
+                    }`}
+                  >
+                    {tab.label}
+                  </button>
+                ))}
+              </div>
+
+              <div className="relative min-w-0 sm:w-64">
+                <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+                <input
+                  value={storesSearch}
+                  onChange={(e) => setStoresSearch(e.target.value)}
+                  placeholder="Tìm theo tên, mã, người đại diện…"
+                  className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-1.5 pl-8 pr-3 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                />
+              </div>
+            </div>
+
+            {filteredAllStores.length === 0 ? (
+              <p className="text-xs text-zinc-600 py-6 text-center ">Không tìm thấy cửa hàng nào phù hợp với bộ lọc.</p>
             ) : (
               <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900">
                 <table className="w-full text-left text-xs">
@@ -1281,7 +1432,7 @@ export const AdminDashboard: React.FC = () => {
                     animate="visible"
                     className="divide-y divide-zinc-200 dark:divide-zinc-800"
                   >
-                    {allStores.map((s) => {
+                    {filteredAllStores.map((s) => {
                       const sId = s.id || s.storeId;
                       return (
                         <motion.tr
@@ -1305,8 +1456,20 @@ export const AdminDashboard: React.FC = () => {
                         <td className="py-2 px-3 text-zinc-500 dark:text-zinc-400 text-[11px] admin-address">{s.address}</td>
                         <td className="py-2 px-3">
                           <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                            <span className={`w-1.5 h-1.5 rounded-full ${s.status === 'ACTIVE' ? 'bg-emerald-500' : 'bg-rose-500'}`}></span>
-                            <span>{s.status === 'ACTIVE' ? 'Hoạt động' : 'Đã ngừng'}</span>
+                            <span className={`w-1.5 h-1.5 rounded-full ${
+                              s.status === 'ACTIVE'
+                                ? 'bg-emerald-500'
+                                : s.status === 'SUSPENDED'
+                                ? 'bg-rose-500'
+                                : 'bg-amber-500'
+                            }`}></span>
+                            <span>{
+                              s.status === 'ACTIVE'
+                                ? 'Đang hoạt động'
+                                : s.status === 'SUSPENDED'
+                                ? 'Ngừng hoạt động'
+                                : 'Chờ phê duyệt'
+                            }</span>
                           </span>
                         </td>
                         <td className="py-2 px-3 text-right">
@@ -1314,12 +1477,18 @@ export const AdminDashboard: React.FC = () => {
                             <button
                               type="button"
                               onClick={() => openStoreActionModal(String(sId), 'SUSPEND')}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300"
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300 cursor-pointer"
                             >
                               <ShieldAlert className="h-3.5 w-3.5" /> Ngừng hoạt động
                             </button>
                           ) : (
-                            <span className="text-[11px] text-zinc-600">Đã ngừng</span>
+                            <button
+                              type="button"
+                              onClick={() => handleApprove(String(sId))}
+                              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 cursor-pointer"
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" /> Kích hoạt lại
+                            </button>
                           )}
                         </td>
                       </motion.tr>
@@ -1696,6 +1865,188 @@ export const AdminDashboard: React.FC = () => {
                   <button disabled={planSaving} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50 cursor-pointer"><Plus className="h-3.5 w-3.5" /> {planSaving ? 'Đang tạo…' : 'Tạo gói đang hoạt động'}</button>
                 </form>
               </div>
+              {/* Theo dõi cửa hàng đã mua gói dịch vụ */}
+              <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+                <div className="border-b border-zinc-100 p-5 dark:border-zinc-800">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <div className="flex items-center gap-2">
+                        <StoreIcon className="h-4 w-4 text-[#0E6BA8]" />
+                        <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                          Cửa hàng đã mua & sử dụng gói dịch vụ
+                        </h3>
+                        <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
+                          {storeSubsMetrics.total} cửa hàng
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs text-zinc-500">
+                        Theo dõi trạng thái mua gói của các gian hàng. Cửa hàng hiện hữu được miễn trừ; các cửa hàng mới bắt buộc phải mua gói dịch vụ để đăng sản phẩm bán.
+                      </p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => void loadStoreSubscriptions()}
+                      disabled={storeSubsLoading}
+                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 cursor-pointer"
+                    >
+                      <RefreshCw className={`h-3.5 w-3.5 ${storeSubsLoading ? 'animate-spin' : ''}`} />
+                      Cập nhật danh sách
+                    </button>
+                  </div>
+
+                  {/* 4 Summary Stat Cards */}
+                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                    <div className="rounded-lg border border-zinc-100 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/40">
+                      <p className="text-[11px] font-medium text-zinc-500">Tổng cửa hàng</p>
+                      <p className="mt-1 text-lg font-bold text-zinc-900 dark:text-white">{storeSubsMetrics.total}</p>
+                      <p className="text-[10px] text-zinc-400">Trên toàn hệ thống</p>
+                    </div>
+                    <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-3 dark:border-emerald-950/40 dark:bg-emerald-950/20">
+                      <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">Đã mua gói trả phí</p>
+                      <p className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-200">{storeSubsMetrics.subscribed}</p>
+                      <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80">Gói đang còn hạn</p>
+                    </div>
+                    <div className="rounded-lg border border-sky-100 bg-sky-50/50 p-3 dark:border-sky-950/40 dark:bg-sky-950/20">
+                      <p className="text-[11px] font-medium text-sky-800 dark:text-sky-300">Cửa hàng hiện hữu</p>
+                      <p className="mt-1 text-lg font-bold text-sky-700 dark:text-sky-200">{storeSubsMetrics.exempt}</p>
+                      <p className="text-[10px] text-sky-600/80 dark:text-sky-400/80">Miễn trừ gói dịch vụ</p>
+                    </div>
+                    <div className="rounded-lg border border-amber-100 bg-amber-50/50 p-3 dark:border-amber-950/40 dark:bg-amber-950/20">
+                      <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">Chưa mua gói</p>
+                      <p className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-200">{storeSubsMetrics.unsubscribed}</p>
+                      <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80">Bị khóa quyền đăng SP</p>
+                    </div>
+                  </div>
+
+                  {/* Filter tabs & Search */}
+                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      {[
+                        { key: 'ALL', label: `Tất cả (${storeSubs.length})` },
+                        { key: 'SUBSCRIBED', label: `Đã mua gói (${storeSubsMetrics.subscribed})` },
+                        { key: 'UNSUBSCRIBED', label: `Chưa mua gói (${storeSubsMetrics.unsubscribed})` },
+                        { key: 'EXEMPT', label: `Miễn trừ (${storeSubsMetrics.exempt})` },
+                      ].map((tab) => (
+                        <button
+                          key={tab.key}
+                          type="button"
+                          onClick={() => setStoreSubsFilter(tab.key as any)}
+                          className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
+                            storeSubsFilter === tab.key
+                              ? 'bg-[#0E6BA8] text-white shadow-2xs'
+                              : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300'
+                          }`}
+                        >
+                          {tab.label}
+                        </button>
+                      ))}
+                    </div>
+
+                    <div className="relative min-w-0 sm:w-64">
+                      <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+                      <input
+                        value={storeSubsSearch}
+                        onChange={(e) => setStoreSubsSearch(e.target.value)}
+                        placeholder="Tìm theo tên, mã, SĐT…"
+                        className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-1.5 pl-8 pr-3 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* Table */}
+                <div className="overflow-x-auto">
+                  {storeSubsLoading && storeSubs.length === 0 ? (
+                    <div className="py-12 text-center text-sm text-zinc-500">
+                      Đang tải dữ liệu gói dịch vụ của các cửa hàng…
+                    </div>
+                  ) : filteredStoreSubs.length === 0 ? (
+                    <div className="py-12 text-center text-sm text-zinc-500">
+                      Không tìm thấy cửa hàng phù hợp với bộ lọc.
+                    </div>
+                  ) : (
+                    <table className="w-full text-left text-xs text-zinc-600 dark:text-zinc-300">
+                      <thead className="border-b border-zinc-200 bg-zinc-50/75 text-[11px] font-semibold text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+                        <tr>
+                          <th className="px-4 py-3">Cửa hàng</th>
+                          <th className="px-4 py-3">Phân loại</th>
+                          <th className="px-4 py-3">Gói dịch vụ</th>
+                          <th className="px-4 py-3">Thời hạn & Số ngày</th>
+                          <th className="px-4 py-3">Quyền đăng sản phẩm</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {filteredStoreSubs.map((item) => (
+                          <tr key={item.storeId} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/40">
+                            <td className="px-4 py-3">
+                              <p className="font-semibold text-zinc-900 dark:text-white">{item.storeName}</p>
+                              <p className="text-[11px] text-zinc-400">
+                                Mã: {item.storeCode} · Chủ shop: {item.ownerName}
+                              </p>
+                              {item.phone && item.phone !== '—' && (
+                                <p className="text-[10px] text-zinc-400">{item.phone}</p>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              {item.isGrandfathered ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                                  🛡️ Cửa hàng hiện hữu
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                                  Cửa hàng mới
+                                </span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3">
+                              <p className="font-medium text-zinc-900 dark:text-white">{item.planName}</p>
+                              {item.planPrice > 0 && (
+                                <p className="text-[11px] text-zinc-400">
+                                  {item.planPrice.toLocaleString('vi-VN')} ₫ · Tối đa {item.maxProducts} sản phẩm
+                                </p>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              {item.isGrandfathered ? (
+                                <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                                  Vô thời hạn (Miễn trừ)
+                                </span>
+                              ) : item.subscription ? (
+                                <div>
+                                  <p className="font-medium text-zinc-900 dark:text-white">
+                                    {item.daysRemaining !== null ? `Còn ${item.daysRemaining} ngày` : '—'}
+                                  </p>
+                                  {item.endDate && (
+                                    <p className="text-[10px] text-zinc-400">
+                                      Hết hạn: {new Date(item.endDate).toLocaleDateString('vi-VN')}
+                                    </p>
+                                  )}
+                                </div>
+                              ) : (
+                                <span className="text-zinc-400 italic">Chưa đăng ký</span>
+                              )}
+                            </td>
+                            <td className="px-4 py-3 whitespace-nowrap">
+                              {item.canListProducts ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                                  <CheckCircle2 className="h-3 w-3" />
+                                  Được phép đăng bán
+                                </span>
+                              ) : (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-[11px] font-semibold text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+                                  <AlertCircle className="h-3 w-3" />
+                                  Bị khóa - Cần mua gói
+                                </span>
+                              )}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </section>
+
             </div>
           ) : (
             <div className="space-y-5">

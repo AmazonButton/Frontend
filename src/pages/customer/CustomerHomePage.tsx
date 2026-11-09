@@ -4,6 +4,7 @@ import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { api } from '../../services/api';
 import { mergeOrderUpdate, normalizeOrder } from '../../services/order-events';
+import { deviceDashboardMetrics } from '../../services/dashboard-metrics';
 import { useAuth } from '../../context/AuthContext';
 import { toast } from '../../context/ToastContext';
 import { useSound } from '../../context/OrderSoundContext';
@@ -222,8 +223,8 @@ export const CustomerHomePage: React.FC = () => {
   const { user } = useAuth();
   const navigate = useNavigate();
   const { playOrderChime, playCancelChime, isSoundEnabled, toggleSound } = useSound();
-  const [devices, setDevices] = useState<Device[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [devices, setDevices] = useState<Device[]>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_cust_devices') : null; if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; } } catch {} return []; });
+  const [orders, setOrders] = useState<Order[]>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_cust_orders') : null; if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; } } catch {} return []; });
   const [loading, setLoading] = useState(true);
   const [showAirPodsModal, setShowAirPodsModal] = useState(false);
 
@@ -305,17 +306,24 @@ export const CustomerHomePage: React.FC = () => {
   );
   useBodyScrollLock(isAnyInlineModalOpen);
 
+  const [homeDevicesReady, setHomeDevicesReady] = useState(() => { try { return Boolean(typeof window !== 'undefined' && window.sessionStorage?.getItem('sob_cached_cust_devices')); } catch { return false; } });
+  const [homeDataError, setHomeDataError] = useState('');
   const fetchData = async (isPolling = false) => {
     try {
-      const [devRes, ordRes, prodRes] = await Promise.all([
+      const [devResult, ordResult, prodResult] = await Promise.allSettled([
         api.get('/devices'),
         api.get('/orders'),
         api.get('/products').catch(() => ({ data: { success: false, data: [] } })),
       ]);
-      if (devRes.data.success) setDevices(devRes.data.data);
-      if (ordRes.data.success) {
+      const unavailable = { data: { success: false, data: [] as any[] } };
+      const devRes = devResult.status === 'fulfilled' ? devResult.value : unavailable;
+      const ordRes = ordResult.status === 'fulfilled' ? ordResult.value : unavailable;
+      const prodRes = prodResult.status === 'fulfilled' ? prodResult.value : unavailable;
+      setHomeDataError(devRes.data.success && ordRes.data.success ? '' : 'Chưa cập nhật đủ dữ liệu. Các mục đã tải vẫn được giữ lại.');
+      if (devRes.data.success && Array.isArray(devRes.data.data)) { setDevices(devRes.data.data); setHomeDevicesReady(true); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_cust_devices', JSON.stringify(devRes.data.data)); } catch {} }
+      if (ordRes.data.success && Array.isArray(ordRes.data.data)) {
         const fetchedOrders: Order[] = ordRes.data.data.map(normalizeOrder);
-        setOrders(fetchedOrders);
+        setOrders(fetchedOrders); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_cust_orders', JSON.stringify(fetchedOrders)); } catch {}
 
         // Check activeCancelOrder: if status is no longer PENDING (e.g. accepted by store/shipper), clear immediately!
         setActiveCancelOrder((current) => {
@@ -350,6 +358,7 @@ export const CustomerHomePage: React.FC = () => {
     }
   };
 
+  const customerDeviceMetrics = deviceDashboardMetrics(devices);
   const customerId = user?.customerProfileId || (user as any)?.customerProfile?.id;
 
   useEffect(() => {
@@ -1008,12 +1017,13 @@ export const CustomerHomePage: React.FC = () => {
           </div>
         </div>
 
+        {homeDataError && <p role="status" className="rounded-xl bg-amber-50 p-3 text-sm text-amber-800">{homeDataError}</p>}
         {/* Minimalist Linear/Stripe Status Bar */}
         <div className="devices-status flex flex-wrap items-center gap-4 py-2.5 px-4 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600">
           <span className="inline-flex items-center gap-2 font-medium">
             <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse shrink-0" />
             <span className="tabular-nums font-semibold text-slate-800">
-              {devices.filter(d => d.status !== 'DISABLED').length}/{devices.length}
+              {!homeDevicesReady ? '—' : customerDeviceMetrics.active}/{!homeDevicesReady ? '—' : customerDeviceMetrics.total}
             </span>{' '}
             thiết bị đang hoạt động
           </span>
@@ -1022,7 +1032,7 @@ export const CustomerHomePage: React.FC = () => {
             <Battery className="w-3.5 h-3.5 text-slate-400 shrink-0" />
             <span>Pin trung bình</span>
             <span className="tabular-nums font-semibold text-slate-800">
-              {devices.length > 0 ? `${Math.round(devices.reduce((s, d) => s + (d.batteryLevel ?? 93), 0) / devices.length)}%` : '—'}
+              {!homeDevicesReady || customerDeviceMetrics.averageBattery === null ? '—' : customerDeviceMetrics.averageBattery + '%'}
             </span>
           </span>
           <span className="text-slate-300 hidden sm:inline">·</span>

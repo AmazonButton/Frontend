@@ -28,6 +28,11 @@ export interface FinanceVerification {
   referenceCode: string;
   expiresAt: string;
   instructions: string;
+  recipientBankBin?: string;
+  recipientBankName?: string;
+  recipientAccountNumber?: string;
+  recipientAccountHolder?: string;
+  qrCodeUrl?: string;
   initialAccountStatus?: string;
 }
 
@@ -42,6 +47,14 @@ export function financeError(error: any, fallback = 'Chưa thể hoàn tất tha
   const message = error?.response?.data?.message || error?.message;
   if (Array.isArray(message)) return message.filter(item => typeof item === 'string').join('. ') || fallback;
   return typeof message === 'string' && message.trim() ? message : fallback;
+}
+
+export function financeLookupError(error: any) {
+  const code = error?.response?.data?.errorCode || error?.response?.data?.code;
+  if (code === 'BANK_LOOKUP_UNAVAILABLE') {
+    return 'Hệ thống chưa tra cứu được tên chủ tài khoản từ dịch vụ ngân hàng. Hãy kiểm tra lại ngân hàng và số tài khoản. Nếu thông tin đã đúng, vui lòng thử lại sau hoặc gửi mã BANK_LOOKUP_UNAVAILABLE cho bộ phận hỗ trợ. Chưa thể tạo yêu cầu xác minh.';
+  }
+  return financeError(error);
 }
 
 export function financeData<T>(response: any): T {

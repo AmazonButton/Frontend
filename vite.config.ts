@@ -26,14 +26,20 @@ export default defineConfig({
   server: {
     port: 5173,
     host: true,
+    watch: { ignored: ['**/dist/**', '**/.cache/**'] },
     headers: {
       'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
     },
     proxy: {
       '/api': {
-        target: 'https://fragrant-mode-3a41.ptt24032004.workers.dev',
+        target: process.env.VITE_BACKEND_URL || 'https://backend-fae8.onrender.com',
         changeOrigin: true,
         secure: false,
+      },
+      '/socket.io': {
+        target: process.env.VITE_BACKEND_URL || 'https://backend-fae8.onrender.com',
+        ws: true,
+        changeOrigin: true,
       },
     },
   },

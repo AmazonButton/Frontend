@@ -1,4 +1,5 @@
 import { api } from './api';
+import { normalizeWalletInfo, normalizeWalletHistory, walletEnvelope } from './wallet-api-data';
 
 export interface StoreWalletInfo {
   id?: string | number;
@@ -6,6 +7,7 @@ export interface StoreWalletInfo {
   balance: number;
   availableBalance?: number;
   pendingBalance?: number;
+  frozenBalance?: number;
   payosPayoutBalance?: number;
   payosPayoutConnected?: boolean;
   bankAccount?: {
@@ -13,6 +15,8 @@ export interface StoreWalletInfo {
     bankBin: string;
     accountNumber: string;
     accountHolderName: string;
+    isMasked?: boolean;
+    verificationStatus?: string;
   };
   updatedAt?: string;
 }
@@ -26,17 +30,14 @@ export interface UpdateBankAccountDto {
 
 export interface RequestWithdrawalDto {
   amount: number;
-  bankName?: string;
-  accountNumber?: string;
-  accountHolderName?: string;
-  note?: string;
+  idempotencyKey: string;
 }
 
 export interface WalletTransactionItem {
   id: string | number;
   amount: number;
   type: 'ORDER_REVENUE' | 'WITHDRAWAL' | 'FEE' | 'REFUND' | string;
-  status: 'PENDING' | 'SUCCESS' | 'FAILED' | string;
+  status?: 'PENDING' | 'SUCCESS' | 'FAILED' | string;
   description?: string;
   createdAt: string;
 }
@@ -54,6 +55,12 @@ export interface WithdrawalItem {
   payoutRef?: string;
   createdAt: string;
   processedAt?: string;
+  fee?: number;
+  netAmount?: number;
+  withdrawalCode?: string;
+  providerPayoutId?: string | null;
+  failureReason?: string | null;
+  rejectionReason?: string | null;
 }
 
 export const walletService = {
@@ -64,7 +71,8 @@ export const walletService = {
     const res = await api.get('/store/wallet', {
       params: storeId ? { storeId } : undefined,
     });
-    return res.data;
+    const response = walletEnvelope(res.data);
+    return { ...response, data: normalizeWalletInfo(response.data) };
   },
 
   /**
@@ -102,31 +110,22 @@ export const walletService = {
   /**
    * Lấy danh sách lịch sử biến động số dư ví
    */
-  async getTransactions(storeId?: string | number) {
+  async getTransactions(storeId?: string | number, page = 1) {
     const res = await api.get('/store/wallet/transactions', {
-      params: storeId ? { storeId } : undefined,
+      params: { ...(storeId ? { storeId } : {}), page, pageSize: 20 },
     });
-    return res.data;
+    return normalizeWalletHistory(res.data, 'transactions');
   },
 
   /**
-   * Tạo yêu cầu rút tiền tự động qua cổng PayOS Payout
+   * Tạo yêu cầu rút tiền; backend xác nhận trạng thái xử lý và chi tiền.
    */
   async requestWithdrawal(data: RequestWithdrawalDto, storeId?: string | number) {
-    const idempotencyKey = `wd_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-    const payload: any = {
-      amount: data.amount,
-      note: data.note,
-    };
-    if (data.bankName) payload.bankName = data.bankName;
-    if (data.accountNumber) {
-      payload.bankAccountNumber = data.accountNumber;
-      payload.accountNumber = data.accountNumber;
+    const idempotencyKey = data.idempotencyKey;
+    if (!Number.isSafeInteger(data.amount) || data.amount < 50000 || !/^[A-Za-z0-9._:-]{1,128}$/.test(idempotencyKey || '')) {
+      throw new Error('Yêu cầu rút tiền chưa hợp lệ.');
     }
-    if (data.accountHolderName) {
-      payload.bankAccountHolder = data.accountHolderName;
-      payload.accountHolderName = data.accountHolderName;
-    }
+    const payload = { amount: data.amount };
 
     const res = await api.post('/store/wallet/withdrawals', payload, {
       params: storeId ? { storeId } : undefined,
@@ -135,22 +134,32 @@ export const walletService = {
         'x-idempotency-key': idempotencyKey,
       },
     });
-    return res.data;
+    return walletEnvelope(res.data);
   },
 
   /**
    * Danh sách các đợt rút tiền của cửa hàng
    */
-  async getWithdrawals(storeId?: string | number) {
+  async getWithdrawals(storeId?: string | number, page = 1) {
     const res = await api.get('/store/wallet/withdrawals', {
-      params: storeId ? { storeId } : undefined,
+      params: { ...(storeId ? { storeId } : {}), page, pageSize: 20 },
     });
-    return res.data;
+    return normalizeWalletHistory(res.data, 'withdrawals');
+  },
+
+  async getWithdrawal(withdrawalId: string | number, expectedStoreId: string): Promise<WithdrawalItem> {
+    if (!/^[1-9]\d*$/.test(String(withdrawalId))) throw new Error('Mã lệnh rút tiền không hợp lệ.');
+    const res = await api.get(`/store/wallet/withdrawals/${withdrawalId}`);
+    const envelope = walletEnvelope(res.data);
+    if (String(envelope.data?.storeId) !== expectedStoreId || String(envelope.data?.withdrawalId) !== String(withdrawalId)) {
+      throw new Error('Lệnh rút tiền không thuộc cửa hàng hiện tại.');
+    }
+    return normalizeWalletHistory({ ...envelope, data: [envelope.data] }, 'withdrawals').data[0];
   },
 
   async lookupBankAccount(bankBin: string, accountNumber: string) {
     const res = await api.post('/stores/bank-accounts/lookup', { bankBin, accountNumber });
-    return res.data;
+    return walletEnvelope(res.data);
   },
 
   /**
@@ -160,6 +169,6 @@ export const walletService = {
     const res = await api.post(`/store/wallet/withdrawals/${withdrawalId}/sync-status`, {}, {
       params: storeId ? { storeId } : undefined,
     });
-    return res.data;
+    return walletEnvelope(res.data);
   },
 };

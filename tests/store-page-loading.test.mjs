@@ -43,6 +43,7 @@ const pages = [
   ['/store/wallet', '/pages/store/StoreWalletPage.tsx'],
   ['/store/profile?tab=SECURITY', '/pages/profile/ProfilePage.tsx'],
   ['/store/finance', '/pages/store/StoreFinancePage.tsx'],
+  ['/store/service-plans', '/pages/store/StoreServicePlansPage.tsx'],
 ];
 
 for (const [route, suffix] of pages) {

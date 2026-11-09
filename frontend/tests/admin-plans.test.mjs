@@ -14,7 +14,10 @@ test('admin dashboard includes the subscription-plan section and API integration
 });
 
 test('admin sidebar links to the subscription-plan section', () => {
-  assert.match(sidebar, /\/admin\/dashboard\?section=PLANS/);
+  assert.match(sidebar, /AdminPackageNavigation/);
+  const submenu = readFileSync(new URL('../src/components/admin/AdminPackageNavigation.tsx', import.meta.url), 'utf8');
+  assert.match(submenu, /\/admin\/dashboard\?section=PLANS/);
+  assert.match(submenu, /\/admin\/dashboard\?section=RENTALS/);
 });
 
 test('an active store can be suspended from the admin list with a reason', () => {

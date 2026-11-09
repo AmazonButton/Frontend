@@ -1,6 +1,8 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Search, RefreshCw, Battery, Cpu, ShoppingBag, Banknote, ChevronLeft, ChevronRight } from 'lucide-react';
-import { api } from '../../services/api';
+import { api, apiSessionMarker } from '../../services/api';
+import { formatMetric } from '../../services/dashboard-metrics';
+import { useDashboardRefresh } from '../../hooks/useDashboardRefresh';
 import { WorkflowDialog, WorkflowLoading, WorkflowNotice, WorkflowReveal, workflowButton, workflowInput, workflowSecondary } from '../../components/operations/WorkflowUI';
 import { formatMoney, workflowData, workflowError } from '../../utils/workflow';
 
@@ -20,8 +22,9 @@ export const AdminLiveAnalytics: React.FC = () => {
     finally { if (request === current.current) setLoading(false); }
   }, []);
   useEffect(() => { void load(); return () => { ++current.current; }; }, [load]);
+  useDashboardRefresh(load, 'admin-live:' + apiSessionMarker());
   return <WorkflowReveal className="space-y-5"><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 className="text-lg font-bold">Báo cáo & doanh thu</h2><p className="mt-1 text-sm text-zinc-500">Số liệu được lấy từ đơn hàng trong phạm vi tài khoản của bạn.</p></div><button className={workflowSecondary} disabled={loading} onClick={() => void load()}><RefreshCw className="h-4 w-4" />Làm mới</button></div><WorkflowNotice tone="error">{error}</WorkflowNotice>
-    {loading && !data ? <WorkflowLoading label="Đang tải báo cáo..." /> : data && <><div className="grid grid-cols-1 gap-3 sm:grid-cols-3">{[{ label: 'Tổng đơn hàng', value: Number(data.totalOrders || 0).toLocaleString('vi-VN'), icon: ShoppingBag }, { label: 'Doanh thu đơn hợp lệ', value: formatMoney(data.totalRevenue), icon: Banknote }, { label: 'Nút đang hoạt động', value: Number(data.activeButtons || 0).toLocaleString('vi-VN'), icon: Cpu }].map(({ label, value, icon: Icon }) => <div key={label} className={card}><Icon className="h-5 w-5 text-[#287DA8]" aria-hidden="true" /><p className="mt-4 text-xs text-zinc-500">{label}</p><p className="mt-1 break-words text-2xl font-bold tabular-nums">{value}</p></div>)}</div><section className={card}><h3 className="font-semibold">Xu hướng giá trị đơn theo ngày</h3><p className="mt-1 text-xs leading-relaxed text-zinc-500">Biểu đồ thể hiện tổng giá trị đơn theo ngày từ báo cáo hệ thống. Doanh thu ở trên đã loại đơn bị hủy hoặc từ chối.</p>{Array.isArray(data.chartData) && data.chartData.length ? <Suspense fallback={<WorkflowLoading label="Đang tải biểu đồ..." />}><AnalyticsChart data={data.chartData} /></Suspense> : <p className="py-16 text-center text-sm text-zinc-500">Chưa có đơn hàng để hiển thị biểu đồ.</p>}</section></>}
+    {loading && !data ? <WorkflowLoading label="Đang tải báo cáo..." /> : data && <><div className="grid grid-cols-1 gap-3 sm:grid-cols-3">{[{ label: 'Tổng đơn hàng', value: formatMetric(data.totalOrders), icon: ShoppingBag }, { label: 'Doanh số tạm tính', value: formatMetric(data.totalRevenue, true), icon: Banknote }, { label: 'Nút đang hoạt động', value: formatMetric(data.activeButtons), icon: Cpu }].map(({ label, value, icon: Icon }) => <div key={label} className={card}><Icon className="h-5 w-5 text-[#287DA8]" aria-hidden="true" /><p className="mt-4 text-xs text-zinc-500">{label}</p><p className="mt-1 break-words text-2xl font-bold tabular-nums">{value}</p></div>)}</div><section className={card}><h3 className="font-semibold">Xu hướng giá trị đơn theo ngày</h3><p className="mt-1 text-xs leading-relaxed text-zinc-500">Biểu đồ thể hiện tổng giá trị đơn theo ngày từ báo cáo hệ thống. Doanh số ở trên đã loại đơn bị hủy hoặc từ chối; chưa phải số tiền đã thu.</p>{Array.isArray(data.chartData) && data.chartData.length ? <Suspense fallback={<WorkflowLoading label="Đang tải biểu đồ..." />}><AnalyticsChart data={data.chartData} /></Suspense> : <p className="py-16 text-center text-sm text-zinc-500">Chưa có đơn hàng để hiển thị biểu đồ.</p>}</section></>}
   </WorkflowReveal>;
 };
 

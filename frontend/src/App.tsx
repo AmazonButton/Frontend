@@ -23,8 +23,7 @@ const StoreDashboard = React.lazy(() => import('./pages/store/StoreDashboard').t
 const StoreDevicesPage = React.lazy(() => import('./pages/store/StoreDevicesPage').then((module) => ({ default: module.StoreDevicesPage })));
 const StoreDeviceTemplatesPage = React.lazy(() => import('./pages/store/StoreDeviceTemplatesPage').then((module) => ({ default: module.StoreDeviceTemplatesPage })));
 const StoreProductsPage = React.lazy(() => import('./pages/store/StoreProductsPage').then((module) => ({ default: module.StoreProductsPage })));
-const StoreWalletPage = React.lazy(() => import('./pages/store/StoreWalletPage').then((module) => ({ default: module.StoreWalletPage })));
-const StoreAnalyticsPage = React.lazy(() => import('./pages/store/StoreAnalyticsPage').then((module) => ({ default: module.StoreAnalyticsPage })));
+const StoreRevenuePage = React.lazy(() => import('./pages/store/StoreRevenuePage').then((module) => ({ default: module.StoreRevenuePage })));
 const CustomerHomePage = React.lazy(() => import('./pages/customer/CustomerHomePage').then((module) => ({ default: module.CustomerHomePage })));
 const CustomerOrdersPage = React.lazy(() => import('./pages/customer/CustomerOrdersPage').then((module) => ({ default: module.CustomerOrdersPage })));
 const CustomerRentalsPage = React.lazy(() => import('./pages/customer/CustomerRentalsPage').then((module) => ({ default: module.CustomerRentalsPage })));
@@ -32,10 +31,11 @@ const ShopPage = React.lazy(() => import('./pages/customer/ShopPage').then((modu
 const AdminDashboard = React.lazy(() => import('./pages/admin/AdminDashboard').then((module) => ({ default: module.AdminDashboard })));
 const QuickSetupPage = React.lazy(() => import('./pages/QuickSetupPage').then((module) => ({ default: module.QuickSetupPage })));
 const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage').then((module) => ({ default: module.ProfilePage })));
-const CustomerVerificationPage = React.lazy(() => import('./pages/operations/OperationsPages').then((module) => ({ default: module.CustomerVerificationPage })));
+const CustomerVerificationPage = React.lazy(() => import('./components/customer/CustomerIdentityVerification').then(module => ({ default: module.CustomerIdentityVerification })));
+const CustomerBankingPage = React.lazy(() => import('./pages/customer/CustomerBankingPage').then(module => ({ default: module.CustomerBankingPage })));
 const StoreFinancePage = React.lazy(() => import('./pages/store/StoreFinancePage').then((module) => ({ default: module.StoreFinancePage })));
+const StoreServicePlansPage = React.lazy(() => import('./pages/store/StoreServicePlansPage').then(module => ({ default: module.StoreServicePlansPage })));
 const AdminPayoutsPage = React.lazy(() => import('./pages/admin/AdminPayoutsPage').then((module) => ({ default: module.AdminPayoutsPage })));
-const AdminIdentityPage = React.lazy(() => import('./pages/admin/AdminIdentityPage').then(module => ({ default: module.AdminIdentityPage })));
 const AdminRentalActivationPage = React.lazy(() => import('./pages/admin/AdminRentalActivationPanel').then(module => ({ default: module.AdminRentalActivationPage })));
 const DriverDeliveryPage = React.lazy(() => import('./pages/operations/DriverDeliveryPage').then(module => ({ default: module.DriverDeliveryPage })));
 const DriverShiftManagement = React.lazy(() => import('./pages/operations/DriverShiftManagement').then(module => ({ default: module.DriverShiftPage })));
@@ -53,7 +53,7 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
   children,
   allowedRoles,
 }) => {
-  const { user, token, isLoading } = useAuth();
+  const { user, token, isLoading, refreshToken, sessionError, refreshUser } = useAuth();
   const location = useLocation();
 
   if (isLoading) {
@@ -67,6 +67,9 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
     );
   }
 
+  if (!token && refreshToken && sessionError) {
+    return <main className="mx-auto my-12 max-w-lg rounded-2xl border border-amber-200 bg-white p-6 dark:border-amber-900 dark:bg-zinc-900"><h1 className="text-lg font-bold">Đang chờ máy chủ</h1><p role="status" className="mt-3 text-sm leading-relaxed text-zinc-600 dark:text-zinc-300">{sessionError}</p><button type="button" onClick={() => void refreshUser()} className="mt-5 min-h-11 rounded-xl bg-[#287DA8] px-4 py-2 text-sm font-semibold text-white">Thử kết nối lại</button></main>;
+  }
   if (!user || !token) {
     return <Navigate to="/login" state={{ from: location }} replace />;
   }
@@ -177,11 +180,12 @@ export const App: React.FC = () => {
             <Route path="/store" element={<Navigate to="/store/dashboard" replace />} />
             <Route path="/store/dashboard" element={<StoreDashboard />} />
             <Route path="/store/devices" element={<StoreDevicesPage />} />
-            <Route path="/store/rentals" element={<CustomerRentalsPage />} />
+            <Route path="/store/rentals" element={user?.role === 'STORE_OWNER' ? <Navigate to="/store/service-plans" replace /> : <CustomerRentalsPage />} />
+            <Route path="/store/service-plans" element={<ProtectedRoute allowedRoles={['STORE_OWNER']}><StoreServicePlansPage /></ProtectedRoute>} />
             <Route path="/store/device-templates" element={<StoreDeviceTemplatesPage />} />
             <Route path="/store/products" element={<StoreProductsPage />} />
-            <Route path="/store/analytics" element={<StoreAnalyticsPage />} />
-            <Route path="/store/wallet" element={<StoreWalletPage />} />
+            <Route path="/store/analytics" element={<StoreRevenuePage />} />
+            <Route path="/store/wallet" element={<Navigate to="/store/analytics?tab=WALLET" replace />} />
             <Route path="/store/finance" element={<ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER']}><StoreFinancePage /></ProtectedRoute>} />
           </Route>
 
@@ -211,6 +215,7 @@ export const App: React.FC = () => {
             <Route path="/customer/rentals" element={<CustomerRentalsPage />} />
             <Route path="/customer/orders" element={<CustomerOrdersPage />} />
             <Route path="/customer/verification" element={<CustomerVerificationPage />} />
+            <Route path="/customer/banking" element={<CustomerBankingPage />} />
             <Route path="/customer/profile" element={<ProfilePage />} />
           </Route>
 
@@ -233,7 +238,7 @@ export const App: React.FC = () => {
           >
             <Route path="/admin/dashboard" element={<AdminDashboard />} />
             <Route path="/admin/payouts" element={<AdminPayoutsPage />} />
-            <Route path="/admin/identity" element={<AdminIdentityPage />} />
+            <Route path="/admin/identity" element={<Navigate to="/admin/dashboard" replace />} />
             <Route path="/admin/rental-activation" element={<AdminRentalActivationPage />} />
             <Route path="/admin/profile" element={<ProfilePage />} />
           </Route>
@@ -244,7 +249,7 @@ export const App: React.FC = () => {
             element={
               <ProtectedRoute>
                 {user?.role === 'CUSTOMER'
-                  ? <CustomerPageMotion><ProfilePage /></CustomerPageMotion>
+                  ? <AppShellLayout><ProfilePage /></AppShellLayout>
                   : <><StandaloneProfileBackNavigation /><ProfilePage /></>}
               </ProtectedRoute>
             }

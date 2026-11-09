@@ -1,3 +1,5 @@
+import * as dashboardMetrics from '../src/services/dashboard-metrics.ts';
+import * as adminSubscriptions from '../src/services/admin-store-subscriptions.ts';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -22,11 +24,24 @@ for (const prefix of ['../src/', '../../src/']) {
     ts.forEachChild(node, visit);
   }
   visit(tree);
+  // Group triggers replace top-level links; their children retain the same destinations.
+  for (const filename of ['AdminPackageNavigation', 'AdminRevenueNavigation']) {
+    const submenu = ts.createSourceFile('submenu.tsx', readFileSync(new URL(`${prefix}components/admin/${filename}.tsx`, import.meta.url), 'utf8'), ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+    const collect = node => {
+      if (ts.isVariableDeclaration(node) && /_LINKS$/.test(node.name.getText(submenu))) {
+        adminPaths.push(...node.initializer.elements.map(item => item.properties.find(property => property.name.getText(submenu) === 'to').initializer.text));
+      }
+      ts.forEachChild(node, collect);
+    };
+    collect(submenu);
+  }
+  adminPaths = [...new Set(adminPaths)];
 
   test(`${prefix}admin highlights exactly one menu entry for each dashboard section and direct route`, () => {
-    const sections = ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS'];
+    const sections = ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'DEVICES', 'RBAC', 'ANALYTICS', 'NOTIFICATIONS'];
     const cases = sections.map(section => ['/admin/dashboard', `?section=${section}&from=review`, section === 'OVERVIEW' ? '/admin/dashboard' : `/admin/dashboard?section=${section}`]);
     cases.push(['/admin/dashboard', '', '/admin/dashboard'], ['/admin/payouts', '', '/admin/payouts'], ['/admin/profile', '', '/admin/profile']);
+    assert.ok(!adminPaths.some(path => /section=(CATALOG|TELEMETRY)/.test(path)));
     for (const [pathname, search, expected] of cases) {
       const active = vm.runInNewContext(compile(`(${activeCallback})`), { isAdmin: true, location: { pathname, search }, URLSearchParams });
       assert.deepEqual(adminPaths.filter(path => active(path)), [expected]);
@@ -50,12 +65,16 @@ for (const prefix of ['../src/', '../../src/']) {
       const module = { exports: {} };
       const actualRequire = name => {
         if (name.endsWith('.css')) return {};
+        if (name === '../../context/AuthContext') return { useAuth: () => ({ user: { id: 'admin-1', role: 'SUPER_ADMIN' } }) };
+        if (name === '../../hooks/useDashboardRefresh') return { useDashboardRefresh() {} };
+        if (name === '../../services/dashboard-metrics') return dashboardMetrics;
+        if (name === '../../services/admin-store-subscriptions') return adminSubscriptions;
         if (name === './admin-presentation') return presentation;
-        if (name === './AdminLiveData') return { AdminLiveAnalytics: () => React.createElement('div', null, 'Báo cáo từ API'), AdminLiveDevices: () => React.createElement('div', null, 'Thiết bị từ API') };
+        if (name === './AdminLiveData') return { AdminLiveAnalytics: () => React.createElement('div', null, 'Báo cáo & doanh thu'), AdminLiveDevices: () => React.createElement('div', null, 'Thiết bị từ API') };
         if (name === 'react-router-dom') return { useSearchParams: () => [new URLSearchParams({ section }), () => {}] };
         if (name === 'react-dom') return { createPortal: () => null };
         if (name === '../../hooks/useBodyScrollLock') return { useBodyScrollLock() {} };
-        if (name === '../../services/api') return { api: new Proxy({}, { get: () => () => { requests++; throw new Error('Unexpected request during render'); } }) };
+        if (name === '../../services/api') return { apiSessionMarker: () => 'test-session', api: new Proxy({}, { get: () => () => { requests++; throw new Error('Unexpected request during render'); } }) };
         if (name === '../../services/rentals.service') return { rentalsService: {} };
         if (name === '../../context/ToastContext') return { toast: {} };
         if (name === '../../data/storeProductsData') return { STORE_CATALOG_PRODUCTS: [] };
