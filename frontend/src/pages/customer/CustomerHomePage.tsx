@@ -960,9 +960,10 @@ export const CustomerHomePage: React.FC = () => {
 
       {/* ── PART 1: Greeting & Minimalist Linear Status Bar ── */}
       <motion.div
-        initial={{ opacity: 0, y: 12 }}
+        initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.35, ease: [0.25, 0.46, 0.45, 0.94] }}
+        transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+        data-page-motion
         className="space-y-4"
       >
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
@@ -1106,9 +1107,10 @@ export const CustomerHomePage: React.FC = () => {
 
       {/* ── PART 2: Device Grid ── */}
       <motion.div
-        initial={{ opacity: 0, y: 15 }}
+        initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, delay: 0.1, ease: [0.25, 0.46, 0.45, 0.94] }}
+        transition={{ duration: 0.24, delay: 0.04, ease: [0.22, 1, 0.36, 1] }}
+        data-page-motion
         className="pt-2"
       >
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 mb-4">
@@ -1247,9 +1249,10 @@ export const CustomerHomePage: React.FC = () => {
 
       {/* ── PART 3: Order History (Clean Flat List, Linear/Stripe Style) ── */}
       <motion.div
-        initial={{ opacity: 0, y: 15 }}
+        initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
-        transition={{ duration: 0.45, delay: 0.15, ease: [0.25, 0.46, 0.45, 0.94] }}
+        transition={{ duration: 0.24, delay: 0.08, ease: [0.22, 1, 0.36, 1] }}
+        data-page-motion
         className="pt-4"
       >
         <div className="flex items-center justify-between mb-4">

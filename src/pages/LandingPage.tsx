@@ -7,6 +7,7 @@ import { api } from '../services/api';
 import { getSocket } from '../services/socket';
 import { subscribeCatalogChanges } from '../services/catalog-sync';
 import { toast } from '../context/ToastContext';
+import { useAuth } from '../context/AuthContext';
 
 /**
  * Store owners can upload PNG cut-outs with a large transparent canvas around
@@ -174,6 +175,7 @@ const getInitialStorefrontCatalog = (): any[] => {
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const prefersReducedMotion = useReducedMotion();
   // Video player controls state
   const videoRef = useRef<HTMLVideoElement>(null);
@@ -334,7 +336,8 @@ export const LandingPage: React.FC = () => {
               {/* Two CTA Buttons */}
               <motion.div initial={prefersReducedMotion ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ duration: 0.4, delay: 0.14, ease: [0.22, 1, 0.36, 1] }} className="flex flex-wrap items-center gap-3.5 pt-1">
                 <Link
-                  to="/quick-setup"
+                  to={user ? '/quick-setup' : '/login'}
+                  state={user ? undefined : { message: 'Vui lòng đăng nhập để bắt đầu đặt hàng.' }}
                   className="inline-flex min-h-12 items-center justify-center px-7 rounded-lg bg-[#287DA8] hover:bg-[#206588] text-white font-semibold text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287DA8] focus-visible:ring-offset-2"
                 >
                   Đặt thử ngay
@@ -454,7 +457,7 @@ export const LandingPage: React.FC = () => {
         )}
       </AnimatePresence>
 
-      <section className="landing-how border-y border-slate-200/80 bg-white/75 py-12 dark:border-zinc-800 dark:bg-zinc-950/50 sm:py-14" aria-labelledby="landing-how-heading">
+      <section id="how-it-works" className="landing-how scroll-mt-20 border-y border-slate-200/80 bg-white/75 py-12 dark:border-zinc-800 dark:bg-zinc-950/50 sm:py-14" aria-labelledby="landing-how-heading">
         <div className="mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
           <motion.div
             initial={prefersReducedMotion ? false : { opacity: 0, y: 8 }}

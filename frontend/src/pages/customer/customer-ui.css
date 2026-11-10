@@ -18,6 +18,14 @@
 }
 .customer-ui :where(button, a) { -webkit-tap-highlight-color: transparent; }
 .customer-ui :where(button):disabled { cursor: not-allowed; }
+.customer-ui :where(button, a) {
+  transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: 160ms;
+  transition-timing-function: ease-out;
+}
+@media (prefers-reduced-motion: reduce) {
+  .customer-ui :where(button, a) { transition-duration: 0.01ms; }
+}
 .customer-ui :where(h1) { font-size: clamp(24px, 2.4vw, 30px); line-height: 1.25; }
 .customer-ui :where(h2) { line-height: 1.35; }
 .customer-ui :where(input:not([type=checkbox]):not([type=radio]), select, textarea) { min-height: 44px; }

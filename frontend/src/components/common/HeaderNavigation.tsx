@@ -41,8 +41,8 @@ export const HeaderNavigation: React.FC<HeaderNavigationProps> = ({
     if (isLandingPage && location.hash) {
       const hashId = location.hash.replace('#', '');
       const item = NAV_ITEMS.find((n) => n.sectionId === hashId);
-      if (item) {
-        setActiveId(item.id);
+      if (item || hashId === 'how-it-works') {
+        setActiveId(item?.id || 'features');
         const targetElement = document.getElementById(hashId);
         if (targetElement) {
           const timer = setTimeout(() => {

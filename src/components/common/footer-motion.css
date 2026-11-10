@@ -1,0 +1,23 @@
+/* Shared by page footers and dialog action footers; no layout or visibility changes. */
+[data-footer-motion-root] :is(a, button):not(:disabled) {
+  transition: color 160ms ease, background-color 160ms ease, transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-footer-motion-root] .site-footer__primary > svg {
+  transition: transform 180ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+[data-footer-motion-root] :is(a, button):not(:disabled):active { transform: scale(.98); }
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+  [data-footer-motion-root] .site-footer__primary:hover { transform: translateY(-2px); }
+  [data-footer-motion-root] .site-footer__primary:hover > svg { transform: translateX(3px); }
+  [data-footer-motion-root] :is(nav, [data-footer-motion-links]) a:hover { transform: translateX(2px); }
+  [data-footer-motion-root] > button:not(:disabled):hover { transform: translateY(-1px); }
+  [data-footer-motion-root] :is(a, button):not(:disabled):active { transform: scale(.98); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-footer-motion-root] :is(a, button):not(:disabled),
+  [data-footer-motion-root] :is(a, button):not(:disabled):active,
+  [data-footer-motion-root] .site-footer__primary > svg {
+    transition: none;
+    transform: none;
+  }
+}

@@ -223,17 +223,6 @@ export const Navbar: React.FC = () => {
                   <span className="hidden sm:inline">Quản lý cửa hàng</span>
                 </Link>
               )}
-              {isCustomer && location.pathname === '/' && (
-                <Link to="/shop" aria-label="Mua sắm" className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-[#287DA8] px-2.5 text-xs font-semibold text-[#287DA8] transition-colors hover:bg-[#EAF4F9] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#287DA8] dark:text-sky-400">
-                  <ShoppingCart aria-hidden="true" className="h-4 w-4" />
-                  <span>Mua sắm</span>
-                </Link>
-              )}
-              {isCustomer && location.pathname === '/' && (
-                <Link to="/shop?cart=open" aria-label="Mở giỏ hàng" className="grid min-h-11 min-w-11 place-items-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 hover:text-[#287DA8] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#287DA8] dark:text-slate-300 dark:hover:bg-zinc-800">
-                  <ShoppingCart aria-hidden="true" className="h-4 w-4" />
-                </Link>
-              )}
               <div role="group" aria-label="Thông báo và giao diện" className="flex shrink-0 items-center gap-0.5 sm:gap-1">
                 <NotificationBellPopover />
                 {isStoreUser && (
@@ -349,30 +338,12 @@ export const Navbar: React.FC = () => {
             </div>
           ) : (
             <div className="flex items-center gap-2 sm:gap-3">
-              {location.pathname === '/' && (
-                <>
-                  <Link to="/shop" aria-label="Mua sắm" className="inline-flex min-h-11 items-center gap-2 rounded-lg border border-[#287DA8] px-2.5 text-xs font-semibold text-[#287DA8] transition-colors hover:bg-[#EAF4F9] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#287DA8] dark:text-sky-400">
-                    <ShoppingCart aria-hidden="true" className="h-4 w-4" />
-                    <span>Mua sắm</span>
-                  </Link>
-                  <Link to="/shop?cart=open" aria-label="Mở giỏ hàng" className="grid min-h-11 min-w-11 place-items-center rounded-lg text-slate-600 transition-colors hover:bg-slate-100 hover:text-[#287DA8] focus-visible:outline focus-visible:outline-2 focus-visible:outline-[#287DA8] dark:text-slate-300 dark:hover:bg-zinc-800">
-                    <ShoppingCart aria-hidden="true" className="h-4 w-4" />
-                  </Link>
-                </>
-              )}
               <Link
                 to="/login"
-                className="hidden sm:inline-block text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white px-2.5 py-1.5 transition-colors"
+                className="inline-flex min-h-11 items-center text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white px-2.5 py-1.5 transition-colors"
               >
                 Đăng nhập
               </Link>
-              <Link
-                to="/quick-setup"
-                className="px-4.5 py-2 text-xs font-semibold text-white bg-[#287DA8] hover:bg-[#206588] rounded-full shadow-xs hover:shadow-md transition-all active:scale-[0.98]"
-              >
-                Cài đặt ngay
-              </Link>
-
               {/* Mobile menu toggle (Guest only) */}
               <button
                 type="button"

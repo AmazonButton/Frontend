@@ -301,7 +301,7 @@ export const CustomerOrdersPage: React.FC = () => {
 
   return (
     <main className="customer-ui customer-orders max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 sm:py-11">
-      <section className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
+      <section data-page-motion className="flex flex-col gap-6 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.16em] text-[#287DA8]">
             <ReceiptText className="w-3.5 h-3.5" />
@@ -321,7 +321,7 @@ export const CustomerOrdersPage: React.FC = () => {
         </button>
       </section>
 
-      <section aria-label="Tóm tắt đơn hàng" className="orders-summary grid grid-cols-1 sm:grid-cols-3 gap-3 mt-8">
+      <section data-page-motion aria-label="Tóm tắt đơn hàng" className="orders-summary grid grid-cols-1 sm:grid-cols-3 gap-3 mt-8">
         {[
           { label: 'Tổng đơn hàng', value: summary.total, note: 'Từ lần đặt đầu tiên', icon: ReceiptText, tone: 'text-[#287DA8] bg-[#287DA8]/10' },
           { label: 'Đang xử lý', value: summary.active, note: 'Cần theo dõi', icon: Truck, tone: 'text-amber-600 bg-amber-50' },
@@ -343,7 +343,7 @@ export const CustomerOrdersPage: React.FC = () => {
         })}
       </section>
 
-      <section className="orders-list mt-6 rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
+      <section data-page-motion className="orders-list mt-6 rounded-2xl border border-slate-200/80 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
         <div className="p-4 sm:p-5 border-b border-slate-100 dark:border-zinc-800">
           <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
             <div aria-label="Lọc trạng thái đơn hàng" className="orders-filters flex items-center gap-2 min-w-0 overflow-x-auto pb-1 lg:pb-0">

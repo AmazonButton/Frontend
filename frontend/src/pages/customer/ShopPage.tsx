@@ -381,7 +381,7 @@ export const ShopPage: React.FC = () => {
 
   return (
     <motion.main
-      initial={{ opacity: 0, y: 10 }}
+      initial={user?.role === 'CUSTOMER' ? false : { opacity: 0, y: 10 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.35, ease: 'easeOut' }}
       className={`min-h-screen bg-[#f7f8fa] text-slate-900 ${user?.role === 'CUSTOMER' ? 'customer-ui customer-shop' : ''}`}
@@ -398,7 +398,7 @@ export const ShopPage: React.FC = () => {
     </motion.div>}
     {/* Full-Bleed / Edge-to-Edge Hero Banner */}
     {user?.role === 'CUSTOMER' ? (
-      <section className="shop-intro">
+      <section data-page-motion className="shop-intro">
         <div>
           <p className="customer-eyebrow">Cửa hàng trực tuyến</p>
           <h1>Mua sắm thiết yếu, giao tận nhà</h1>
@@ -493,7 +493,7 @@ export const ShopPage: React.FC = () => {
     </section>
     )}
 
-    <section id="storefront-catalog" className="shop-catalog mx-auto max-w-7xl px-4 pb-12 pt-8 sm:px-6 lg:px-8">
+    <section data-page-motion id="storefront-catalog" className="shop-catalog mx-auto max-w-7xl px-4 pb-12 pt-8 sm:px-6 lg:px-8">
 
       <div className="shop-tools mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
         <div>

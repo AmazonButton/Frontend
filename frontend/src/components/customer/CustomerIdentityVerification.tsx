@@ -210,7 +210,7 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
     <Container ref={sectionRef} id={embedded ? 'customer-identity-verification' : undefined} aria-label="Xác minh danh tính eKYC" className={`customer-ui customer-verification ${embedded ? 'profile-identity-verification w-full min-w-0 scroll-mt-24 space-y-6' : 'mx-auto max-w-5xl space-y-6 px-4 py-6 sm:px-6 lg:px-8'} ${isApproved ? 'verification-complete' : ''}`}>
       {/* Top Hero Banner */}
       {isApproved ? (
-        <section className="relative overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-800 via-teal-800 to-sky-950 p-6 text-white shadow-sm">
+        <section data-page-motion className="relative overflow-hidden rounded-2xl border border-emerald-500/25 bg-gradient-to-br from-emerald-800 via-teal-800 to-sky-950 p-6 text-white shadow-sm">
           <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
             <div>
               <div className="mb-2 flex items-center gap-2 text-emerald-200">
@@ -231,7 +231,7 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
           </div>
         </section>
       ) : isPending ? (
-        <section className="relative overflow-hidden rounded-2xl border border-[#287DA8]/25 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-sm">
+        <section data-page-motion className="relative overflow-hidden rounded-2xl border border-[#287DA8]/25 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-sm">
           <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
             <div>
               <div className="mb-2 flex items-center gap-2 text-sky-100">
@@ -256,7 +256,7 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
           </div>
         </section>
       ) : (
-        <section className="overflow-hidden rounded-2xl border border-[#287DA8]/25 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-sm">
+        <section data-page-motion className="overflow-hidden rounded-2xl border border-[#287DA8]/25 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-sm">
           <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
             <div>
               <div className="mb-2 flex items-center gap-2 text-sky-100">
@@ -304,7 +304,7 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
       )}
 
       {/* Main Status Grid */}
-      <section className="verification-main grid gap-6 md:grid-cols-[1.15fr_.85fr] items-stretch">
+      <section data-page-motion className="verification-main grid gap-6 md:grid-cols-[1.15fr_.85fr] items-stretch">
         {/* Latest Status Card */}
         <div className={`verification-status ${card} flex flex-col justify-between`}>
           <div className="flex items-center justify-between">

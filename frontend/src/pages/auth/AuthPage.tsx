@@ -6,6 +6,7 @@ import axios from 'axios';
 import { useGoogleLogin, useGoogleOAuth } from '@react-oauth/google';
 import { getGoogleLoginError, getGooglePopupError } from '../../services/google-auth-errors';
 import { useAuth } from '../../context/AuthContext';
+import { useFooterMotion } from '../../components/common/useFooterMotion';
 import { toast } from '../../context/ToastContext';
 import { api } from '../../services/api';
 import {
@@ -47,6 +48,7 @@ interface AuthPageProps {
 }
 
 export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
+  const footerRef = useFooterMotion();
   const location = useLocation();
   const navigate = useNavigate();
   const locationState = location.state as { email?: string; message?: string } | undefined;
@@ -1420,12 +1422,17 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
       </main>
 
       {/* Footer Bottom Line */}
-      <footer className="relative z-10 w-full px-4 sm:px-8 py-3 text-center sm:flex sm:items-center sm:justify-between text-xs text-slate-500">
-        <p>© 2026 Smart Order Button · IoT Instant Commerce. Nền tảng Đặt Hàng Tức Thì.</p>
-        <div className="hidden sm:flex items-center gap-4 text-slate-500">
-          <Link to="/" className="hover:text-slate-800 transition-colors">Trang chủ</Link>
-          <a href="#privacy" className="hover:text-slate-800 transition-colors">Bảo mật</a>
-          <a href="#terms" className="hover:text-slate-800 transition-colors">Điều khoản</a>
+      <footer
+        ref={footerRef}
+        data-footer-motion-root
+        className="relative z-10 flex w-full flex-col items-center justify-between gap-1.5 bg-transparent px-4 py-2 text-center text-xs font-bold leading-5 text-white sm:flex-row sm:gap-6 sm:px-8 sm:text-left"
+        style={{ textShadow: '0 1px 2px #0f172a, 0 0 5px #0f172a', WebkitTextStroke: '0.3px rgba(15, 23, 42, 0.85)' }}
+      >
+        <p data-footer-motion className="min-w-0 break-words">© 2026 Smart Order Button · IoT Instant Commerce. Nền tảng Đặt Hàng Tức Thì.</p>
+        <div data-footer-motion data-footer-motion-links className="flex flex-wrap items-center justify-center gap-x-5 sm:shrink-0">
+          <Link to="/" className="inline-flex min-h-11 items-center transition-colors hover:text-sky-100 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Trang chủ</Link>
+          <Link to="/policies/privacy" className="inline-flex min-h-11 items-center transition-colors hover:text-sky-100 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Bảo mật</Link>
+          <Link to="/policies/terms" className="inline-flex min-h-11 items-center transition-colors hover:text-sky-100 hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-white">Điều khoản</Link>
         </div>
       </footer>
     </div>

@@ -340,17 +340,10 @@ export const Navbar: React.FC = () => {
             <div className="flex items-center gap-2 sm:gap-3">
               <Link
                 to="/login"
-                className="hidden sm:inline-block text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white px-2.5 py-1.5 transition-colors"
+                className="inline-flex min-h-11 items-center text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white px-2.5 py-1.5 transition-colors"
               >
                 Đăng nhập
               </Link>
-              <Link
-                to="/quick-setup"
-                className="px-4.5 py-2 text-xs font-semibold text-white bg-[#287DA8] hover:bg-[#206588] rounded-full shadow-xs hover:shadow-md transition-all active:scale-[0.98]"
-              >
-                Cài đặt ngay
-              </Link>
-
               {/* Mobile menu toggle (Guest only) */}
               <button
                 type="button"

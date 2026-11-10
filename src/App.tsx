@@ -13,6 +13,7 @@ import './pages/customer/customer-ui.css';
 // behaviour intact while avoiding the cost of dashboards, charts and forms on
 // the first visit to an unrelated screen.
 const LandingPage = React.lazy(() => import('./pages/LandingPage').then((module) => ({ default: module.LandingPage })));
+const PublicInfoPage = React.lazy(() => import('./pages/PublicInfoPage').then((module) => ({ default: module.PublicInfoPage })));
 const LoginPage = React.lazy(() => import('./pages/auth/LoginPage').then((module) => ({ default: module.LoginPage })));
 const RegisterPage = React.lazy(() => import('./pages/auth/RegisterPage').then((module) => ({ default: module.RegisterPage })));
 const ForgotPasswordPage = React.lazy(() => import('./pages/auth/ForgotPasswordPage').then((module) => ({ default: module.ForgotPasswordPage })));
@@ -156,6 +157,8 @@ export const App: React.FC = () => {
         <Suspense fallback={<RouteLoadingFallback />}>
           <Routes>
           <Route path="/" element={<LandingPage />} />
+          <Route path="/help/:slug" element={<PublicInfoPage />} />
+          <Route path="/policies/:slug" element={<PublicInfoPage />} />
           <Route
             path="/shop"
             element={user?.role === 'CUSTOMER' ? <AppShellLayout><ShopPage /></AppShellLayout> : <ShopPage />}
