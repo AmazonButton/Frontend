@@ -340,7 +340,7 @@ export const Navbar: React.FC = () => {
             <div className="flex items-center gap-2 sm:gap-3">
               <Link
                 to="/login"
-                className="inline-flex min-h-11 items-center text-xs font-semibold text-slate-600 hover:text-slate-900 dark:text-zinc-300 dark:hover:text-white px-2.5 py-1.5 transition-colors"
+                className="inline-flex min-h-11 items-center justify-center rounded-lg border border-[#cce3ef] bg-[#eaf4f9] px-4 py-1.5 text-xs font-semibold text-[#216d92] transition-colors hover:border-[#afd2e4] hover:bg-[#dceef7] active:bg-[#cfe5f1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#287DA8] dark:border-[#2a5267] dark:bg-[#183649] dark:text-[#a7deee] dark:hover:bg-[#21485e] dark:active:bg-[#2a5267]"
               >
                 Đăng nhập
               </Link>
@@ -378,7 +378,7 @@ export const Navbar: React.FC = () => {
                 <Link
                   to="/login"
                   onClick={() => setMobileMenuOpen(false)}
-                  className="w-full text-center py-2 text-xs font-semibold text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-xl transition-colors"
+                  className="inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-[#cce3ef] bg-[#eaf4f9] px-4 py-2 text-xs font-semibold text-[#216d92] transition-colors hover:border-[#afd2e4] hover:bg-[#dceef7] active:bg-[#cfe5f1] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[#287DA8] dark:border-[#2a5267] dark:bg-[#183649] dark:text-[#a7deee] dark:hover:bg-[#21485e] dark:active:bg-[#2a5267]"
                 >
                   Đăng nhập
                 </Link>

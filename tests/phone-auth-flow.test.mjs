@@ -38,6 +38,7 @@ test('validates credential and registration name before any backend request',asy
   assert.equal(calls,0);
 });
 test('every phone-login destination is accessible to its role',()=>{
+  assert.equal(roleHome('CUSTOMER'),'/shop');
   for(const role of ['SUPER_ADMIN','SYSTEM_ADMIN','ADMIN'])assert.equal(roleHome(role),'/admin/dashboard');
   for(const role of ['STORE_OWNER','STORE_MANAGER','STORE_STAFF'])assert.equal(roleHome(role),'/store/dashboard');
   for(const role of ['STAFF_ORDER','STAFF_DELIVERY'])assert.equal(roleHome(role),'/driver/deliveries');

@@ -153,7 +153,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
         } else if (['STAFF_DELIVERY', 'STAFF_ORDER'].includes(user.role)) {
           navigate('/driver/deliveries', { replace: true });
         } else if (user.role === 'CUSTOMER') {
-          navigate('/customer/home', { replace: true });
+          navigate('/shop', { replace: true });
         } else if (['SUPER_ADMIN', 'ADMIN', 'SYSTEM_ADMIN'].includes(user.role)) {
           navigate('/admin/dashboard', { replace: true });
         } else {
@@ -275,7 +275,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
           } else if (['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role)) {
             navigate('/store/dashboard');
           } else {
-            navigate('/customer/home');
+            navigate(user?.role === 'CUSTOMER' ? '/shop' : '/customer/home');
           }
           return;
         }
@@ -1016,7 +1016,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
                               if (['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role)) {
                                 navigate('/store/dashboard', { replace: true });
                               } else {
-                                navigate('/customer/home', { replace: true });
+                                navigate(user?.role === 'CUSTOMER' ? '/shop' : '/customer/home', { replace: true });
                               }
                             } else {
                               setIdentifier(username.trim() || registerEmail.trim());

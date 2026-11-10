@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
-import { motion, AnimatePresence } from 'framer-motion';
+import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { ArrowRight, CheckCircle2, Minus, PackageCheck, Plus, RefreshCw, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
 import { api, isTokenExpired } from '../../services/api';
 import { getSocket } from '../../services/socket';
@@ -14,6 +14,7 @@ import { getShippingContactErrors, normalizeShippingContact, ShippingContactFiel
 import { DeliveryAddressMap } from '../../components/orders/DeliveryAddressMap';
 import type { DeliveryLocation } from '../../services/delivery-location';
 import { useAuth } from '../../context/AuthContext';
+import { PageBackButton } from '../../components/common/PageBackButton';
 
 const deliveryHeroBackground = '/assets/products/delivery-hero-pastel.png';
 
@@ -46,6 +47,7 @@ const getInitialStorefrontCatalog = (): Product[] => {
 
 export const ShopPage: React.FC = () => {
   const { user } = useAuth();
+  const reduceMotion = useReducedMotion();
   const location = useLocation();
   const cachedProducts = getInitialStorefrontCatalog();
   const [products, setProducts] = useState<Product[]>(cachedProducts);
@@ -397,19 +399,8 @@ export const ShopPage: React.FC = () => {
       {flyingProduct.product.imageUrl ? <img src={flyingProduct.product.imageUrl} alt="" crossOrigin="anonymous" referrerPolicy="no-referrer" loading="lazy" className="h-full w-full object-cover" /> : <span className="grid h-full place-items-center text-xl">🛍️</span>}
     </motion.div>}
     {/* Full-Bleed / Edge-to-Edge Hero Banner */}
-    {user?.role === 'CUSTOMER' ? (
-      <section data-page-motion className="shop-intro">
-        <div>
-          <p className="customer-eyebrow">Cửa hàng trực tuyến</p>
-          <h1>Mua sắm thiết yếu, giao tận nhà</h1>
-          <p className="shop-intro-description">Chọn sản phẩm từ cửa hàng bạn tin dùng. Giá và tồn kho được cập nhật trực tiếp.</p>
-          <button type="button" onClick={scrollToCatalog} className="shop-catalog-link">Xem sản phẩm <ArrowRight size={16} /></button>
-        </div>
-        <img src={deliveryHeroBackground} alt="" className="shop-intro-image" />
-      </section>
-    ) : (
     <section
-      className="relative w-full overflow-hidden border-b border-sky-100/70 bg-[#eaf7f8] bg-cover bg-[center_right] sm:bg-center bg-no-repeat"
+      className="shop-hero relative w-full overflow-hidden border-b border-sky-100/70 bg-[#eaf7f8] bg-cover bg-[center_right] sm:bg-center bg-no-repeat"
       style={{ backgroundImage: `url("${deliveryHeroBackground}")` }}
     >
       {/* Subtle Gradient Overlay: Soft pastel-tinted on left, smoothly transparent on right to reveal illustration */}
@@ -419,9 +410,12 @@ export const ShopPage: React.FC = () => {
       />
 
       <div className="relative mx-auto max-w-7xl px-4 sm:px-6 lg:px-8">
+        {user?.role === 'CUSTOMER' && <nav aria-label="Điều hướng trang" className="shop-hero-back relative z-10 flex pt-3 sm:pt-4">
+          <PageBackButton />
+        </nav>}
         <div className="relative z-10 flex min-h-[340px] items-center py-10 sm:min-h-[380px] sm:py-14 lg:min-h-[420px] lg:py-16">
           <motion.div
-            initial="hidden"
+            initial={reduceMotion ? false : "hidden"}
             animate="visible"
             variants={{
               hidden: { opacity: 0 },
@@ -463,8 +457,8 @@ export const ShopPage: React.FC = () => {
               className="mt-6 flex flex-wrap items-center gap-4 sm:mt-8 sm:gap-6"
             >
               <motion.button
-                whileHover={{ scale: 1.03 }}
-                whileTap={{ scale: 0.97 }}
+                whileHover={reduceMotion ? undefined : { scale: 1.03 }}
+                whileTap={reduceMotion ? undefined : { scale: 0.97 }}
                 type="button"
                 onClick={scrollToCatalog}
                 className="group inline-flex items-center gap-2 rounded-xl bg-[#287DA8] px-5 py-3 text-sm font-semibold text-white shadow-sm transition-colors duration-200 hover:bg-[#1e688e] hover:shadow-md focus:outline-none focus:ring-2 focus:ring-[#287DA8]/50 focus:ring-offset-2 sm:px-6 sm:py-3.5 sm:text-base"
@@ -478,7 +472,7 @@ export const ShopPage: React.FC = () => {
               </motion.button>
 
               <motion.div
-                whileHover={{ scale: 1.02 }}
+                whileHover={reduceMotion ? undefined : { scale: 1.02 }}
                 className="flex items-center gap-2 text-xs font-medium text-slate-600 sm:text-sm"
               >
                 <span className="grid h-8 w-8 place-items-center rounded-full bg-sky-100/90 text-[#287DA8]">
@@ -491,7 +485,6 @@ export const ShopPage: React.FC = () => {
         </div>
       </div>
     </section>
-    )}
 
     <section data-page-motion id="storefront-catalog" className="shop-catalog mx-auto max-w-7xl px-4 pb-12 pt-8 sm:px-6 lg:px-8">
 

@@ -57,7 +57,7 @@ test('A Google access token uses the existing authenticated API contract and sto
   assert.equal(app.state.requests[0].payload.token, 'test-google-access-token');
   assert.equal(app.state.requests[0].payload.email, undefined);
   assert.equal(app.state.logins[0][0], 'test-app-session');
-  assert.equal(app.state.navigations[0], '/customer/home');
+  assert.equal(app.state.navigations[0], '/shop');
   assert.equal(app.state.loading, false);
 });
 

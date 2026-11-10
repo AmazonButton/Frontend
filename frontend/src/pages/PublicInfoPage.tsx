@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useLayoutEffect, useRef } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { useReducedMotion } from 'framer-motion';
 import { ArrowLeft, ArrowRight, BookOpen, ChevronRight, Info } from 'lucide-react';
@@ -12,6 +12,30 @@ export const PublicInfoPage: React.FC = () => {
   const prefersReducedMotion = useReducedMotion();
   const article = PUBLIC_ARTICLES.find((item) => item.path === pathname.replace(/\/$/, ''));
   const heading = useRef<HTMLHeadingElement>(null);
+  const articleContent = useRef<HTMLElement>(null);
+
+  useLayoutEffect(() => {
+    const content = articleContent.current;
+    if (!content || prefersReducedMotion) return;
+
+    let id = '';
+    try { id = decodeURIComponent(hash.slice(1)); } catch { /* Invalid hashes use the page entrance. */ }
+    const target = id ? document.getElementById(id) : null;
+    const section = target && content.contains(target) ? target : null;
+    // Keep the sidebar mounted and anchor positions steady during in-page navigation.
+    const surfaces = section ? [section] : Array.from(content.children);
+    const animations = surfaces
+      .filter((surface): surface is HTMLElement => surface instanceof HTMLElement && typeof surface.animate === 'function')
+      .map((surface, index) => surface.animate(
+        section
+          ? [{ opacity: 0.5 }, { opacity: 1 }]
+          : [{ opacity: 0.45, transform: 'translate3d(0, 10px, 0)' }, { opacity: 1, transform: 'translate3d(0, 0, 0)' }],
+        { duration: 360, delay: section ? 0 : Math.min(index * 35, 105), easing: 'cubic-bezier(0.22, 1, 0.36, 1)', fill: 'backwards' },
+      ));
+
+    // Rapid navigation never leaves an old animation or hidden content behind.
+    return () => animations.forEach((animation) => animation.cancel());
+  }, [article, hash, prefersReducedMotion]);
 
   useEffect(() => {
     const previousTitle = document.title;
@@ -43,8 +67,8 @@ export const PublicInfoPage: React.FC = () => {
   };
 
   if (!article) return (
-    <main className="public-info public-info--missing">
-      <nav className="public-info__back-navigation" aria-label="Điều hướng quay lại"><PageBackButton fallbackTo="/" /></nav>
+    <main ref={articleContent} className="public-info public-info--missing">
+      <nav className="public-info__back-navigation" aria-label="Điều hướng quay lại"><PageBackButton fallbackTo="/" /><Link to="/" className="public-info__back"><ArrowLeft aria-hidden="true" size={16} /> Về trang chủ</Link></nav>
       <BookOpen aria-hidden="true" size={32} />
       <h1 ref={heading} tabIndex={-1}>Không tìm thấy nội dung</h1>
       <p>Bạn có thể quay lại hướng dẫn đặt hàng hoặc chọn một chủ đề ở cuối trang.</p>
@@ -59,6 +83,7 @@ export const PublicInfoPage: React.FC = () => {
       <div className="public-info__inner">
         <nav className="public-info__back-navigation" aria-label="Điều hướng quay lại">
           <PageBackButton fallbackTo="/" />
+          <Link to="/" className="public-info__back"><ArrowLeft aria-hidden="true" size={16} /> Về trang chủ</Link>
         </nav>
         <nav className="public-info__breadcrumb" aria-label="Vị trí trang">
           <Link to="/">Trang chủ</Link><ChevronRight aria-hidden="true" size={13} />
@@ -88,7 +113,7 @@ export const PublicInfoPage: React.FC = () => {
             </div>
           </aside>
           <main className="public-info__article">
-            <article aria-labelledby="public-article-title">
+            <article ref={articleContent} aria-labelledby="public-article-title">
             <header>
               <span className="public-info__eyebrow">{article.category.toLocaleUpperCase('vi-VN')}</span>
               <h1 id="public-article-title" ref={heading} tabIndex={-1}>{article.title}</h1>
@@ -130,10 +155,9 @@ export const PublicInfoPage: React.FC = () => {
               <div><h2>{article.support.title}</h2><p>{article.support.description}</p></div>
               <Link to={article.support.to} className="public-info__action">{article.support.label}<ArrowRight aria-hidden="true" size={16} /></Link>
             </div>}
-            <div className="public-info__next">
-              <Link to="/" className="public-info__back"><ArrowLeft aria-hidden="true" size={16} /> Về trang chủ</Link>
-              {article.support?.to !== article.action.to && !article.related?.links.some((link) => link.to === article.action.to) && <Link to={article.action.to} className={article.support ? 'public-info__back' : 'public-info__action'}>{article.action.label}<ArrowRight aria-hidden="true" size={16} /></Link>}
-            </div>
+            {article.support?.to !== article.action.to && !article.related?.links.some((link) => link.to === article.action.to) && <div className="public-info__next">
+              <Link to={article.action.to} className={article.support ? 'public-info__back' : 'public-info__action'}>{article.action.label}<ArrowRight aria-hidden="true" size={16} /></Link>
+            </div>}
             </article>
           </main>
         </div>

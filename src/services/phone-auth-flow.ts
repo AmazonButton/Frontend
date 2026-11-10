@@ -9,7 +9,7 @@ export function roleHome(role?: string) {
   if (['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(role || '')) return '/admin/dashboard';
   if (['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(role || '')) return '/store/dashboard';
   if (['STAFF_DELIVERY', 'STAFF_ORDER'].includes(role || '')) return '/driver/deliveries';
-  return role === 'CUSTOMER' ? '/customer/home' : '/profile';
+  return role === 'CUSTOMER' ? '/shop' : '/profile';
 }
 
 export async function exchangePhoneCredential(transport: { post: (path: string, body: any) => Promise<any> }, mode: 'login' | 'register' | 'verify', firebaseIdToken: string, profile?: { fullName: string; email?: string }) {

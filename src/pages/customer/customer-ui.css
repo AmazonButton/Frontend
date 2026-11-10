@@ -30,24 +30,11 @@
 .customer-ui :where(h2) { line-height: 1.35; }
 .customer-ui :where(input:not([type=checkbox]):not([type=radio]), select, textarea) { min-height: 44px; }
 
-/* Shopping: compact introduction, catalog first, price above two clear actions. */
-.customer-shop { min-height: 0; border-radius: 12px; }
-.customer-shop .shop-intro {
-  position: relative;
-  display: flex;
-  align-items: center;
-  min-height: 180px;
-  gap: 24px;
-  padding: 24px 32px;
-  overflow: hidden;
-  background: #EAF4F9;
-  border-bottom: 1px solid var(--customer-line);
-}
-.customer-shop .shop-intro > div { position: relative; z-index: 1; max-width: 580px; }
-.customer-shop .shop-intro h1 { font-weight: 700; letter-spacing: -.03em; }
-.customer-shop .shop-intro-description { max-width: 460px; margin-top: 8px; color: #475569; font-size: 14px; }
-.customer-shop .shop-catalog-link { display: inline-flex; align-items: center; gap: 8px; min-height: 44px; margin-top: 4px; color: #287DA8; font-size: 13px; font-weight: 600; }
-.customer-shop .shop-intro-image { width: 30%; max-width: 280px; height: 150px; object-fit: cover; border-radius: 8px; margin-left: auto; }
+/* Shopping: illustrated hero, then the existing catalog and purchase actions. */
+.customer-shop { min-height: 0; border-radius: 0; }
+.customer-shop .shop-hero h1 { font-size: clamp(2rem, 3.3vw, 3rem); line-height: 1.15; color: #0c2340; }
+.customer-shop .shop-hero-back button { color: #475569; }
+.customer-shop .shop-hero-back button:hover { color: #0E6BA8; background: rgb(255 255 255 / .65); }
 .customer-shop .shop-catalog { padding: 24px 24px 32px; }
 .customer-shop .shop-tools { align-items: flex-start; margin-bottom: 20px; }
 .customer-shop .shop-tools h2 { font-size: 18px; }
@@ -230,10 +217,6 @@
   .customer-shop .shop-products { grid-template-columns: repeat(4, minmax(0,1fr)); }
 }
 @media (max-width: 719px) {
-  .customer-shop .shop-intro { min-height: 0; padding: 20px 16px; }
-  .customer-shop .shop-intro-image { display: none; }
-  .customer-shop .shop-intro h1 { font-size: 24px; }
-  .customer-shop .shop-intro-description { font-size: 13px; }
   .customer-shop .shop-catalog { padding: 20px 12px; }
   .customer-shop .shop-tools { flex-direction: column; gap: 16px; }
   .customer-shop .shop-search-cart { width: 100%; }
@@ -269,7 +252,6 @@
 .dark .customer-profile .account-phone-notice, .dark .customer-profile .account-phone-notice p { color: #a1a1aa; }
 .dark .customer-profile .account-phone-notice a { color: #7dd3fc; }
 .dark .customer-shop { background: #0c0f17; color: #f8fafc; }
-.dark .customer-shop .shop-intro { background: #131722; }
 .dark .customer-shop .shop-product { background: #131722; }
 .dark .customer-shop .shop-product-image { background: #f8fafc; }
 .dark .customer-shop .shop-product-image span { color: #475569; }

@@ -1,6 +1,6 @@
 .public-info { position: relative; background: #fff; color: #172234; }
 .public-info__inner { max-width: 76rem; margin: 0 auto; padding: 1.75rem 2rem 3.5rem; }
-.public-info__back-navigation { display: flex; margin-bottom: .5rem; }
+.public-info__back-navigation { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: .5rem 1rem; margin-bottom: .5rem; }
 .public-info__breadcrumb { display: flex; flex-wrap: wrap; align-items: center; gap: .5rem; color: #526278; font-size: 12px; line-height: 1.6; margin-bottom: 2rem; }
 .public-info__breadcrumb > * { min-width: 0; overflow-wrap: anywhere; }
 .public-info__breadcrumb a { display: inline-flex; align-items: center; min-height: 32px; }

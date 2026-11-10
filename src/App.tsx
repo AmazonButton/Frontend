@@ -84,14 +84,14 @@ const ProtectedRoute: React.FC<{ children: React.ReactNode; allowedRoles?: strin
 
 // Shared desktop shell. The sidebar keeps navigation available while its compact
 // state gives every role the same full-width workspace as the store owner.
-const AppShellLayout: React.FC<{ children?: React.ReactNode }> = ({ children }) => {
+const AppShellLayout: React.FC<{ children?: React.ReactNode; showBackNavigation?: boolean; edgeToEdge?: boolean }> = ({ children, showBackNavigation = true, edgeToEdge = false }) => {
   const { user } = useAuth();
 
   return (
     <div className="flex flex-col lg:flex-row min-h-[calc(100vh-4rem)] w-full bg-[#FBFBFC] dark:bg-zinc-950 relative">
       <Sidebar />
-      <main className="app-workspace flex-1 min-w-0 w-full p-3 sm:p-5 lg:p-6">
-        {['CUSTOMER', 'STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '') && (
+      <main className={`app-workspace flex-1 min-w-0 w-full ${edgeToEdge ? 'p-0' : 'p-3 sm:p-5 lg:p-6'}`}>
+        {showBackNavigation && ['CUSTOMER', 'STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '') && (
           <nav aria-label="Điều hướng trang" className="mb-3 flex sm:mb-4">
             <PageBackButton />
           </nav>
@@ -161,7 +161,7 @@ export const App: React.FC = () => {
           <Route path="/policies/:slug" element={<PublicInfoPage />} />
           <Route
             path="/shop"
-            element={user?.role === 'CUSTOMER' ? <AppShellLayout><ShopPage /></AppShellLayout> : <ShopPage />}
+            element={user?.role === 'CUSTOMER' ? <AppShellLayout showBackNavigation={false} edgeToEdge><ShopPage /></AppShellLayout> : <ShopPage />}
           />
           <Route path="/quick-setup" element={<QuickSetupPage />} />
           <Route path="/login" element={<LoginPage initialMode="login" />} />
