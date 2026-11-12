@@ -1,8 +1,10 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { api } from '../../services/api';
+import { createDeviceTelemetry, deviceRuntime } from '../../services/device-runtime';
+import { api, apiSessionMarker } from '../../services/api';
+import { createDevicePageLoader, assertDeviceScope, upsertScopedDevice, normalizeDevice, readDeviceCache, saveDeviceCache, hasBleReceipt } from '../../services/device-connection';
 import { toast } from '../../context/ToastContext';
 import { useAuth } from '../../context/AuthContext';
 import { deviceDashboardMetrics, formatMetric } from '../../services/dashboard-metrics';
@@ -65,7 +67,7 @@ import {
   ShieldAlert,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
-import { WhiteDeviceAirPodsModal } from '../../components/devices/WhiteDeviceAirPodsModal';
+const WhiteDeviceAirPodsModal = React.lazy(() => import('../../components/devices/WhiteDeviceAirPodsModal').then(m => ({ default: m.WhiteDeviceAirPodsModal })));
 
 // Keep camera decoding out of the initial device list; the existing camera branch mounts it.
 const QrCameraScanner = React.lazy(() => import('../../components/common/QrCameraScanner').then((module) => ({ default: module.QrCameraScanner })));
@@ -232,6 +234,10 @@ const GESTURE_ITEMS = [
 
 export const StoreDevicesPage: React.FC = () => {
   const { user } = useAuth();
+  return <StoreDevicesWorkspace key={`${user?.id}:${user?.storeId}`} />;
+};
+const StoreDevicesWorkspace: React.FC = () => {
+  const { user } = useAuth();
   const [showAirPodsModal, setShowAirPodsModal] = useState(false);
   const [openMenuId, setOpenMenuId] = useState<string | null>(null);
   const [showToolsDropdown, setShowToolsDropdown] = useState(false);
@@ -244,10 +250,11 @@ export const StoreDevicesPage: React.FC = () => {
     window.addEventListener('click', handleClosePopups);
     return () => window.removeEventListener('click', handleClosePopups);
   }, []);
-  const [devices, setDevices] = useState<Device[]>([]);
+  const [devices, setDevices] = useState<Device[]>(() => { try { return readDeviceCache(sessionStorage, user); } catch { return []; } });
   const [products, setProducts] = useState<Product[]>([]);
-  const [devicesReady, setDevicesReady] = useState(false);
-  const [loading, setLoading] = useState(true);
+  const hasSeenBleDevice = (device: Device) => { try { return hasBleReceipt(localStorage, user, device); } catch { return false; } };
+  const [devicesReady, setDevicesReady] = useState(devices.length > 0);
+  const [loading, setLoading] = useState(devices.length === 0);
   const [loadError, setLoadError] = useState<string | null>(null);
 
   // Search & Filters
@@ -350,6 +357,7 @@ export const StoreDevicesPage: React.FC = () => {
   const [editMissingFields, setEditMissingFields] = useState<string[]>([]);
 
   // Simulation test state
+  const [deviceErrors, setDeviceErrors] = useState<Record<string, string>>({});
   const [simulatingDeviceId, setSimulatingDeviceId] = useState<string | null>(null);
   const [simulationResult, setSimulationResult] = useState<any | null>(null);
 
@@ -530,32 +538,24 @@ export const StoreDevicesPage: React.FC = () => {
     }
   };
 
-  const fetchData = async (attempt = 0) => {
-    const results = await Promise.allSettled([
-        api.get('/devices'),
-        api.get('/products'),
-
-    ]);
-    const [deviceResult, productResult] = results;
-    const failedRequests = results.filter((result) => result.status === 'rejected' || result.value.data?.success !== true || !Array.isArray(result.value.data.data));
-
-    if (deviceResult.status === 'fulfilled' && deviceResult.value.data?.success && Array.isArray(deviceResult.value.data.data)) {
-      setDevices(deviceResult.value.data.data); setDevicesReady(true);
-    }
-    if (productResult.status === 'fulfilled' && productResult.value.data?.success && Array.isArray(productResult.value.data.data)) {
-      setProducts(productResult.value.data.data);
-    }
-
-
-    if (failedRequests.length > 0) {
-      setLoadError('Một phần dữ liệu hạm đội chưa tải được. Hệ thống sẽ tự thử lại.');
-      if (attempt < 2) {
-        window.setTimeout(() => void fetchData(attempt + 1), 1000 * (attempt + 1));
-      }
-    } else {
-      setLoadError(null);
-    }
-    setLoading(false);
+  const deviceLoader = useRef(createDevicePageLoader());
+  const deviceRevision = useRef(0);
+  const deviceTelemetry = useRef(createDeviceTelemetry());
+  const [deviceNow, setDeviceNow] = useState(Date.now);
+  useEffect(() => { const timer = window.setInterval(() => setDeviceNow(Date.now()), 5000); return () => window.clearInterval(timer); }, []);
+  const dataFailures = useRef(new Set<string>());
+  useEffect(() => { deviceLoader.current = createDevicePageLoader(); return () => deviceLoader.current.dispose(); }, []);
+  const fetchData = async () => {
+    const loader = deviceLoader.current; const scope = apiSessionMarker(); const revision = deviceRevision.current;
+    const valid = () => loader.valid() && apiSessionMarker() === scope;
+    const report = (key: string, failed: boolean) => { if (!valid()) return; if (failed) dataFailures.current.add(key); else dataFailures.current.delete(key); setLoadError(dataFailures.current.size ? 'Một phần dữ liệu chưa tải được. Dữ liệu đã tải vẫn được giữ lại; bạn có thể tải lại.' : null); };
+    return loader.run([async () => {
+      try { const res = await api.get('/devices'); if (!res.data?.success || !Array.isArray(res.data.data)) throw new Error('Invalid devices'); if (!valid() || revision !== deviceRevision.current) return; const rows = deviceTelemetry.current.merge<Device>(res.data.data.map((raw: any) => assertDeviceScope(raw, user))); setDevices(rows); setDevicesReady(true); try { saveDeviceCache(sessionStorage, user, rows); } catch {} report('devices', false); }
+      catch { report('devices', true); } finally { if (valid()) setLoading(false); }
+    }, async () => {
+      try { const res = await api.get('/products'); if (!res.data?.success || !Array.isArray(res.data.data)) throw new Error('Invalid products'); if (valid()) { setProducts(res.data.data); report('products', false); } }
+      catch { report('products', true); }
+    }]);
   };
 
   useEffect(() => {
@@ -566,22 +566,13 @@ export const StoreDevicesPage: React.FC = () => {
       const socket = getSocket();
 
       const handleHeartbeat = (data: any) => {
-        setDevices((prev) =>
-          prev.map((d) =>
-            d.deviceId === data.deviceId
-              ? {
-                  ...d,
-                  batteryLevel: data.batteryLevel,
-                  wifiRSSI: data.wifiRSSI,
-                  lastSeenAt: data.lastSeenAt,
-                }
-              : d
-          )
-        );
+        deviceTelemetry.current.record(data);
+        setDevices(previous => deviceTelemetry.current.merge(previous));
       };
 
       const handleRefresh = () => {
-        fetchData();
+        deviceRevision.current++;
+        void fetchData();
       };
 
       const handleDevicesAllocated = (payload: any) => {
@@ -600,6 +591,8 @@ export const StoreDevicesPage: React.FC = () => {
       socket.on('device:offline', handleRefresh);
       socket.on('device:product_changed', handleRefresh);
       socket.on('device:configured', handleRefresh);
+      socket.on('DEVICE_PROVISIONED', handleRefresh);
+      window.addEventListener('sob_device_claimed_success', handleRefresh);
       socket.on('device:deleted', handleRefresh);
       socket.on('DEVICES_ALLOCATED', handleDevicesAllocated);
       socket.on('devices:allocated', handleDevicesAllocated);
@@ -610,6 +603,8 @@ export const StoreDevicesPage: React.FC = () => {
         socket.off('device:offline', handleRefresh);
         socket.off('device:product_changed', handleRefresh);
         socket.off('device:configured', handleRefresh);
+        socket.off('DEVICE_PROVISIONED', handleRefresh);
+        window.removeEventListener('sob_device_claimed_success', handleRefresh);
         socket.off('device:deleted', handleRefresh);
         socket.off('DEVICES_ALLOCATED', handleDevicesAllocated);
         socket.off('devices:allocated', handleDevicesAllocated);
@@ -677,15 +672,19 @@ export const StoreDevicesPage: React.FC = () => {
 
   // Thao tác Mô phỏng bấm nút gửi server (Store Manage)
   const handleSimulatePress = async (deviceId: string) => {
+    const state = deviceRuntime(devices.find(d => d.deviceId === deviceId));
+    if (!state.canOrder) { setDeviceErrors(prev => ({ ...prev, [deviceId]: state.hint })); return; }
+    setDeviceErrors(prev => ({ ...prev, [deviceId]: '' }));
     setSimulatingDeviceId(deviceId);
     try {
       const res = await api.post(`/devices/${deviceId}/simulate-press`, { eventType: 'DOUBLE_PRESS' });
+      if (!res.data?.success) throw new Error(res.data?.message || 'Mô phỏng bấm nút thất bại');
       if (res.data.success) {
         setSimulationResult(res.data);
         fetchData();
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Mô phỏng bấm nút thất bại');
+      setDeviceErrors(prev => ({ ...prev, [deviceId]: err.response?.data?.message || err.message || 'Mô phỏng bấm nút thất bại' }));
     } finally {
       setSimulatingDeviceId(null);
     }
@@ -936,7 +935,7 @@ export const StoreDevicesPage: React.FC = () => {
 
   // Filtered devices
   useDashboardRefresh(() => fetchData(), 'store-devices:' + user?.id + ':' + user?.storeId, true);
-  const deviceMetrics = deviceDashboardMetrics(devices);
+  const deviceMetrics = { ...deviceDashboardMetrics(devices), active: devices.filter(device => deviceRuntime(device, deviceNow).running).length };
   const filteredDevices = devices.filter((device) => {
     const q = searchQuery.toLowerCase().trim();
     const matchesSearch =
@@ -967,7 +966,7 @@ export const StoreDevicesPage: React.FC = () => {
               Danh sách nút bấm
             </h1>
             <span className="flex items-center gap-1.5 px-1.5 py-0.5 rounded text-[10px] font-mono font-semibold bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></span>
+              <span className={`w-1.5 h-1.5 rounded-full ${devicesReady && deviceMetrics.active > 0 ? "bg-emerald-500 motion-safe:animate-pulse" : "bg-zinc-400"}`}></span>
               FLEET-TELEMETRY
             </span>
           </div>
@@ -1097,13 +1096,13 @@ export const StoreDevicesPage: React.FC = () => {
             <span className="text-xl font-bold font-mono text-emerald-600 dark:text-emerald-400">
               {formatMetric(!devicesReady ? null : (deviceMetrics.active))}
             </span>
-            <span className="text-[10.5px] font-mono text-zinc-400">Theo trạng thái hệ thống</span>
+            <span className="text-[10.5px] font-mono text-zinc-400">Đã kích hoạt & có tín hiệu mạng</span>
           </div>
         </div>
 
         <div className="p-3 sm:px-4 sm:py-2.5 flex flex-col justify-between">
           <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-400 dark:text-zinc-500">
-            Chưa hoạt động
+            Chưa chạy / chờ kết nối
           </span>
           <div className="mt-1 flex items-baseline gap-1.5">
             <span className="text-xl font-bold font-mono text-zinc-700 dark:text-zinc-300">
@@ -1186,7 +1185,7 @@ export const StoreDevicesPage: React.FC = () => {
               className="text-xs px-2 py-1 rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 focus:outline-none cursor-pointer"
             >
               <option value="ALL">Tất cả trạng thái ({devices.length})</option>
-              <option value="ACTIVE">Hoạt động (ACTIVE)</option>
+              <option value="ACTIVE">Đã kích hoạt (ACTIVE)</option>
               <option value="DISABLED">Tạm ngưng (DISABLED)</option>
               <option value="UNCLAIMED">Chưa kích hoạt</option>
             </select>
@@ -1227,7 +1226,7 @@ export const StoreDevicesPage: React.FC = () => {
               Đang tải danh sách thiết bị viễn trắc...
             </div>
           </div>
-        ) : filteredDevices.length === 0 ? (
+        ) : !devicesReady ? <div role="status" className="py-12 text-center text-sm text-amber-800 dark:text-amber-300">Chưa đọc được kho nút từ hệ thống. Hãy tải lại để kiểm tra; không tạo nút thay thế.</div> : filteredDevices.length === 0 ? (
           <div className="py-16 text-center space-y-2">
             <Cpu className="w-7 h-7 text-zinc-200 dark:text-zinc-700 mx-auto" strokeWidth={1.5} />
             <p className="text-xs font-medium text-zinc-400">
@@ -1252,10 +1251,7 @@ export const StoreDevicesPage: React.FC = () => {
               className="divide-y divide-zinc-100 dark:divide-zinc-800/60 text-xs"
             >
               {filteredDevices.map((device, index) => {
-                const isOnline =
-                  device.lastSeenAt &&
-                  Date.now() - new Date(device.lastSeenAt).getTime() < 25000 &&
-                  device.status === 'ACTIVE';
+                const runtime = deviceRuntime(device, deviceNow);
 
                 const assignedProduct =
                   device.product || device.configuration?.product;
@@ -1264,7 +1260,7 @@ export const StoreDevicesPage: React.FC = () => {
 
                 return (
                   <motion.tr
-                    key={device.id}
+                    key={device.deviceId || device.id}
                     variants={tableRowVariants}
                     className="hover:bg-zinc-50/80 dark:hover:bg-zinc-800/30 transition-colors group"
                   >
@@ -1273,18 +1269,12 @@ export const StoreDevicesPage: React.FC = () => {
                       <div className="flex items-center gap-2">
                         <span
                           className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                            device.status === 'ACTIVE'
-                              ? isOnline
-                                ? 'bg-emerald-500 shadow-[0_0_6px_rgba(16,185,129,0.8)] animate-pulse'
-                                : 'bg-emerald-500/80'
-                              : device.status === 'DISABLED'
-                              ? 'bg-rose-500'
-                              : 'bg-zinc-400'
+                            runtime.running ? 'bg-emerald-500' : device.status === 'DISABLED' ? 'bg-rose-500' : 'bg-zinc-400'
                           }`}
                         />
                         <div>
                           <div className="flex items-center gap-1.5 font-mono text-sm font-medium text-zinc-900 dark:text-zinc-100 leading-none">
-                            <span>{device.deviceId}</span>
+                            <span>{device.deviceId}</span>{hasSeenBleDevice(device) && <span className="ml-2 text-[10px] text-sky-700 dark:text-sky-300">Đã nhận diện BLE</span>}
                             <button
                               type="button"
                               onClick={() => handleCopy(device.deviceId, device.id)}
@@ -1311,25 +1301,15 @@ export const StoreDevicesPage: React.FC = () => {
                       <div className="flex items-center gap-1.5">
                         <span
                           className={`w-1.5 h-1.5 rounded-full shrink-0 ${
-                            device.status === 'ACTIVE'
-                              ? isOnline
-                                ? 'bg-emerald-500'
-                                : 'bg-emerald-500/80'
-                              : device.status === 'DISABLED'
-                              ? 'bg-rose-500'
-                              : 'bg-zinc-400'
+                            runtime.running ? 'bg-emerald-500' : device.status === 'DISABLED' ? 'bg-rose-500' : 'bg-zinc-400'
                           }`}
                         />
                         <span className="text-[11px] font-medium text-zinc-600 dark:text-zinc-400">
-                          {device.status === 'ACTIVE'
-                            ? isOnline
-                              ? 'Trực tuyến'
-                              : 'Sẵn sàng'
-                            : device.status === 'DISABLED'
-                            ? 'Tạm ngưng'
-                            : 'Chưa kích hoạt'}
+                          {runtime.label}
                         </span>
                       </div>
+                      {runtime.hint && <p className="mt-1 max-w-[220px] whitespace-normal text-[11px] leading-4 text-zinc-500">{runtime.hint}</p>}
+                      {deviceErrors[device.deviceId] && <p role="alert" className="mt-1 max-w-[220px] whitespace-normal text-[11px] leading-4 text-amber-700 dark:text-amber-300">{deviceErrors[device.deviceId]}</p>}
                     </td>
 
                     {/* Mapped SKU */}
@@ -1390,9 +1370,9 @@ export const StoreDevicesPage: React.FC = () => {
                           type="button"
                           whileTap={{ scale: 0.94 }}
                           onClick={() => handleSimulatePress(device.deviceId)}
-                          disabled={simulatingDeviceId === device.deviceId}
+                          disabled={simulatingDeviceId === device.deviceId || !runtime.canOrder}
                           className="opacity-0 group-hover:opacity-100 transition-opacity px-2 py-1 rounded-md border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 text-[11px] font-medium flex items-center gap-1 shadow-2xs"
-                          title="Mô phỏng bấm nút gửi tín hiệu đặt hàng"
+                          title={runtime.canOrder ? "Mô phỏng đặt hàng trên web; không kiểm tra kết nối phần cứng" : runtime.hint}
                         >
                           {simulatingDeviceId === device.deviceId ? (
                             <RefreshCw className="w-3 h-3 animate-spin text-zinc-500" strokeWidth={1.5} />
@@ -2696,7 +2676,7 @@ export const StoreDevicesPage: React.FC = () => {
                         onChange={(e) => setCreateForm({ ...createForm, status: e.target.value })}
                         className="w-full px-3 py-2 pr-10 truncate text-xs font-semibold rounded-lg bg-white dark:bg-black/50 border border-slate-200 dark:border-slate-800 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
                       >
-                        <option value="ACTIVE">Đang hoạt động</option>
+                        <option value="ACTIVE">Đã kích hoạt</option>
                         <option value="READY_FOR_CUSTOMER">Sẵn Sàng Giao Khách</option>
                         <option value="DISABLED">Tạm Dừng (DISABLED)</option>
                       </select>
@@ -2838,7 +2818,7 @@ export const StoreDevicesPage: React.FC = () => {
                     onChange={(e) => setEditForm({ ...editForm, status: e.target.value })}
                     className={`w-full px-3 py-2 text-xs font-semibold rounded-lg bg-slate-50 dark:bg-black/40 border text-slate-900 dark:text-white focus:outline-none focus:ring-2 transition-all ${editMissingFields.includes('status') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/20' : 'border-slate-200 dark:border-slate-800 focus:border-[#287DA8] focus:ring-[#287DA8]/20'}`}
                   >
-                    <option value="ACTIVE">Đang hoạt động</option>
+                    <option value="ACTIVE">Đã kích hoạt</option>
                     <option value="DISABLED">Tạm Dừng (DISABLED)</option>
                     <option value="UNCLAIMED">Chưa Kích Hoạt (UNCLAIMED)</option>
                   </select>
@@ -3377,12 +3357,12 @@ export const StoreDevicesPage: React.FC = () => {
       )}
 
       {/* Apple-Style AirPods White Device Pairing Modal */}
-      <WhiteDeviceAirPodsModal
+      {showAirPodsModal && <Suspense fallback={<p role="status" className="fixed bottom-5 right-5 rounded-xl bg-white p-4 shadow-lg">Đang mở kết nối nút…</p>}><WhiteDeviceAirPodsModal
         isOpen={showAirPodsModal}
         onClose={() => setShowAirPodsModal(false)}
         availableProducts={products}
-        onDeviceBound={() => fetchData()}
-      />
+        onDeviceBound={saved => { deviceRevision.current++; setDevices(previous => { const next = upsertScopedDevice(previous, saved, user); try { saveDeviceCache(sessionStorage, user, next); } catch {} return next; }); setDevicesReady(true); void fetchData(); }}
+      /></Suspense>}
     </div>
   );
 };

@@ -70,6 +70,7 @@ export const StoreFinancePage: React.FC = () => {
   const [formError, setFormError] = useState('');
   const [creationUncertain, setCreationUncertain] = useState(false);
   const [activeRequest, setActiveRequest] = useState<FinanceVerification | null>(null);
+  const [requestChecked, setRequestChecked] = useState(false);
   const requestRef = useRef<FinanceVerification | null>(null);
   const [action, setAction] = useState<AccountAction | null>(null);
   const [operation, setOperation] = useState('');
@@ -87,17 +88,26 @@ export const StoreFinancePage: React.FC = () => {
 
   const saveRequest = useCallback((request: FinanceVerification | null) => {
     if (scopeRef.current !== scope) return;
+    setRequestChecked(false);
     requestRef.current = request; setActiveRequest(request);
     try { if (storageKey) { if (request) sessionStorage.setItem(storageKey, JSON.stringify(request)); else sessionStorage.removeItem(storageKey); } } catch { /* Browser storage is optional. */ }
   }, [scope, storageKey]);
 
   const restoreRequest = useCallback((transaction: StoreBankTransaction, force = false) => {
-    if (scopeRef.current !== scope || String(transaction.storeId) !== storeId || transaction.status !== 'PENDING') return;
-    if (operationRef.current || requestRef.current?.verificationId === transaction.verificationId || (requestRef.current && !force)) return;
-    setAction(null); setActionError(''); setCreationUncertain(false); setFormOpen(false); setLookup(null); setNameConfirmed(false);
-    saveRequest({ verificationId: transaction.verificationId, bankAccountId: transaction.bankAccountId,
+    if (scopeRef.current !== scope || String(transaction.storeId) !== storeId || transaction.status !== 'PENDING') return false;
+    const sameRequest = requestRef.current?.verificationId === transaction.verificationId;
+    if (operationRef.current || (requestRef.current && !sameRequest && !force)) return false;
+    const request = readFinanceVerification(JSON.stringify({ verificationId: transaction.verificationId, bankAccountId: transaction.bankAccountId,
       bankName: transaction.bankName, accountName: transaction.accountName, accountNumberMasked: transaction.accountNumberMasked,
-      referenceCode: transaction.referenceCode, amount: transaction.expectedAmount, expiresAt: transaction.expiresAt, instructions: '' });
+      referenceCode: transaction.referenceCode, amount: transaction.expectedAmount, expiresAt: transaction.expiresAt,
+      instructions: transaction.instructions || '', recipientBankBin: transaction.recipientBankBin,
+      recipientBankName: transaction.recipientBankName, recipientAccountNumber: transaction.recipientAccountNumber,
+      recipientAccountHolder: transaction.recipientAccountHolder, qrCodeUrl: transaction.qrCodeUrl }));
+    if (!request) return false;
+    if (JSON.stringify(requestRef.current) === JSON.stringify(request)) return true;
+    if (!sameRequest) { setAction(null); setActionError(''); setCreationUncertain(false); setFormOpen(false); setLookup(null); setNameConfirmed(false); }
+    saveRequest(request);
+    return true;
   }, [scope, storeId, saveRequest]);
 
   const loadAccounts = useCallback(async (quiet = false) => {
@@ -140,7 +150,7 @@ export const StoreFinancePage: React.FC = () => {
   useEffect(() => {
     let saved: FinanceVerification | null = null;
     try { if (storageKey) saved = readFinanceVerification(sessionStorage.getItem(storageKey)); } catch { /* Browser storage is optional. */ }
-    requestRef.current = saved; setActiveRequest(saved);
+    requestRef.current = saved; setActiveRequest(saved); setRequestChecked(false);
     subscriptionOwner.current = scope;
     operationRef.current = ''; setOperation('');
     setAccounts([]); setSubscription(null); setFormOpen(false); setAction(null); setNotice(''); setActionError(''); setFormError(''); setLookup(null); setNameConfirmed(false); setBankBin(''); setAccountNumber(''); setBanks([]); setBanksLoading(false); setBanksError(''); setCreationUncertain(false);
@@ -154,10 +164,10 @@ export const StoreFinancePage: React.FC = () => {
   useEffect(() => { if (formOpen) formRef.current?.focus(); }, [formOpen]);
   useEffect(() => {
     const update = () => setNow(Date.now());
-    const timer = window.setInterval(update, 60000);
+    const timer = window.setInterval(update, activeRequest ? 1000 : 60000);
     document.addEventListener('visibilitychange', update);
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', update); };
-  }, []);
+  }, [activeRequest]);
   useEffect(() => { if (action) actionRef.current?.focus(); }, [action]);
   useEffect(() => {
     if (!activeRequest || !canManageBanks || !storeId) return;
@@ -171,23 +181,34 @@ export const StoreFinancePage: React.FC = () => {
       try {
         const result = await banking.storeDetail(storeId, activeRequest.verificationId);
         if (stopped || scopeRef.current !== scope || requestRef.current?.verificationId !== result.verificationId) return;
-        if (result.status !== 'PENDING') { saveRequest(null); setBankRefresh(value => value + 1); setNotice('Phiên xác minh đã cập nhật. Xem kết quả và hoàn tiền tại lịch sử bên dưới.'); }
+        if (result.status !== 'PENDING') { saveRequest(null); setBankRefresh(value => value + 1); setNotice('Phiên xác minh đã cập nhật. Xem kết quả xác minh và trạng thái hoàn tiền riêng tại lịch sử bên dưới.'); }
+        else { restoreRequest(result); setRequestChecked(true); }
         await loadAccounts(true);
       } catch (error) {
         failed = true;
+        if (!stopped && scopeRef.current === scope) setRequestChecked(false);
         if (!stopped && scopeRef.current === scope) setActionError(financeError(error, 'Chưa thể kiểm tra phiên xác minh. Hãy mở lịch sử để kiểm tra lại.'));
       } finally { running = false; }
     };
     void refresh();
-    const timer = window.setInterval(refresh, 15000);
+    const timer = window.setInterval(refresh, 4000);
     document.addEventListener('visibilitychange', refresh);
     return () => { stopped = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
-  }, [activeRequest, canManageBanks, storeId, scope, saveRequest, loadAccounts, requestRefresh]);
+  }, [activeRequest, canManageBanks, storeId, scope, saveRequest, restoreRequest, loadAccounts, requestRefresh]);
 
   const clearLookup = () => { lookupRequest.current += 1; setLookup(null); setNameConfirmed(false); setFormError(''); };
   const closeForm = () => { if (operationRef.current) return; setFormOpen(false); setFormError(''); addRef.current?.focus(); };
   const begin = useCallback((kind: string) => { if (operationRef.current) return false; operationRef.current = kind; setOperation(kind); setNotice(''); setActionError(''); return true; }, []);
   const end = useCallback(() => { if (scopeRef.current === scope) { operationRef.current = ''; setOperation(''); } }, [scope]);
+  const recoverExistingVerification = async () => {
+    const current = await banking.pendingStoreVerification(storeId!);
+    if (scopeRef.current !== scope) return;
+    if (!current) throw new Error('Chưa tìm thấy phiên đang chờ. Hãy kiểm tra lịch sử hoặc liên hệ hỗ trợ trước khi tạo yêu cầu khác.');
+    // Restoration is a read operation. Release the form lock before resuming.
+    end();
+    if (!restoreRequest(current, true)) throw new Error('Thông tin phiên đang chờ chưa đầy đủ. Hãy kiểm tra lịch sử hoặc liên hệ hỗ trợ trước khi chuyển tiền.');
+    setNotice('Đã mở lại phiên xác minh đang chờ. Tiếp tục dùng hướng dẫn hiện tại; chưa tạo phiên mới.');
+  };
   const lookupAccount = useCallback(async (event?: React.FormEvent) => {
     event?.preventDefault();
     if (lookupTimer.current !== null) { window.clearTimeout(lookupTimer.current); lookupTimer.current = null; }
@@ -215,12 +236,18 @@ export const StoreFinancePage: React.FC = () => {
     try {
       const request = await flow.verify(storeId, bankBin, accountNumber);
       if (scopeRef.current !== scope) return;
-      saveRequest({ ...request, initialAccountStatus: accounts.find(account => String(account.id) === request.bankAccountId)?.verificationStatus || 'PENDING' }); setNow(Date.now()); setFormOpen(false); setLookup(null); setNameConfirmed(false); setAccountNumber('');
+      saveRequest({ ...request, initialAccountStatus: accounts.find(account => String(account.id) === request.bankAccountId)?.verificationStatus || 'PENDING' }); setRequestChecked(true); setNow(Date.now()); setFormOpen(false); setLookup(null); setNameConfirmed(false); setAccountNumber('');
       setNotice('Đã tạo yêu cầu xác minh. Tài khoản chỉ được xác nhận sau khi ngân hàng trả kết quả.');
       setBankRefresh(value => value + 1);
       await loadAccounts();
     } catch (error: any) {
       if (scopeRef.current === scope) {
+        if (error?.response?.status === 409) {
+          setCreationUncertain(true);
+          try { await recoverExistingVerification(); }
+          catch (recoveryError) { if (scopeRef.current === scope) setFormError(financeError(recoveryError)); }
+          return;
+        }
         const definitelyRejected = error?.response?.status >= 400 && error?.response?.status < 500;
         setCreationUncertain(!definitelyRejected);
         setFormError(definitelyRejected ? financeError(error) : 'Chưa xác nhận được kết quả gửi yêu cầu. Không gửi lại để tránh tạo trùng; hãy kiểm tra danh sách và liên hệ quản trị viên nếu cần.');
@@ -312,7 +339,7 @@ export const StoreFinancePage: React.FC = () => {
 
     {canManageBanks && activeRequest && <motion.section {...entrance} className={`${card} border-sky-200 dark:border-sky-900`} aria-labelledby="bank-verification-title">
       <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold text-[#287DA8]">Yêu cầu xác minh đã tạo</p><h2 id="bank-verification-title" className="mt-1 font-semibold text-zinc-900 dark:text-white">{activeRequest.bankName} · {activeRequest.accountNumberMasked}</h2><p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Tài khoản cần xác minh · {activeRequest.accountName}</p></div><span className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${isExpired ? 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300' : 'bg-amber-50 text-amber-800 dark:bg-amber-950/40 dark:text-amber-300'}`}><Clock3 className="h-3.5 w-3.5" />{isExpired ? 'Đã qua hạn hướng dẫn' : 'Đang chờ kết quả'}</span></div>
-      <BankTransferInstructions key={activeRequest.verificationId} receipt={activeRequest} now={now} />
+      {requestChecked ? <BankTransferInstructions key={activeRequest.verificationId} receipt={activeRequest} now={now} /> : <p role="status" className="mt-4 text-sm leading-6 text-amber-800 dark:text-amber-300">Chưa xác nhận lại trạng thái phiên từ máy chủ. Bấm “Kiểm tra kết quả” trước khi chuyển tiền.</p>}
       <div className="mt-4 flex flex-wrap gap-2"><button type="button" onClick={() => { setActionError(''); setRequestRefresh(value => value + 1); }} disabled={isBusy || accountsLoading} className={secondaryButton}><RefreshCw className="h-4 w-4" />Kiểm tra kết quả</button><button type="button" onClick={() => { setAction({ kind: 'cancel' }); setActionError(''); }} disabled={isBusy} className={secondaryButton}>Hủy yêu cầu</button></div>
       <p className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">{isExpired ? 'Không chuyển tiền theo hướng dẫn đã quá hạn. Hãy hủy yêu cầu này trước khi tạo lại.' : 'Trang tự kiểm tra kết quả khi đang mở. Việc tạo yêu cầu chưa có nghĩa là tài khoản đã được xác minh hoặc tiền đã được hoàn.'}</p>
     </motion.section>}
@@ -323,7 +350,7 @@ export const StoreFinancePage: React.FC = () => {
           <div className="flex items-center justify-between gap-3"><h3 className="font-semibold text-zinc-900 dark:text-white">Xác minh tài khoản mới</h3><button type="button" onClick={closeForm} disabled={isBusy} className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287DA8] dark:hover:bg-zinc-800" aria-label="Đóng biểu mẫu ngân hàng"><X className="h-4 w-4" /></button></div><p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">Chọn ngân hàng và nhập số tài khoản. Hệ thống tự tra cứu tên chủ tài khoản sau khi bạn ngừng nhập.</p>
           <form onSubmit={lookupAccount} className="mt-4 space-y-4"><p role="status" className="text-xs text-zinc-500 dark:text-zinc-400">{operation === 'lookup' ? 'Đang tra cứu tên chủ tài khoản…' : 'Tự động tra cứu sau khi ngừng nhập 0,7 giây. Bạn vẫn có thể bấm nút bên dưới để tra cứu lại.'}</p><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Ngân hàng<select ref={formRef} value={bankBin} onChange={event => { setBankBin(event.target.value); clearLookup(); }} className={inputClass} disabled={isBusy || banksLoading} required><option value="">{banksLoading ? 'Đang tải ngân hàng…' : 'Chọn ngân hàng'}</option>{banks.map(bank => <option key={bank.bin} value={bank.bin}>{bank.shortName} — {bank.name}</option>)}</select></label><label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Số tài khoản<input value={accountNumber} onChange={event => { setAccountNumber(event.target.value); clearLookup(); }} className={inputClass} type="text" autoComplete="off" spellCheck={false} minLength={5} maxLength={30} pattern="[0-9a-zA-Z]{5,30}" disabled={isBusy} placeholder="Nhập số tài khoản" required /></label></div>{banksError && <div role="alert" className="text-sm text-rose-700 dark:text-rose-300"><p>{banksError}</p><button type="button" onClick={() => void loadBanks()} disabled={banksLoading} className="mt-1 font-semibold underline underline-offset-4">Tải lại danh sách ngân hàng</button></div>}<button type="submit" disabled={isBusy || !bankBin || !accountNumber.trim() || banksLoading} className={secondaryButton}>{operation === 'lookup' ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <Landmark className="h-4 w-4" />}Tra cứu chủ tài khoản</button></form>
           {lookup && <div className="mt-4 rounded-lg border border-sky-200 bg-white p-4 dark:border-sky-900 dark:bg-zinc-900"><p className="text-xs text-zinc-500 dark:text-zinc-400">Tên do ngân hàng cung cấp</p><p className="mt-1 break-words text-base font-semibold text-zinc-900 dark:text-white">{lookup.accountName}</p><p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{lookup.bankName} · {lookup.accountNumberMasked}</p><label className="mt-4 flex cursor-pointer items-start gap-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300"><input type="checkbox" className="mt-1 h-4 w-4 shrink-0 accent-[#287DA8]" checked={nameConfirmed} onChange={event => setNameConfirmed(event.target.checked)} disabled={isBusy} />Tôi đã kiểm tra và xác nhận đây là tài khoản của mình.</label><p className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">Bước tiếp theo sẽ hiển thị hướng dẫn chuyển tiền do hệ thống cung cấp. Chỉ chuyển khi có đủ thông tin người nhận và phiên còn hạn.</p><button type="button" onClick={createVerification} disabled={isBusy || !nameConfirmed || creationUncertain} className={`${primaryButton} mt-4 min-h-10 text-sm`}>{operation === 'create' ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <ShieldCheck className="h-4 w-4" />}Tạo yêu cầu xác minh</button></div>}
-          {formError && <p role="alert" className="mt-4 text-sm leading-6 text-rose-700 dark:text-rose-300">{formError}</p>}
+          {formError && <p role="alert" className="mt-4 text-sm leading-6 text-rose-700 dark:text-rose-300">{formError}</p>}{creationUncertain && <button type="button" disabled={isBusy} className={`${secondaryButton} mt-3`} onClick={async () => { if (!begin("recover")) return; try { await recoverExistingVerification(); } catch (error) { if (scopeRef.current === scope) setFormError(financeError(error)); } finally { end(); } }}><RefreshCw size={16} />Kiểm tra phiên đang chờ</button>}
         </div></motion.div>}</AnimatePresence>
         <AnimatePresence initial={false}>{action && <motion.div key="bank-confirmation" {...entrance} exit={{ opacity: 0 }} className="mt-5 rounded-xl border border-sky-200 bg-sky-50/60 p-4 dark:border-sky-900 dark:bg-sky-950/20"><h3 ref={actionRef} tabIndex={-1} className="font-semibold text-zinc-900 outline-none dark:text-white">{action.kind === 'delete' ? 'Xóa tài khoản ngân hàng?' : action.kind === 'default' ? 'Chọn làm tài khoản mặc định?' : 'Hủy yêu cầu xác minh?'}</h3><p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{action.kind === 'cancel' ? 'Yêu cầu hiện tại sẽ ngừng chờ xác minh. Nếu đã chuyển tiền, hãy kiểm tra với quản trị viên trước khi hủy.' : `${action.account.bankName} · ${action.account.accountNumberMasked} · ${action.account.accountName}`}</p>{action.kind === 'delete' && <p className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400">{action.account.isDefault ? 'Tài khoản này đang được đánh dấu mặc định. Sau khi xóa, bạn cần chọn lại một tài khoản đã xác minh khác.' : 'Thao tác xóa không thể hoàn tác. Yêu cầu xác minh đang chờ cần được hủy trước.'}</p>}<div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={isBusy} onClick={confirmAction} className={`${primaryButton} min-h-10 text-sm ${action.kind === 'delete' ? 'bg-rose-600 hover:bg-rose-700' : ''}`}>{operation === 'action' && <Loader2 className="h-4 w-4 motion-safe:animate-spin" />}{action.kind === 'delete' ? 'Xác nhận xóa' : action.kind === 'default' ? 'Đặt làm mặc định' : 'Xác nhận hủy'}</button><button type="button" disabled={isBusy} onClick={() => { setAction(null); setActionError(''); }} className={secondaryButton}>Giữ nguyên</button></div></motion.div>}</AnimatePresence>
         {accountsError && <div role="alert" className="mt-5 rounded-lg bg-amber-50 p-3 text-sm leading-6 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"><p>{accountsError}</p><button type="button" onClick={() => void loadAccounts()} disabled={accountsLoading} className="mt-1 font-semibold underline underline-offset-4">Tải lại tài khoản</button></div>}

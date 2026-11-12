@@ -1,12 +1,14 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
-import { Link } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
 import { AlertCircle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, Clock3, KeyRound, Loader2, Package, QrCode, RefreshCw, ShieldCheck, Store, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
-import { confirmAtomicPairing, createPairingSession, loadPairingStore, lookupPairingDevice, pairingConfirmationBody, pairingCustomer, pairingError, parsePairingInput, readOwnedPairedDevice, verifyPairingSession } from './device-pairing.mjs';
+import { clearPairingProgress, readPairingProgress, savePairingProgress, confirmAtomicPairing, createPairingSession, loadPairingStore, lookupPairingDevice, pairingConfirmationBody, pairingCustomer, pairingError, parsePairingInput, readOwnedPairedDevice, verifyPairingSession } from './device-pairing.mjs';
 
 const QrCameraScanner = React.lazy(() => import('../../components/common/QrCameraScanner').then(module => ({ default: module.QrCameraScanner })));
+import { deviceProductIds, finishPairedProduct } from '../../services/device-connection';
+
 const field = 'mt-2 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-sky-100 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-sky-950';
 const primary = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#287DA8] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#206588] disabled:cursor-not-allowed disabled:opacity-50';
 const secondary = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800';
@@ -14,7 +16,11 @@ const secondary = 'inline-flex min-h-11 items-center justify-center gap-2 rounde
 const PairingNotice = ({ children, success = false }: { children: React.ReactNode; success?: boolean }) => <div role={success ? 'status' : 'alert'} className={`flex items-start gap-2 rounded-xl border p-3 text-sm leading-relaxed ${success ? 'border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200' : 'border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200'}`}><AlertCircle className="mt-0.5 h-4 w-4 shrink-0" /><div className="min-w-0 break-words">{children}</div></div>;
 
 export const DevicePairingPage: React.FC = () => {
-  const { user } = useAuth(); const reduced = useReducedMotion(); const allowed = user?.role === 'CUSTOMER' && !!user.customerProfileId;
+  const { user } = useAuth();
+  return <PairingWorkspace key={`${user?.id}:${user?.customerProfileId}`} />;
+};
+const PairingWorkspace: React.FC = () => {
+  const { user } = useAuth(); const location = useLocation(); const reduced = useReducedMotion(); const allowed = user?.role === 'CUSTOMER' && !!user.customerProfileId;
   const [mode, setMode] = useState<'QR' | 'MANUAL'>('QR'); const [qr, setQr] = useState(''); const [deviceCode, setDeviceCode] = useState(''); const [token, setToken] = useState(''); const [camera, setCamera] = useState(false); const [scanned, setScanned] = useState(false);
   const [session, setSession] = useState<any>(null); const [store, setStore] = useState<any>(null); const [productId, setProductId] = useState(''); const [buttonName, setButtonName] = useState(''); const [device, setDevice] = useState<any>(null);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [contextError, setContextError] = useState(''); const [now, setNow] = useState(Date.now()); const [createUncertain, setCreateUncertain] = useState(false); const [confirmationSent, setConfirmationSent] = useState(false); const [acknowledged, setAcknowledged] = useState(false);
@@ -25,7 +31,7 @@ export const DevicePairingPage: React.FC = () => {
   const onScan = useCallback((text: string) => { setQr(text); setScanned(true); setCamera(false); setError(''); }, []);
   const lock = () => { if (busyRef.current) return false; busyRef.current = true; setBusy(true); return true; };
   const unlock = () => { busyRef.current = false; if (mounted.current) setBusy(false); };
-  const publishDevice = (value: any) => { if (mounted.current) setDevice(value); window.dispatchEvent(new CustomEvent('sob_device_claimed_success', { detail: { deviceId: value.deviceId } })); };
+  const publishDevice = (value: any) => { try { clearPairingProgress(sessionStorage, user); } catch {} if (mounted.current) setDevice(value); window.dispatchEvent(new CustomEvent('sob_device_claimed_success', { detail: { deviceId: value.deviceId } })); };
   const getStore = async (activeSession: any) => {
     setContextError('');
     try { const actualStore = await loadPairingStore(api, activeSession); if (!mounted.current) return; setStore(actualStore); if (actualStore.products.length === 1) setProductId(String(actualStore.products[0].productId || actualStore.products[0].id)); }
@@ -43,7 +49,7 @@ export const DevicePairingPage: React.FC = () => {
       if (attemptedCodes.current.has(attemptKey)) throw new Error('Mã ghép nối này đã được gửi trước đó. Vui lòng sử dụng mã mới từ cửa hàng.');
       if (createAttempt.current) throw new Error('Yêu cầu tạo phiên đã được gửi. Vui lòng dùng mã ghép nối mới do cửa hàng cấp.');
       const activeSession = await createPairingSession(api, { ...parsed, deviceId: lookup.deviceId }, () => { sessionRequestSent = true; createAttempt.current = true; attemptedCodes.current.add(attemptKey); });
-      sessionRef.current = activeSession; if (!mounted.current) return; setSession(activeSession); setQr(''); setToken(''); setDeviceCode(''); setButtonName('Nút bấm của tôi');
+      sessionRef.current = activeSession; try { savePairingProgress(sessionStorage, user, { deviceId: activeSession.deviceId, session: activeSession }); } catch {} if (!mounted.current) return; setSession(activeSession); setQr(''); setToken(''); setDeviceCode(''); setButtonName('Nút bấm của tôi');
       const verified = await verifyPairingSession(api, activeSession); if (!mounted.current) return; setSession(verified); sessionRef.current = verified; await getStore(verified);
     } catch (failure: any) {
       if (!mounted.current) return;
@@ -60,19 +66,47 @@ export const DevicePairingPage: React.FC = () => {
     event.preventDefault(); if (!session || sentRef.current || !acknowledged || !lock()) return; setError('');
     try {
       expected.current = pairingConfirmationBody(session, { productId, buttonName });
-      await confirmAtomicPairing(api, session, user, { productId, buttonName }, () => { sentRef.current = true; if (mounted.current) setConfirmationSent(true); });
-      publishDevice(await readOwnedPairedDevice(api, session.deviceId, user, { storeId: session.storeId, productId }));
+      await confirmAtomicPairing(api, session, user, { productId, buttonName }, () => { if (!mounted.current) throw new Error('Trang ghép nối đã đóng.'); sentRef.current = true; try { savePairingProgress(sessionStorage, user, { deviceId: session.deviceId, session, confirmationSent: true, productId, buttonName }); } catch {} if (mounted.current) setConfirmationSent(true); });
+      const saved = await readOwnedPairedDevice(api, session.deviceId, user, { storeId: session.storeId, productId });
+      publishDevice(await finishPairedProduct(api, saved, user, session.storeId, productId, buttonName, () => mounted.current));
     } catch (failure) { if (mounted.current) setError(pairingError(failure)); } finally { unlock(); }
   };
   const checkDevice = async () => {
     if (!session || !lock()) return; setError('');
-    try { publishDevice(await readOwnedPairedDevice(api, session.deviceId, user, { storeId: session.storeId, productId: expected.current?.productId || productId })); }
+    try { const saved = await readOwnedPairedDevice(api, session.deviceId, user, { storeId: session.storeId, productId: expected.current?.productId || productId }); publishDevice(await finishPairedProduct(api, saved, user, session.storeId, expected.current?.productId || productId, buttonName, () => mounted.current)); }
     catch (failure) { if (mounted.current) setError(pairingError(failure)); } finally { unlock(); }
   };
   const useNewCode = () => {
     if (busyRef.current || sentRef.current) return;
+    try { clearPairingProgress(sessionStorage, user); } catch {}
     setSession(null); sessionRef.current = null; setStore(null); setProductId(''); setButtonName(''); setQr(''); setToken(''); setDeviceCode(''); setError(''); setContextError(''); setCreateUncertain(false); createAttempt.current = false; setAcknowledged(false);
   };
+  useEffect(() => {
+    if (!allowed) return;
+    let stopped = false;
+    let saved: any = null; try { saved = readPairingProgress(sessionStorage, user); } catch {}
+    const id = new URLSearchParams(location.search).get('deviceId');
+    if (!saved) { if (id && /^[A-Za-z0-9._-]{1,100}$/.test(id)) { setMode('MANUAL'); setDeviceCode(id); } return; }
+    busyRef.current = true; setBusy(true); setMode('MANUAL'); setDeviceCode(saved.deviceId);
+    void (async () => {
+      try {
+        const owned = await readOwnedPairedDevice(api, saved.deviceId, user, saved.confirmationSent ? { storeId: saved.session.storeId, productId: saved.productId } : null);
+        if (stopped) return;
+        if (saved.confirmationSent && deviceProductIds(owned).some(id => id !== saved.productId)) throw new Error('Sản phẩm đã lưu chưa khớp yêu cầu. Hãy kiểm tra cấu hình nút.');
+        publishDevice(owned); return;
+      } catch (failure) {
+        if (stopped) return;
+        if (!saved.session) { setError(pairingError(failure)); return; }
+        sessionRef.current = saved.session; setSession(saved.session); setProductId(saved.productId); setButtonName(saved.buttonName || 'Nút bấm của tôi');
+        sentRef.current = saved.confirmationSent; setConfirmationSent(saved.confirmationSent);
+        expected.current = saved.productId ? { productId: saved.productId } : null;
+        if (saved.confirmationSent) { setError('Yêu cầu đã gửi trước khi tải lại trang. Hãy kiểm tra kết quả; không gửi lại xác nhận ghép nối.'); return; }
+        try { const current = await verifyPairingSession(api, saved.session); if (!stopped) { setSession(current); sessionRef.current = current; await getStore(current); } }
+        catch (error) { if (!stopped) setError(pairingError(error)); }
+      }
+    })().finally(() => { if (!stopped) { busyRef.current = false; setBusy(false); } });
+    return () => { stopped = true; };
+  }, [allowed, user?.id, user?.customerProfileId]);
   const remaining = session ? Math.max(0, Math.ceil((Date.parse(session.expiresAt) - now) / 1000)) : 0;
   const selectedProduct = store?.products?.find((product: any) => String(product.productId || product.id) === productId);
   const price = Number(selectedProduct?.basePrice ?? selectedProduct?.price);

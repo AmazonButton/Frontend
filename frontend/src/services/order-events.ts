@@ -16,7 +16,7 @@ const firstContactText = (...values: unknown[]): string => {
 export function getOrderRecipient(raw: any) {
   return {
     customerName: firstContactText(raw?.shippingRecipientName, raw?.shipping_recipient_name, raw?.customerName, raw?.customer?.fullName, raw?.customer?.user?.fullName),
-    customerPhone: firstContactText(raw?.shippingPhone, raw?.shipping_phone, raw?.customerPhone, raw?.customer?.phoneNumber, raw?.customer?.user?.phone),
+    customerPhone: firstContactText(raw?.shippingPhone, raw?.shipping_phone, raw?.recipientPhone, raw?.customerPhone, raw?.customer?.phoneNumber, raw?.customer?.phone, raw?.customer?.user?.phone),
     deliveryAddress: firstContactText(raw?.shippingAddress, raw?.shipping_address, raw?.deliveryAddress),
   };
 }
@@ -40,9 +40,13 @@ export function normalizeOrder(raw: any): Order {
 
 export function mergeOrderUpdate(current: Order, incoming: any): Order {
   const merged = { ...current, ...incoming };
+  // A refreshed snapshot can use a different alias from the cached order.
+  // Update the canonical fields together so an old camel-case value cannot
+  // override the new recipientPhone or snake-case value after payment/status changes.
+  const recipientName = firstContactText(incoming?.shippingRecipientName, incoming?.shipping_recipient_name);
+  const recipientPhone = firstContactText(incoming?.shippingPhone, incoming?.shipping_phone, incoming?.recipientPhone);
   const point = readDeliveryLocation(incoming?.shippingLatitude ?? incoming?.shipping_latitude, incoming?.shippingLongitude ?? incoming?.shipping_longitude);
   const address = getOrderRecipient(incoming).deliveryAddress;
-  if (address) merged.shippingAddress = address;
   // Clear legacy aliases so they cannot resurrect an invalidated pin.
   delete merged.shipping_latitude;
   delete merged.shipping_longitude;
@@ -57,9 +61,12 @@ export function mergeOrderUpdate(current: Order, incoming: any): Order {
   }
   // Status/payment events can omit contact details or normalize them to empty
   // strings. Such an event must not erase the recipient already shown.
-  for (const field of ['customerName', 'customerPhone', 'deliveryAddress', 'shippingRecipientName', 'shippingPhone', 'shippingAddress', 'shipping_recipient_name', 'shipping_phone', 'shipping_address']) {
+  for (const field of ['customerName', 'customerPhone', 'deliveryAddress', 'shippingRecipientName', 'shippingPhone', 'recipientPhone', 'shippingAddress', 'shipping_recipient_name', 'shipping_phone', 'shipping_address']) {
     if (!firstContactText(incoming?.[field])) merged[field] = (current as any)[field];
   }
+  if (recipientName) merged.shippingRecipientName = recipientName;
+  if (recipientPhone) merged.shippingPhone = recipientPhone;
+  if (address) merged.shippingAddress = address;
   return normalizeOrder({ ...merged, status: incoming?.status || incoming?.orderStatus || current.status });
 }
 

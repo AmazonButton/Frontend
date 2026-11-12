@@ -47,12 +47,13 @@ const idPath = (id: string | number) => {
   if (!/^\d+$/.test(value)) throw new Error('Mã dữ liệu không hợp lệ.');
   return value;
 };
-const changedOrder = (body: any, expectedStatus: string) => {
+const changedOrder = (body: any, expectedStatus: string, expectedId?: string | number, publishEvent = true) => {
   checked(body);
   if (!body?.data?.id && !body?.data?.orderId) throw new Error('Máy chủ chưa trả lại đơn hàng. Vui lòng tải lại trước khi thử tiếp.');
   const order = normalizeOrder(body.data);
+  if (expectedId !== undefined && String(order.id) !== String(expectedId)) throw new Error('Đơn hàng trả về không khớp. Vui lòng tải lại trước khi thử tiếp.');
   if (order.status !== expectedStatus) throw new Error('Trạng thái đơn chưa được xác nhận. Vui lòng tải lại trước khi thử tiếp.');
-  if (typeof window !== 'undefined') publishOrderEvent('ORDER_STATUS_CHANGED', { order });
+  if (publishEvent && typeof window !== 'undefined') publishOrderEvent('ORDER_STATUS_CHANGED', { order });
   return { ...body, data: order };
 };
 const changedShift = (body: any, expectedStatus: DriverShift['status']) => {
@@ -87,8 +88,8 @@ export const driversService = {
     if (!Array.isArray(body?.data)) throw new Error('Không thể đọc danh sách đơn chờ nhận.');
     return body.data.map(normalizeOrder).filter((order: any) => !order.assignedDriverId && order.status === 'READY_FOR_DELIVERY');
   },
-  async claimOrder(orderId: string | number) {
-    return changedOrder((await api.post(`/orders/${idPath(orderId)}/claim`)).data, 'SHIPPING');
+  async claimOrder(orderId: string | number, options: { publishEvent?: boolean } = {}) {
+    return changedOrder((await api.post(`/orders/${idPath(orderId)}/claim`)).data, 'SHIPPING', orderId, options.publishEvent !== false);
   },
   async getOrder(orderId: string | number) {
     const body = checked((await api.get(`/orders/${idPath(orderId)}`)).data);

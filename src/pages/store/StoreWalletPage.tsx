@@ -206,7 +206,7 @@ export const StoreWalletWorkspace: React.FC = () => {
       try { savePending(request); } catch { setStorageError('Chưa lưu được mã yêu cầu rút tiền. Vui lòng cho phép lưu trữ trình duyệt trước khi tiếp tục.'); return; }
       if (!mounted.current) return;
       dispatched = true;
-      const response = await walletService.requestWithdrawal({ amount: request.amount, idempotencyKey: request.key });
+      const response = await walletService.requestWithdrawal({ amount: request.amount, idempotencyKey: request.key, ...(request.accountId ? { bankAccountId: request.accountId } : {}) });
       if (!mounted.current) return;
       const result = response.data;
       if (!/^[1-9]\d*$/.test(String(result?.withdrawalId ?? result?.id)) || String(result?.storeId) !== storeId || Number(result?.amount) !== request.amount) {
@@ -453,7 +453,7 @@ export const StoreWalletWorkspace: React.FC = () => {
                     required
                     type="number"
                     min="50000"
-                    step="1000"
+                    step="1"
                     max={availableBalance}
                     disabled={!!pending || withdrawing || !!storageError}
                     value={amount}
@@ -593,7 +593,7 @@ export const StoreWalletWorkspace: React.FC = () => {
               withdrawals.map((item) => {
                 const isPending = ['PENDING', 'PROCESSING'].includes(item.status);
                 const isSuccess = ['COMPLETED', 'SUCCESS', 'SUCCEEDED'].includes(item.status);
-                const isFailed = ['FAILED', 'REJECTED'].includes(item.status);
+                const isCancelled = item.status === 'CANCELLED';
 
                 return (
                   <div
@@ -607,7 +607,7 @@ export const StoreWalletWorkspace: React.FC = () => {
                             ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
                             : isPending
                             ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400'
-                            : 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
+                            : isCancelled ? 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300' : 'bg-rose-50 text-rose-600 dark:bg-rose-950/40 dark:text-rose-400'
                         }`}
                       >
                         <ArrowDownToLine className="h-4 w-4" />
@@ -624,14 +624,10 @@ export const StoreWalletWorkspace: React.FC = () => {
                                 ? 'bg-emerald-100/70 text-emerald-700 dark:bg-emerald-950/60 dark:text-emerald-300'
                                 : isPending
                                 ? 'bg-amber-100/70 text-amber-700 dark:bg-amber-950/60 dark:text-amber-300'
-                                : 'bg-rose-100/70 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
+                                : isCancelled ? 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300' : 'bg-rose-100/70 text-rose-700 dark:bg-rose-950/60 dark:text-rose-300'
                             }`}
                           >
-                            {isSuccess
-                              ? 'Đã chuyển thành công'
-                              : isPending
-                              ? 'Đang xử lý chi'
-                              : isFailed ? 'Thất bại' : item.status}
+                            {withdrawalStatusLabel(item.status)}
                           </span>
                         </div>
 

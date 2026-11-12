@@ -119,6 +119,10 @@ for (const prefix of ['../src/', '../frontend/src/']) {
     assert.equal(calls[1].config.headers['idempotency-key'], 'wd_fixed');
     for (const invalid of [{ amount: 1, idempotencyKey: 'wd_fixed' }, { amount: 50000 }, { amount: 50000.5, idempotencyKey: 'wd_fixed' }]) await assert.rejects(api.requestWithdrawal(invalid));
     assert.equal(calls.length, 2);
+    await api.requestWithdrawal({ amount: 50000, idempotencyKey: 'wd_recipient', bankAccountId: '90071992547409931', fee: 123 });
+    assert.deepEqual({ ...calls[2].body }, { amount: 50000, bankAccountId: '90071992547409931' });
+    await assert.rejects(api.requestWithdrawal({ amount: 50000, idempotencyKey: 'wd_recipient', bankAccountId: '../1' }));
+    assert.equal(calls.length, 3);
   });
   test(`${prefix}withdrawal detail reads the existing scoped API and rejects a different store or id`, async () => {
     const response = { withdrawalId: '90071992547409931', storeId: '1', amount: 50000, fee: 1000, netAmount: 49000, bankAccountMasked: '******4321', bankAccountHolder: 'VERIFIED OWNER', status: 'PROCESSING', failureReason: 'PENDING_RECONCILIATION' };
@@ -215,5 +219,18 @@ for (const prefix of ['../src/', '../frontend/src/']) {
     for (const options of [{ fail: true }, { wallet: { ...liveResponse.data, storeId: '2' } }]) {
       const app = walletScreen(prefix, options); await app.flush(); assert.ok(!app.text.includes('15.000.000')); assert.match(app.text, /—/); app.unmount();
     }
+  });
+}
+
+
+for (const prefix of ['../src/', '../frontend/src/']) {
+  test(prefix + 'withdrawal accepts integer VND and shows pending, processing and cancellation independently', async () => {
+    const app = walletScreen(prefix, { accounts: [verifiedAccount], history: ['PENDING', 'PROCESSING', 'CANCELLED'].map((status, i) => ({ id: String(i + 1), amount: 50000, status, createdAt: '2026-11-11T00:00:00Z' })) });
+    await app.flush();
+    assert.equal(app.nodes.find(n => n.type === 'input' && n.props.type === 'number').props.step, '1');
+    assert.match(app.text, /Chờ xử lý/); assert.match(app.text, /Đang chuyển tiền/); assert.match(app.text, /Đã hủy/);
+    await app.amount('50001'); await app.submit(); await app.flush();
+    assert.equal(app.posts[0].amount, 50001); assert.equal(app.posts[0].bankAccountId, verifiedAccount.id); assert.equal('fee' in app.posts[0], false); assert.equal('netAmount' in app.posts[0], false);
+    app.unmount();
   });
 }

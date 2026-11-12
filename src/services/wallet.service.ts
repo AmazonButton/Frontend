@@ -31,6 +31,7 @@ export interface UpdateBankAccountDto {
 export interface RequestWithdrawalDto {
   amount: number;
   idempotencyKey: string;
+  bankAccountId?: string;
 }
 
 export interface WalletTransactionItem {
@@ -125,7 +126,10 @@ export const walletService = {
     if (!Number.isSafeInteger(data.amount) || data.amount < 50000 || !/^[A-Za-z0-9._:-]{1,128}$/.test(idempotencyKey || '')) {
       throw new Error('Yêu cầu rút tiền chưa hợp lệ.');
     }
-    const payload = { amount: data.amount };
+    if (data.bankAccountId !== undefined && !/^[1-9]\d*$/.test(data.bankAccountId)) {
+      throw new Error('Tài khoản nhận tiền không hợp lệ.');
+    }
+    const payload = { amount: data.amount, ...(data.bankAccountId ? { bankAccountId: data.bankAccountId } : {}) };
 
     const res = await api.post('/store/wallet/withdrawals', payload, {
       params: storeId ? { storeId } : undefined,

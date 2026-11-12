@@ -9,7 +9,7 @@ import { driverCard, driverInput, driverPrimary, driverSecondary, DriverDialog, 
 
 const paymentLabel = (order: any) => deliveryPaymentMethod(order) === 'COD' ? 'Thu tiền mặt' : 'Chuyển khoản';
 
-const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'failed'; userId: string; role: string; onClose: () => void; onDone: (message: string) => Promise<void> }> = ({ order, mode, userId, role, onClose, onDone }) => {
+export const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'failed'; userId: string; role: string; onClose: () => void; onDone: (message: string) => Promise<void> }> = ({ order, mode, userId, role, onClose, onDone }) => {
   const [imageUrl, setImageUrl] = useState('');
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -45,6 +45,7 @@ const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'failed';
     try {
       // Re-read the order: payment or assignment may have changed while the form was open.
       const latest = await driversService.getOrder(order.id);
+      if (!alive.current) return;
       if (!canRecordDelivery(latest, userId, role)) throw new Error('Đơn này đã thay đổi trạng thái hoặc người giao. Đóng hộp thoại và tải lại danh sách.');
       if (mode === 'delivered') {
         const payload = buildDeliveryPayload(latest, imageUrl, amount, confirmed);
@@ -52,7 +53,7 @@ const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'failed';
       } else {
         await driversService.failDelivery(order.id, { failureReasonCode: reason, failureNote: note.trim() || undefined, evidenceImageUrl: imageUrl });
       }
-      await onDone(mode === 'delivered' ? `Đã xác nhận giao đơn ${order.orderNumber || order.id}.` : `Đã ghi nhận kết quả đơn ${order.orderNumber || order.id}.`);
+      if (alive.current) await onDone(mode === 'delivered' ? `Đã xác nhận giao đơn ${order.orderNumber || order.id}.` : `Đã ghi nhận kết quả đơn ${order.orderNumber || order.id}.`);
     } catch (issue) { if (alive.current) setError(driverError(issue)); }
     finally { lock.current = false; if (alive.current) setSaving(false); }
   };

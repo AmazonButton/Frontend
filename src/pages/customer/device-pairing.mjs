@@ -11,6 +11,25 @@ export function pairingCustomer(user) {
   if (user?.role !== 'CUSTOMER' || !/^[1-9]\d*$/.test(String(user.customerProfileId || ''))) throw new Error('Tài khoản cần có hồ sơ khách hàng để thêm nút bấm.');
   return String(user.customerProfileId);
 }
+export function pairingProgressKey(user) { return `sob_pairing_progress:${user?.id || ''}:${pairingCustomer(user)}`; }
+export function savePairingProgress(storage, user, value) {
+  const progress = { deviceId: String(value.deviceId || ''), session: value.session ? {
+    sessionId: value.session.sessionId, deviceId: value.session.deviceId, storeId: String(value.session.storeId || ''),
+    status: value.session.status, expiresAt: value.session.expiresAt,
+  } : null, confirmationSent: value.confirmationSent === true, productId: String(value.productId || ''), buttonName: String(value.buttonName || '').slice(0, 100) };
+  if (!/^[A-Za-z0-9._-]{1,100}$/.test(progress.deviceId)) throw new Error('Mã nút cần khôi phục không hợp lệ.');
+  storage.setItem(pairingProgressKey(user), JSON.stringify(progress));
+}
+export function readPairingProgress(storage, user) {
+  try {
+    const p = JSON.parse(storage.getItem(pairingProgressKey(user)) || 'null');
+    if (!p || !/^[A-Za-z0-9._-]{1,100}$/.test(p.deviceId) || typeof p.confirmationSent !== 'boolean') return null;
+    if (p.session && (!/^sess_[a-f0-9]{24}$/.test(p.session.sessionId) || p.session.deviceId !== p.deviceId || !/^[1-9]\d*$/.test(p.session.storeId) || !Number.isFinite(Date.parse(p.session.expiresAt)))) return null;
+    if (p.confirmationSent && (!p.session || !/^[1-9]\d*$/.test(p.productId))) return null;
+    return p;
+  } catch { return null; }
+}
+export function clearPairingProgress(storage, user) { storage.removeItem(pairingProgressKey(user)); }
 export function parsePairingInput({ qrPayload = '', deviceCode = '', token = '' } = {}) {
   let identifier = String(deviceCode || '').trim(); let secret = String(token || '').trim();
   const qr = String(qrPayload || '').trim();

@@ -1094,7 +1094,7 @@ export const AdminDashboard: React.FC = () => {
       {/* ========================================================================= */}
       {/* COMMAND CENTER TOP SECTION: ULTRA-SLIM HEADER & NAVIGATION TABS           */}
       {/* ========================================================================= */}
-      <header className="admin-page-header">
+      {activeTab !== 'ANALYTICS' && <header className="admin-page-header">
         <div className="admin-page-heading">
           <div>
             <div className="admin-eyebrow">Quản trị hệ thống</div>
@@ -1107,7 +1107,7 @@ export const AdminDashboard: React.FC = () => {
             <span>Làm mới</span>
           </button>
         </div>
-      </header>
+      </header>}
 
       {/* Main Content Area */}
       <main className="admin-content">
@@ -2387,7 +2387,7 @@ export const AdminDashboard: React.FC = () => {
       {/* ========================================================================= */}
       {/* MODULE 5: 4.2.4 ANALYTICS & EXPORT REPORTS (CSV / PDF)                   */}
       {/* ========================================================================= */}
-      {activeTab === 'ANALYTICS' && <React.Suspense fallback={<div role="status" className="py-12 text-center text-sm text-zinc-500">Đang tải dữ liệu...</div>}><AdminLiveAnalytics /></React.Suspense>}
+      {activeTab === 'ANALYTICS' && <React.Suspense fallback={<div role="status" className="space-y-2 py-12 text-center text-sm text-zinc-500"><h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">{ADMIN_SECTIONS.ANALYTICS.title}</h2><p>Đang tải dữ liệu...</p></div>}><AdminLiveAnalytics /></React.Suspense>}
 
       {/* ========================================================================= */}
       {/* MODULE 6: 4.2.5 FCM NOTIFICATIONS & MESSAGE TEMPLATES                     */}

@@ -193,3 +193,66 @@ test('mocked receive-deliver-close-handover flow refreshes saved server state', 
   assert.equal(currentShift.totalOrdersDelivered, 1);
   assert.equal(app.events.length, 2);
 });
+
+function resultDialogHarness(latestOrder = { ...order, status: 'SHIPPING', assignedDriverId: '21' }) {
+  const serviceApp = harness({
+    get: () => ({ success: true, data: latestOrder }),
+    post: ({ body }) => ({ success: true, data: { ...latestOrder, ...body, status: 'DELIVERED', paymentStatus: 'PAID' } }),
+  });
+  const slots = [], done = [], uploads = [];
+  let cursor = 0, dirty = true, tree;
+  const react = {
+    useState(initial) { const index = cursor++; slots[index] ||= { value: typeof initial === 'function' ? initial() : initial }; return [slots[index].value, value => { slots[index].value = typeof value === 'function' ? value(slots[index].value) : value; dirty = true; }]; },
+    useRef(initial) { return slots[cursor++] ||= { current: initial }; },
+    useEffect() {},
+  };
+  const jsx = (type, props) => ({ type, props });
+  const module = { exports: {} };
+  const source = readFileSync(new URL('../src/pages/operations/DriverDeliveryPage.tsx', import.meta.url), 'utf8');
+  vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText, {
+    exports: module.exports, require(name) {
+      if (name === 'react') return react;
+      if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
+      if (name === 'react-router-dom') return { Link: 'a' };
+      if (name === 'lucide-react') return new Proxy({}, { get: (_, key) => `icon.${String(key)}` });
+      if (name.endsWith('/AuthContext')) return {};
+      if (name.endsWith('/drivers.service')) return { driversService: serviceApp.service };
+      if (name.endsWith('/driver-workflow')) return helper;
+      if (name.endsWith('/media.service')) return { mediaService: { uploadPodImage: async (file, id) => { uploads.push({ file, id }); return { success: true, data: { secureUrl: image } }; } } };
+      if (name.endsWith('/DriverWorkflowUI')) return { DriverDialog: 'dialog', DriverNotice: 'notice', driverInput: 'input', driverPrimary: 'primary', driverSecondary: 'secondary' };
+      throw new Error(`Unexpected dialog import ${name}`);
+    },
+  });
+  const walk = node => !node || typeof node !== 'object' ? [] : [node, ...[node.props?.children].flat(Infinity).flatMap(walk)];
+  const flush = async () => {
+    for (let n = 0; n < 35; n++) {
+      if (dirty) { dirty = false; cursor = 0; tree = module.exports.DeliveryResultDialog({ order: { ...order, status: 'SHIPPING', assignedDriverId: '21' }, mode: 'delivered', userId: '7', role: 'STORE_OWNER', onClose() {}, onDone: async message => { done.push(message); } }); }
+      await Promise.resolve();
+    }
+  };
+  return { ...serviceApp, done, uploads, flush, get nodes() { return walk(tree); },
+    async submit() { await walk(tree).find(node => node.type === 'form').props.onSubmit({ preventDefault() {} }); await flush(); },
+    async upload() { walk(tree).find(node => node.type === 'input' && node.props.type === 'file').props.onChange({ target: { files: [{ type: 'image/jpeg', size: 100 }], value: 'fixture.jpg' } }); await flush(); },
+    async confirmCash() { walk(tree).find(node => node.type === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await flush(); },
+  };
+}
+
+test('the shared owner delivery form requires real uploaded POD and cash confirmation before POST deliver', async () => {
+  const app = resultDialogHarness(); await app.flush();
+  await app.submit(); assert.equal(app.requests.length, 0); assert.equal(app.done.length, 0);
+  await app.upload(); assert.equal(app.uploads[0].id, '601');
+  await app.submit(); assert.equal(app.requests.filter(request => request.method === 'post').length, 0);
+  await app.confirmCash(); await app.submit();
+  const posts = app.requests.filter(request => request.method === 'post');
+  assert.equal(posts.length, 1); assert.equal(posts[0].path, '/orders/601/deliver');
+  assert.deepEqual(JSON.parse(JSON.stringify(posts[0].body)), { status: 'DELIVERED', paymentMethod: 'COD', podImageUrl: image, collectedAmount: 120000 });
+  assert.equal(app.done.length, 1); assert.equal(app.events.length, 1);
+});
+
+test('the shared owner form rechecks current order before recording delivery', async () => {
+  const app = resultDialogHarness({ ...order, status: 'DELIVERED', paymentStatus: 'PAID' });
+  await app.flush(); await app.upload(); await app.confirmCash(); await app.submit();
+  assert.equal(app.requests.filter(request => request.method === 'get').length, 1);
+  assert.equal(app.requests.filter(request => request.method === 'post').length, 0);
+  assert.equal(app.done.length, 0); assert.equal(app.events.length, 0);
+});

@@ -316,3 +316,103 @@ test('UI blocks duplicate confirmation clicks while mutation is in flight', asyn
   job.resolve(ok(undefined)); await Promise.all([one, two]); await h.flush();
   h.unmount();
 });
+
+test('restored pending store verification keeps the server recipient and QR without creating a new request', async () => {
+  const transaction = { ...receipt, storeId: '12', expectedAmount: 2000, status: 'PENDING', actualAmount: null,
+    recipientBankBin: '970422', recipientBankName: 'PLATFORM BANK', recipientAccountNumber: '0012345678',
+    recipientAccountHolder: 'PLATFORM RECIPIENT', qrCodeUrl: 'https://img.vietqr.io/image/test.png' };
+  const get = async path => {
+    if (path === '/bank-account-verifications/21') return ok(transaction);
+    if (path === '/store/subscriptions/current') return ok(null);
+    return ok([account]);
+  };
+  const h = harness({ api: { get }, hash: '#store-bank-accounts' }); await h.flush();
+  h.nodes.find(node => node.type === 'bank-history').props.onResume(transaction);
+  await h.flush();
+  const restored = h.nodes.find(node => node.type === 'bank-transfer').props.receipt;
+  assert.equal(restored.recipientAccountNumber, transaction.recipientAccountNumber);
+  assert.equal(restored.recipientBankBin, transaction.recipientBankBin);
+  assert.equal(restored.qrCodeUrl, transaction.qrCodeUrl);
+  assert.equal(restored.instructions, transaction.instructions);
+  assert.equal(restored.amount, 2000);
+  assert.equal(h.calls.filter(call => call.method !== 'get').length, 0);
+  assert.ok(h.calls.filter(call => call.path === '/bank-account-verifications/21').length <= 2, 'restoration must not create a polling render loop');
+  h.unmount();
+});
+
+test('same-id legacy cached request is enriched from GET without replacing a different pending request', async () => {
+  const storage = new Map([[finance.financeVerificationKey('7', '12'), JSON.stringify(receipt)]]);
+  const transaction = { ...receipt, storeId: '12', expectedAmount: 2000, status: 'PENDING',
+    recipientBankBin: '970422', recipientBankName: 'PLATFORM BANK', recipientAccountNumber: '0012345678',
+    recipientAccountHolder: 'PLATFORM', qrCodeUrl: 'https://img.vietqr.io/image/test.png' };
+  const h = harness({ storage, hash: '#store-bank-accounts', api: { get: async path => path === '/bank-account-verifications/21' ? ok(transaction) : path === '/store/subscriptions/current' ? ok(null) : ok([account]) } });
+  await h.flush();
+  assert.equal(h.nodes.find(node => node.type === 'bank-transfer').props.receipt.recipientAccountNumber, transaction.recipientAccountNumber);
+  h.nodes.find(node => node.type === 'bank-history').props.onResume({ ...transaction, verificationId: '99', referenceCode: 'OTHER_SESSION', recipientAccountNumber: 'OTHER_ACCOUNT' });
+  await h.flush();
+  const stored = JSON.parse(storage.get(finance.financeVerificationKey('7', '12')));
+  assert.equal(stored.verificationId, '21');
+  assert.equal(stored.recipientAccountNumber, transaction.recipientAccountNumber);
+  assert.equal(h.calls.filter(call => call.method !== 'get').length, 0);
+  h.unmount();
+});
+
+
+test('409 resumes the current server session through GET without retrying verification', async () => {
+  const current = { ...receipt, storeId: '12', expectedAmount: 3500, status: 'PENDING', amount: undefined,
+    referenceCode: 'VERIFY_SERVER_EXISTING', recipientBankBin: '970422', recipientBankName: 'RECEIVER',
+    recipientAccountNumber: '0011111111', recipientAccountHolder: 'PLATFORM', qrCodeUrl: 'https://img.vietqr.io/image/server.png' };
+  const h = harness({ hash: '#store-bank-accounts', api: {
+    get: async path => path.endsWith('/bank-account-verifications')
+      ? { data: { success: true, data: [current], pagination: { page: 1, pageSize: 10, totalItems: 1 } } }
+      : path === '/bank-account-verifications/21' ? ok(current) : path === '/store/subscriptions/current' ? ok(null)
+      : path === '/banks' ? ok([{ bin: '970422', name: 'Test Bank', shortName: 'TEST' }]) : ok([]),
+    post: async (path, body) => { if (path.endsWith('/lookup')) return ok({ bankBin: body.bankBin, accountName: 'OWNER', bankName: 'Test Bank', accountNumberMasked: '******123' }); throw { response: { status: 409, data: { message: 'Phiên xác thực đang hoạt động' } } }; }
+  } });
+  await h.flush(); await h.click('Thêm tài khoản'); await h.change('select', '970422'); await h.change('input', '0012345'); await h.submit();
+  h.nodes.find(n => n.type === 'input' && n.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await h.flush();
+  await h.click('Tạo yêu cầu xác minh');
+  assert.equal(h.calls.filter(c => c.path.endsWith('/verification')).length, 1);
+  assert.match(h.text, /Đã mở lại phiên xác minh đang chờ/);
+  const transfer = h.nodes.find(n => n.type === 'bank-transfer').props.receipt;
+  assert.equal(transfer.referenceCode, current.referenceCode); assert.equal(transfer.amount, 3500);
+  assert.equal(transfer.recipientAccountNumber, current.recipientAccountNumber);
+  h.unmount();
+});
+
+test('unresolved 409 blocks another creation and recovery only reads existing sessions', async () => {
+  const h = harness({ api: {
+    get: async path => path.endsWith('/bank-account-verifications') ? { data: { success: true, data: [], pagination: { page: 1, pageSize: 10, totalItems: 0 } } }
+      : path === '/banks' ? ok([{ bin: '970422', name: 'Test Bank', shortName: 'TEST' }]) : path === '/store/subscriptions/current' ? ok(null) : ok([]),
+    post: async (path, body) => { if (path.endsWith('/lookup')) return ok({ bankBin: body.bankBin, accountName: 'OWNER', bankName: 'Test Bank', accountNumberMasked: '******123' }); throw { response: { status: 409 } }; }
+  } });
+  await h.flush(); await h.click('Thêm tài khoản'); await h.change('select', '970422'); await h.change('input', '0012345'); await h.submit();
+  h.nodes.find(n => n.type === 'input' && n.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await h.flush();
+  await h.click('Tạo yêu cầu xác minh');
+  assert.equal(h.find('button', 'Tạo yêu cầu xác minh').props.disabled, true);
+  await h.click('Kiểm tra phiên đang chờ');
+  assert.equal(h.calls.filter(c => c.path.endsWith('/verification')).length, 1);
+  assert.match(h.text, /Chưa tìm thấy phiên đang chờ/); h.unmount();
+});
+
+test('a cached receipt cannot display a payable QR when current status cannot be read', async () => {
+  const h = harness({ storage: new Map([[finance.financeVerificationKey('7', '12'), JSON.stringify(receipt)]]), api: {
+    get: async path => { if (path === '/bank-account-verifications/21') throw Error('status unavailable'); return path === '/store/subscriptions/current' ? ok(null) : ok([]); }
+  } });
+  await h.flush();
+  assert.equal(h.nodes.some(n => n.type === 'bank-transfer'), false);
+  assert.match(h.text, /Chưa xác nhận lại trạng thái phiên/);
+  assert.equal(h.calls.some(c => c.method !== 'get'), false); h.unmount();
+});
+
+
+test('provider authentication failure stays visible without enabling manual-name verification', async () => {
+  const error = { response: { status: 503, data: { errorCode: 'BANK_LOOKUP_SERVICE_UNAVAILABLE', message: 'Xác thực dịch vụ thất bại' } } };
+  assert.match(finance.financeLookupError(error), /Xác thực dịch vụ thất bại/);
+  assert.match(finance.financeLookupError(error), /BANK_LOOKUP_SERVICE_UNAVAILABLE/);
+  const h = harness({ api: { post: async () => { throw error; } } });
+  await h.flush(); await h.click('Thêm tài khoản'); await h.change('select', '970422'); await h.change('input', '0012345'); await h.submit();
+  assert.match(h.text, /Xác thực dịch vụ thất bại/);
+  assert.equal(h.nodes.some(n => n.type === 'button' && n.props.children === 'Tạo yêu cầu xác minh'), false);
+  assert.equal(h.calls.some(c => c.path.endsWith('/verification')), false); h.unmount();
+});

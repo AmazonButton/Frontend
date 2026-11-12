@@ -64,7 +64,7 @@ export const CustomerOrdersPage: React.FC = () => {
         const raw = window.localStorage?.getItem('sob_cached_cust_orders') || window.sessionStorage?.getItem('sob_cached_cust_orders');
         if (raw) {
           const p = JSON.parse(raw);
-          if (Array.isArray(p) && p.length > 0) return p;
+          if (Array.isArray(p) && p.length > 0) return p.map(normalizeOrder);
         }
       }
     } catch {}

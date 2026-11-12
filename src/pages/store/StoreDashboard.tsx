@@ -6,6 +6,7 @@ import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 import { api } from '../../services/api';
+import { driversService } from '../../services/drivers.service';
 import { subscribeToStore, getSocket } from '../../services/socket';
 import { useAuth } from '../../context/AuthContext';
 import { useSound } from '../../context/OrderSoundContext';
@@ -52,6 +53,7 @@ import { StoreCatalogItem, getStoreCatalog, saveStoreCatalog } from '../../data/
 
 // The collapsed chart must not pull the charting library into the orders load.
 const AnalyticsChart = React.lazy(() => import('../../components/AnalyticsChart').then((module) => ({ default: module.AnalyticsChart })));
+const DeliveryResultDialog = React.lazy(() => import('../operations/DriverDeliveryPage').then((module) => ({ default: module.DeliveryResultDialog })));
 
 const buildChartDataFromOrders = (orders: Order[]) => {
   const byDay = new Map<string, { date: string; rawDate: Date; revenue: number }>();
@@ -99,7 +101,7 @@ export const StoreDashboard: React.FC = () => {
         const raw = window.localStorage?.getItem(key) || window.sessionStorage?.getItem(key) || window.sessionStorage?.getItem('sob_cached_store_orders');
         if (raw) {
           const p = JSON.parse(raw);
-          if (Array.isArray(p) && p.length > 0) return p;
+          if (Array.isArray(p) && p.length > 0) return p.map(normalizeOrder);
         }
       }
     } catch {}
@@ -108,6 +110,8 @@ export const StoreDashboard: React.FC = () => {
   const latestOrdersRef = useRef(orders);
   latestOrdersRef.current = orders;
   const [pendingStatusUpdates, setPendingStatusUpdates] = useState<Record<string, string>>({});
+  const [deliveryResult, setDeliveryResult] = useState<Order | null>(null);
+  useEffect(() => { setDeliveryResult(null); }, [user?.id, token]);
   const statusUpdatesRef = useRef(new Map<string, { previous: Order; displayStatus: string }>());
   const orderListRevision = useRef(0);
   const [loading, setLoading] = useState(() => {
@@ -421,8 +425,20 @@ export const StoreDashboard: React.FC = () => {
     if (statusUpdatesRef.current.has(orderId)) return;
     const previous = orders.find((order) => order.id === orderId);
     if (!previous) return;
-    // Completing an order can settle money: show success only after the API.
-    const displayStatus = nextStatus === 'COMPLETED' ? String(previous.orderStatus || previous.status) : nextStatus;
+    if (nextStatus === 'DELIVERED') {
+      if (['SHIPPING', 'OUT_FOR_DELIVERY'].includes(String(previous.orderStatus || previous.status))) setDeliveryResult(previous);
+      return;
+    }
+    if (nextStatus === 'DELIVERY_FAILED') {
+      toast.error('Vui lòng ghi nhận kết quả tại mục Giao hàng với ảnh bằng chứng.');
+      return;
+    }
+    if (nextStatus === 'SHIPPING' && (String(previous.orderStatus || previous.status) !== 'READY_FOR_DELIVERY' || previous.assignedDriverId)) {
+      toast.error('Đơn hàng đã được nhận hoặc chưa sẵn sàng giao. Hãy tải lại để kiểm tra.');
+      void fetchOrders(); return;
+    }
+    // Claim and settlement are shown only after the dedicated API confirms them.
+    const displayStatus = ['SHIPPING', 'COMPLETED'].includes(nextStatus) ? String(previous.orderStatus || previous.status) : nextStatus;
     const operation = { previous, displayStatus };
     statusUpdatesRef.current.set(orderId, operation);
     ++orderListRevision.current;
@@ -447,7 +463,9 @@ export const StoreDashboard: React.FC = () => {
     });
 
     try {
-      const res = await api.patch(`/orders/${orderId}/status`, { status: nextStatus });
+      const res = nextStatus === 'SHIPPING'
+        ? { data: await driversService.claimOrder(orderId, { publishEvent: false }) }
+        : await api.patch(`/orders/${orderId}/status`, { status: nextStatus });
       if (statusUpdatesRef.current.get(orderId) !== operation) return;
       ++orderListRevision.current;
       if (res.data.success) {
@@ -464,8 +482,6 @@ export const StoreDashboard: React.FC = () => {
           toast.success('Đơn hàng sẵn sàng để bắt đầu giao.', { title: 'Sẵn sàng giao', duration: 4000 });
         } else if (nextStatus === 'SHIPPING') {
           toast.success('Đơn hàng đang được giao đến khách hàng.', { title: 'Bắt đầu giao', duration: 4000 });
-        } else if (nextStatus === 'DELIVERED') {
-          toast.success('Đã xác nhận giao hàng. Hãy hoàn tất đơn để cộng tiền vào ví.', { title: 'Đã giao', duration: 5000 });
         } else if (nextStatus === 'COMPLETED') {
           toast.success('Đã giao thành công! Tiền đã cộng vào Ví Cửa Hàng.', { title: 'Giao thành công 🎉', duration: 5000 });
         }
@@ -820,6 +836,13 @@ export const StoreDashboard: React.FC = () => {
 
   return (
     <div className="store-orders w-full text-zinc-900 dark:text-zinc-100">
+
+      {deliveryResult && <React.Suspense fallback={<div role="status" className="fixed inset-0 z-[110] grid place-items-center bg-zinc-950/30 text-sm text-white">Đang mở biểu mẫu giao hàng…</div>}>
+        <DeliveryResultDialog key={deliveryResult.id} order={deliveryResult} mode="delivered"
+          userId={String((user as any)?.userId || user?.id || '')} role={user?.role || ''}
+          onClose={() => setDeliveryResult(null)}
+          onDone={async message => { setDeliveryResult(null); toast.success(message, { title: 'Đã ghi nhận giao hàng' }); await fetchOrders(); }} />
+      </React.Suspense>}
 
       {/* ── Page Header ── */}
       <div className="w-full">

@@ -1,7 +1,9 @@
-// Contracts checked against deployed Swagger and AmazonButton/Backend main (08/11/2026).
+// Contracts checked against deployed Swagger and backend b03ae5b (12/11/2026).
 export interface BankingTransport {
   get(path: string, config?: any): Promise<any>;
   post(path: string, body?: any): Promise<any>;
+  patch(path: string, body?: any): Promise<any>;
+  delete(path: string): Promise<any>;
 }
 export interface BankOption { bin: string; code: string; name: string; shortName: string }
 export interface CustomerBankAccount {
@@ -17,20 +19,47 @@ export interface CustomerBankStatus {
   accountId: string; accountVerificationStatus: string; message: string;
   session: null | { sessionReference: string; sessionStatus: string; verificationStatus: string;
     paymentStatus: string; refundStatus: string; refundSummary: RefundSummary;
-    expiresAt: string; isExpired: boolean; rejectionReason?: string | null };
+    expiresAt: string; isExpired: boolean; rejectionReason?: string | null; checkoutUrl?: string | null };
 }
 export interface CustomerBankHistory extends RefundSummary {
   sessionId: string; sessionReference: string; orderCode?: string | null; sessionStatus: string;
   verificationStatus: string; paymentReceived: boolean; receivedAmount: number | null;
   refundStatus: string; expiresAt: string; verifiedAt?: string | null; createdAt: string;
+  accountId?: string | null; bankBin?: string | null; bankName?: string | null;
+  accountNumberMasked?: string | null; accountName?: string | null; checkoutUrl?: string | null;
 }
 export interface StoreBankTransaction {
   verificationId: string; bankAccountId: string; storeId: string; bankName: string;
   accountNumberMasked: string; accountName: string; referenceCode: string;
   expectedAmount: number; actualAmount: number | null; status: string; refundStatus: string;
   expiresAt: string; verifiedAt?: string | null; createdAt: string;
+  recipientBankBin?: string; recipientBankName?: string; recipientAccountNumber?: string;
+  recipientAccountHolder?: string; qrCodeUrl?: string; instructions?: string; failureReason?: string | null;
 }
 export interface BankingPage<T> { items: T[]; page: number; pageSize: number; total: number; pages: number }
+
+// Verification and refund are separate outcomes, even when the transaction's
+// overall status advances to REFUND_PENDING or REFUNDED.
+export function storeVerificationStatus(transaction: StoreBankTransaction) {
+  return ['VERIFIED', 'REFUND_PENDING', 'REFUNDED'].includes(transaction.status) ? 'VERIFIED' : transaction.status;
+}
+export function storeBankNeedsPolling(transaction: StoreBankTransaction, now = Date.now()) {
+  return (transaction.status === 'PENDING' && !bankSessionExpired(transaction.expiresAt, now))
+    || ['PENDING', 'PENDING_REFUND', 'PROCESSING', 'PROCESSING_REFUND', 'FAILED_RETRY', 'PENDING_RECONCILIATION'].includes(transaction.refundStatus);
+}
+export function bankRefundMessage(status: string | null | undefined, amount: unknown) {
+  const value = bankMoney(amount);
+  status = status === 'PENDING_REFUND' ? 'PENDING' : status === 'PROCESSING_REFUND' ? 'PROCESSING' : status;
+  return ({
+    PENDING: `Hệ thống đang chờ chuyển hoàn ${value}.`,
+    PROCESSING: `Hệ thống đang xử lý chuyển hoàn ${value}; chưa xác nhận tiền đã về tài khoản.`,
+    PENDING_RECONCILIATION: `Khoản hoàn ${value} đang chờ đối soát kết quả chi trả.`,
+    FAILED_RETRY: `Khoản hoàn ${value} đang chờ hệ thống tự động thử lại.`,
+    SUCCESS: `Hệ thống đã xác nhận hoàn ${value}.`,
+    REFUNDED: `Hệ thống đã xác nhận hoàn ${value}.`,
+    FAILED: `Khoản hoàn ${value} chưa thành công. Kiểm tra lại trạng thái hoặc liên hệ hỗ trợ.`,
+  } as Record<string, string>)[status || ''] || 'Kết quả hoàn tiền được cập nhật riêng sau khi hệ thống xử lý; chưa có xác nhận hoàn thành.';
+}
 
 export function bankingId(value: unknown) {
   const id = String(value ?? '');
@@ -63,6 +92,19 @@ export function bankSessionExpired(expiresAt?: string, now = Date.now()) {
   const expiry = Date.parse(expiresAt || '');
   return !Number.isFinite(expiry) || expiry <= now;
 }
+/** A saved payment link is usable only while the server still expects this account's payment. */
+export function customerBankCheckout(status: CustomerBankStatus | null, checkout: CustomerBankSession | null, now = Date.now()) {
+  if (!status || status.accountVerificationStatus === 'VERIFIED') return null;
+  const session = status.session;
+  const matchingCheckout = checkout?.accountId === status.accountId
+    && (!session || checkout.sessionReference === session.sessionReference) ? checkout : null;
+  const current = session || matchingCheckout;
+  if (!current || !current.sessionReference || current.sessionStatus !== 'ACTIVE'
+    || current.verificationStatus !== 'PENDING' || bankSessionExpired(current.expiresAt, now)
+    || (session && (session.isExpired || session.paymentStatus !== 'PENDING'))) return null;
+  const url = bankCheckoutUrl(session?.checkoutUrl || matchingCheckout?.checkoutUrl);
+  return url ? { url, expiresAt: current.expiresAt, amount: matchingCheckout?.amount ?? null } : null;
+}
 export function customerBankPayload(bank: BankOption, number: string, name: string, isDefault: boolean) {
   if (!bank || !/^\d{6}$/.test(bank.bin)) throw new Error('Vui lòng chọn ngân hàng.');
   const accountNumber = number.trim();
@@ -79,6 +121,14 @@ export function customerBankNeedsPolling(status: CustomerBankStatus | null, now 
   return waitingForPayment || ['PENDING_REFUND', 'PROCESSING_REFUND', 'PARTIALLY_REFUNDED'].includes(session.refundStatus)
     || session.paymentStatus === 'PENDING_RECONCILIATION';
 }
+/** Resume an existing server session after reload/PayOS return, without creating a payment. */
+export function customerBankResumeAccount(accounts: CustomerBankAccount[], history: CustomerBankHistory[]) {
+  const pending = history.filter(item => item.accountId && accounts.some(account => account.id === item.accountId)
+    && (item.verificationStatus === 'PENDING' || item.verificationStatus === 'PENDING_SOURCE_EVIDENCE'
+      || ['PENDING_REFUND', 'PROCESSING_REFUND', 'PARTIALLY_REFUNDED'].includes(item.refundStatus)));
+  pending.sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+  return accounts.find(account => account.id === pending[0]?.accountId) || null;
+}
 export const bankMoney = (value: unknown) => value !== null && value !== undefined && Number.isFinite(Number(value))
   ? `${Number(value).toLocaleString('vi-VN')} ₫` : '—';
 export const bankDate = (value?: string | null) => value && Number.isFinite(Date.parse(value))
@@ -88,10 +138,11 @@ export function bankStatusLabel(value?: string | null) {
     PENDING: 'Chờ xác minh', ACTIVE: 'Đang chờ', CONSUMED: 'Đã hoàn tất phiên', EXPIRED: 'Đã hết hạn',
     CANCELLED: 'Đã hủy', CANCELED: 'Đã hủy', FAILED: 'Không thành công', FAILED_MISMATCH: 'Thông tin không khớp',
     PENDING_SOURCE_EVIDENCE: 'Cần đối chiếu tài khoản nguồn', PAID: 'Đã nhận tiền',
-    PENDING_RECONCILIATION: 'Chờ đối soát', NONE: 'Chưa ghi nhận hoàn tiền', PENDING_REFUND: 'Chờ hoàn tiền',
+    PENDING_RECONCILIATION: 'Chờ đối soát', MANUAL_RECONCILIATION_REQUIRED: 'Cần đối soát thủ công', NONE: 'Chưa ghi nhận hoàn tiền', PENDING_REFUND: 'Chờ hoàn tiền',
     PROCESSING_REFUND: 'Đang hoàn tiền', PROCESSING: 'Đang xử lý', PARTIALLY_REFUNDED: 'Đã hoàn một phần',
     PENDING_MANUAL_REFUND: 'Chờ hỗ trợ hoàn tiền', REFUND_FAILED: 'Hoàn tiền chưa thành công',
     REFUND_PENDING: 'Chờ hoàn tiền', REFUNDED: 'Đã hoàn tiền', SUCCESS: 'Thành công', SUSPENDED: 'Tạm khóa', REVOKED: 'Đã thu hồi',
+    FAILED_RETRY: 'Đang chờ thử lại',
   } as Record<string, string>)[value || ''] || (value ? `Trạng thái: ${value}` : 'Chưa có dữ liệu');
 }
 export function createBankingFlow(transport: BankingTransport) {
@@ -111,10 +162,22 @@ export function createBankingFlow(transport: BankingTransport) {
       bankingId(account?.id);
       return account;
     },
+    async setDefaultCustomerAccount(accountId: string) {
+      const id = bankingId(accountId);
+      const account = data<CustomerBankAccount>(await transport.patch(`/customers/me/bank-accounts/${id}/default`, {}));
+      if (String(account?.id) !== id || account.verificationStatus !== 'VERIFIED' || account.isDefault !== true) {
+        throw new Error('Chưa xác nhận được tài khoản mặc định. Hãy tải lại danh sách để kiểm tra.');
+      }
+      return account;
+    },
+    async removeCustomerAccount(accountId: string) {
+      const result = data<{ success: boolean; message?: string }>(await transport.delete(`/customers/me/bank-accounts/${bankingId(accountId)}`));
+      if (result?.success !== true) throw new Error('Chưa xác nhận được kết quả xóa. Hãy tải lại danh sách để kiểm tra.');
+    },
     async initiateCustomerVerification(accountId: string) {
       const session = data<CustomerBankSession>(await transport.post(`/customers/me/bank-accounts/${bankingId(accountId)}/initiate-verification`, {}));
       if (String(session?.accountId) !== accountId || !session.verificationStatus) throw new Error('Phiên xác minh không khớp tài khoản đã chọn. Hãy kiểm tra trạng thái trước khi thử lại.');
-      if (session.verificationStatus !== 'VERIFIED' && (!bankCheckoutUrl(session.checkoutUrl) || session.amount !== 2000
+      if (session.verificationStatus !== 'VERIFIED' && (!bankCheckoutUrl(session.checkoutUrl) || (!Number.isSafeInteger(session.amount) || session.amount <= 0)
         || !session.sessionReference || !Number.isFinite(Date.parse(session.expiresAt)))) throw new Error('Hướng dẫn thanh toán chưa hợp lệ. Hãy kiểm tra trạng thái trước khi thử lại.');
       return session;
     },
@@ -127,7 +190,18 @@ export function createBankingFlow(transport: BankingTransport) {
       return bankingPage<CustomerBankHistory>(await transport.get('/customers/me/bank-accounts/verification-history', { params: { page, pageSize: 10 } }));
     },
     async storeHistory(storeId: string, page = 1, status = '') {
-      return bankingPage<StoreBankTransaction>(await transport.get(`/stores/${bankingId(storeId)}/bank-account-verifications`, { params: { page, pageSize: 10, ...(status ? { status } : {}) } }));
+      const result = bankingPage<StoreBankTransaction>(await transport.get(`/stores/${bankingId(storeId)}/bank-account-verifications`, { params: { page, pageSize: 10, ...(status ? { status } : {}) } }));
+      if (result.items.some(item => String(item.storeId) !== storeId || !/^[1-9]\d*$/.test(String(item.verificationId)))) throw new Error('Lịch sử xác minh không thuộc cửa hàng hiện tại.');
+      return result;
+    },
+    async pendingStoreVerification(storeId: string) {
+      const result = bankingPage<StoreBankTransaction>(await transport.get(`/stores/${bankingId(storeId)}/bank-account-verifications`, { params: { page: 1, pageSize: 10, status: 'PENDING' } }));
+      if (result.items.some(item => String(item.storeId) !== storeId)) throw new Error('Lịch sử xác minh không thuộc cửa hàng hiện tại.');
+      const latest = result.items.find(item => item.status === 'PENDING');
+      if (!latest) return null;
+      const current = data<StoreBankTransaction>(await transport.get(`/bank-account-verifications/${bankingId(latest.verificationId)}`));
+      if (String(current?.storeId) !== storeId || String(current?.verificationId) !== String(latest.verificationId)) throw new Error('Phiên xác minh không thuộc cửa hàng hiện tại.');
+      return current.status === 'PENDING' ? current : null;
     },
     async storeDetail(storeId: string, verificationId: string) {
       const transaction = data<StoreBankTransaction>(await transport.get(`/bank-account-verifications/${bankingId(verificationId)}`));

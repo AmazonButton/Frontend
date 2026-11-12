@@ -139,7 +139,8 @@ export const ShopPage: React.FC = () => {
       if (effectiveOrderId) {
         api.get(`/orders/${effectiveOrderId}`)
           .then((res) => {
-            const serverOrder = res.data?.data || res.data;
+            const rawServerOrder = res.data?.data || res.data;
+            const serverOrder = rawServerOrder ? normalizeOrder(rawServerOrder) : null;
             if (serverOrder && serverOrder.orderStatus !== 'CANCELLED' && serverOrder.paymentStatus !== 'PAID') {
               setRecoveryOrder({
                 orderId: serverOrder.id || serverOrder.orderId || effectiveOrderId,
@@ -301,8 +302,8 @@ export const ShopPage: React.FC = () => {
       const response = await api.post('/storefront/orders', {
         storeId: selectedStore,
         items: selectedCart.map(({ product, quantity }) => ({ productId: product.id, quantity })),
-        ...form,
         ...contact,
+        paymentMethod: form.paymentMethod,
       }, {
         headers: {
           'x-idempotency-key': orderIdempKey,

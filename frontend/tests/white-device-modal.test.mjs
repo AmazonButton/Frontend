@@ -1,52 +1,40 @@
+﻿import assert from 'node:assert/strict';
 import test from 'node:test';
-import assert from 'node:assert/strict';
-import fs from 'node:fs';
-import path from 'node:path';
-
-test('WhiteDeviceAirPodsModal defines WIFI_CONFIG step and handles Wi-Fi deployment', () => {
-  const filePath = path.resolve('frontend/src/components/devices/WhiteDeviceAirPodsModal.tsx');
-  const content = fs.readFileSync(filePath, 'utf8');
-
-  // Verify step type includes WIFI_CONFIG
-  assert.match(
-    content,
-    /'WIFI_CONFIG'/,
-    'Modal step type must include WIFI_CONFIG'
-  );
-
-  // Verify Wi-Fi state exists
-  assert.match(content, /const \[ssid, setSsid\] = useState/, 'Must manage SSID state');
-  assert.match(content, /const \[wifiPassword, setWifiPassword\] = useState/, 'Must manage Wi-Fi password state');
-
-  // Verify BLE command WIFI:ten_wifi:mat_khau is prepared
-  assert.match(content, /WIFI:\$\{ssid\.trim\(\)\}:\$\{wifiPassword\}/, 'Must format Bluetooth command as WIFI:ssid:pass');
-
-  // Verify step === 'WIFI_CONFIG' UI block exists
-  assert.match(content, /step === 'WIFI_CONFIG'/, 'Must render Wi-Fi config UI block');
-});
-
-test('WhiteDeviceAirPodsModal dynamically fetches catalog from API and defaults to Tất cả', () => {
-  const filePath = path.resolve('frontend/src/components/devices/WhiteDeviceAirPodsModal.tsx');
-  const content = fs.readFileSync(filePath, 'utf8');
-
-  // Verify API call to /products
-  assert.match(content, /api\.get\('\/products'\)/, 'Must call api.get("/products") to fetch live products');
-
-  // Verify fallback to storefront catalog
-  assert.match(
-    content,
-    /api\.get\('\/products\/storefront\/catalog'\)/,
-    'Must fall back to /products/storefront/catalog'
-  );
-
-  // Verify default category is Tất cả so products are not hidden
-  assert.match(
-    content,
-    /selectedCategory.*'Tất cả'/,
-    'Default category must be Tất cả so products are immediately visible'
-  );
-
-  // Verify loading state indicator
-  assert.match(content, /isLoadingCatalog/, 'Must have loading state indicator');
-});
-
+import { readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import vm from 'node:vm';
+import * as connection from '../src/services/device-connection.ts';
+import * as pairing from '../src/pages/customer/device-pairing.mjs';
+const ts = createRequire(import.meta.url)('typescript');
+const ok = data => ({ data: { success: true, data } });
+const owner = { id: '11', role: 'STORE_OWNER', storeId: '5' };
+const customer = { id: '22', role: 'CUSTOMER', customerProfileId: '41' };
+const active = { sessionId: 'sess_0123456789abcdef01234567', deviceId: 'BTN-91', storeId: '5', status: 'ACTIVE', expiresAt: '2099-01-01T00:00:00Z' };
+function harness({ user = owner, rejectSave = false, rejectWifi = false, rejectLookup = false, owned = false } = {}) {
+  const source = readFileSync(new URL('../src/components/devices/WhiteDeviceAirPodsModal.tsx', import.meta.url), 'utf8');
+  const code = ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText;
+  const slots = [], calls = [], saved = [], writes = [], disk = new Map(); let cursor = 0, dirty = true, tree, effects = [], live = true;
+  let row = { id: '91', buttonId: '91', deviceId: 'BTN-91', storeId: '5', customerId: owned ? '41' : null, status: owned ? 'ACTIVE' : 'INACTIVE', inventoryState: 'ALLOCATED_TO_STORE', products: [{ productId: '6', productName: 'Old product', price: 20000 }] };
+  const jsx = (type,props) => ({type,props});
+  const react = {
+    useState(initial) { const i=cursor++; slots[i] ||= { value: typeof initial === 'function' ? initial() : initial }; return [slots[i].value, v => { const n=typeof v==='function'?v(slots[i].value):v; if(!Object.is(n,slots[i].value)){slots[i].value=n;dirty=true;} }]; },
+    useRef(v){ return slots[cursor++] ||= { current: v }; },
+    useEffect(fn,deps){const i=cursor++; if(!slots[i]||deps.some((v,n)=>!Object.is(v,slots[i].deps[n]))){const old=slots[i];slots[i]={deps,cleanup:old?.cleanup};effects.push(()=>{slots[i].cleanup?.();slots[i].cleanup=fn();});}}
+  };
+  const server={connected:true,async getPrimaryService(){return{async getCharacteristic(uuid){if(uuid.includes('fff1'))return{readValue:async()=>new TextEncoder().encode(JSON.stringify({deviceId:'BTN-91'}))};return{writeValueWithResponse:async bytes=>{writes.push(new TextDecoder().decode(bytes));if(rejectWifi)throw Error('GATT refused');}};}};}};
+  const hw={name:'SmartOrder-DEMO-WRONG-ID',gatt:{...server,connected:true,connect:async()=>server,disconnect(){server.connected=false;}}};
+  const transport={
+    get:async path=>{calls.push({method:'get',path});if(path==='/devices/BTN-91')return ok(structuredClone(row));if(path==='/stores/5')return ok({storeId:'5',status:'ACTIVE',products:[{productId:'7',name:'Water',status:'ACTIVE',basePrice:23000}]});if(path.startsWith('/products/'))return ok({productId:'7',storeId:'5',status:'ACTIVE'});throw Error(path);},
+    post:async(path,body)=>{calls.push({method:'post',path,body});if(path==='/devices/lookup-code'){if(rejectLookup)throw Error('lookup unavailable');return ok({deviceId:row.deviceId,isClaimed:!!row.customerId,status:row.status});}if(path==='/provisioning/session')return ok(active);if(path==='/provisioning/verify')return{data:{success:true,valid:true,data:active}};if(path.endsWith('/confirmation')){row={...row,customerId:'41',status:'ACTIVE',products:[...row.products,{productId:'7',productName:'Water',price:23000}]};return ok({...row,productId:'7'});}if(path.endsWith('/assign-product')){if(rejectSave)throw Error('save response lost');row={...row,products:[{productId:body.productId,productName:'Water',price:23000}]};return ok(row);}throw Error(path);}
+  };
+  transport.put = async (path, body) => { calls.push({ method: 'put', path, body }); assert.ok(path.endsWith('/customer-config')); if(rejectSave) throw Error('save response lost'); row = { ...row, products: [{ productId: body.productId, quantity: body.quantity, productName: 'Water', price: 23000 }] }; return ok(row); };
+  const exports={};vm.runInNewContext(code,{exports,Date,encodeURIComponent,localStorage:{getItem:k=>disk.get(k)||null,setItem:(k,v)=>disk.set(k,v)},sessionStorage:{getItem:k=>disk.get(k)||null,setItem:(k,v)=>disk.set(k,v),removeItem:k=>disk.delete(k)},navigator:{bluetooth:{requestDevice:async()=>hw}},document:{body:{}},window:{dispatchEvent(){}},CustomEvent:class{constructor(name,options){this.type=name;this.detail=options?.detail;}},require(name){if(name==='react')return react;if(name==='react/jsx-runtime')return{jsx,jsxs:jsx};if(name==='react-dom')return{createPortal:x=>x};if(name==='react-router-dom')return{Link:'a'};if(name==='framer-motion')return{motion:new Proxy({},{get:(_,k)=>'motion.'+String(k)}),useReducedMotion:()=>true};if(name==='lucide-react')return new Proxy({},{get:(_,k)=>'icon.'+String(k)});if(name.endsWith('/api'))return{api:transport};if(name.endsWith('/AuthContext'))return{useAuth:()=>({user})};if(name.endsWith('/useBodyScrollLock'))return{useBodyScrollLock(){}};if(name.endsWith('/device-connection'))return connection;if(name.endsWith('/device-pairing.mjs'))return pairing;throw Error(name);}});
+  const walk=x=>x&&typeof x==='object'?[x,...[x.props?.children].flat(Infinity).flatMap(walk)]:[];
+  const text=x=>x==null||typeof x==='boolean'?'':typeof x!=='object'?String(x):[x.props?.children].flat(Infinity).map(text).join('');
+  const app={calls,saved,writes,get text(){return text(tree);},get row(){return row;},get nodes(){return walk(tree);},async flush(){for(let i=0;i<100;i++){if(dirty&&live){dirty=false;cursor=0;tree=exports.WhiteDeviceAirPodsModal({isOpen:true,onClose(){},onDeviceBound:v=>saved.push(v)});const jobs=effects;effects=[];jobs.forEach(f=>f());}await Promise.resolve();}},async click(label){const n=walk(tree).find(n=>n.type==='button'&&text(n).includes(label));assert.ok(n,'Missing '+label);assert.ok(!n.props.disabled,'Disabled '+label);n.props.onClick?.();await this.flush();},async input(label,value){const n=walk(tree).find(n=>n.type==='label'&&text(n).includes(label));const input=walk(n).find(n=>n.type==='input'||n.type==='select');assert.ok(input,label);input.props.onChange({target:{value}});await this.flush();},unmount(){live=false;slots.forEach(s=>s.cleanup?.());}};return app;
+}
+test('store BLE recognition verifies the allocated device immediately without creating/claiming a device or requiring Wi-Fi',async()=>{const app=harness();await app.flush();await app.click('Tìm & kết nối Bluetooth');assert.equal(app.saved[0].deviceId,'BTN-91');assert.equal(app.saved[0].status,'INACTIVE');assert.ok(app.text.includes('Hoàn tất nhận diện'));assert.equal(app.writes.length,0);assert.ok(!app.text.includes('Gửi Wi-Fi tới nút'));assert.ok(!app.text.includes('Kiểm tra / chọn sản phẩm'));assert.ok(!app.text.includes('Xác nhận & cấu hình'));assert.equal(app.calls.filter(c=>c.method==='post').length,1);assert.equal(app.calls[0].path,'/devices/lookup-code');app.unmount();});
+test('failed lookup cannot fabricate a device from a Bluetooth name or demo code',async()=>{const app=harness({rejectLookup:true});await app.flush();await app.click('Tìm & kết nối Bluetooth');assert.equal(app.saved.length,0);assert.ok(app.text.includes('lookup unavailable'));assert.ok(!app.text.includes('Hoàn tất nhận diện'));app.unmount();});
+test('backend mapping failure stays pending instead of claiming binding success',async()=>{const app=harness({user:customer,owned:true,rejectSave:true});await app.flush();await app.click('Tìm & kết nối Bluetooth');await app.click('Kiểm tra / chọn sản phẩm');await app.input('Sản phẩm của cửa hàng','7');await app.click('Lưu sản phẩm cho đúng nút');assert.ok(app.text.includes('save response lost'));assert.ok(!app.text.includes('Đã xác nhận dữ liệu lưu trên máy chủ'));assert.ok(app.text.includes('Kiểm tra kết quả đã lưu'));assert.deepEqual(connection.deviceProductIds(app.row),['6']);app.unmount();});
+test('customer uses secure confirmation for the same device and stores exactly the chosen product',async()=>{const app=harness({user:customer});await app.flush();await app.click('Tìm & kết nối Bluetooth');assert.equal(app.saved.length,0);assert.ok(app.text.includes('Mã ghép nối hoặc nội dung QR'));await app.input('Mã ghép nối hoặc nội dung QR','pair-token');await app.click('Kiểm tra mã ghép nối');await app.input('Sản phẩm của cửa hàng','7');await app.click('Xác nhận lưu nút vào tài khoản');assert.ok(app.text.includes('Đã xác nhận dữ liệu lưu trên máy chủ'));assert.equal(app.row.deviceId,'BTN-91');assert.equal(app.row.customerId,'41');assert.equal(app.row.storeId,'5');assert.deepEqual(connection.deviceProductIds(app.row),['7']);assert.equal(app.calls.filter(c=>c.path.endsWith('/confirmation')).length,1);assert.equal(app.calls.some(c=>c.path==='/devices/configure-by-code'),false);app.unmount();});
+test('GATT write failure never reports Wi-Fi/Cloud success and keeps the existing stored device',async()=>{const app=harness({user:customer,owned:true,rejectWifi:true});await app.flush();await app.click('Tìm & kết nối Bluetooth');await app.input('Tên Wi-Fi','Real network');await app.input('Mật khẩu Wi-Fi','secret');await app.click('Gửi Wi-Fi tới nút');assert.ok(app.text.includes('GATT refused'));assert.ok(!app.text.includes('Đã gửi cấu hình tới đúng nút'));assert.equal(app.row.deviceId,'BTN-91');assert.deepEqual(app.writes,['Real network:secret']);app.unmount();});

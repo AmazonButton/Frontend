@@ -51,6 +51,9 @@ export function financeError(error: any, fallback = 'Chưa thể hoàn tất tha
 
 export function financeLookupError(error: any) {
   const code = error?.response?.data?.errorCode || error?.response?.data?.code;
+  if (code === 'BANK_LOOKUP_SERVICE_UNAVAILABLE') {
+    return `${financeError(error, 'Dịch vụ tra cứu ngân hàng chưa sẵn sàng.')} Chưa thể xác minh tên chủ tài khoản. Vui lòng thử lại sau hoặc gửi mã BANK_LOOKUP_SERVICE_UNAVAILABLE cho bộ phận hỗ trợ.`;
+  }
   if (code === 'BANK_LOOKUP_UNAVAILABLE') {
     return 'Hệ thống chưa tra cứu được tên chủ tài khoản từ dịch vụ ngân hàng. Hãy kiểm tra lại ngân hàng và số tài khoản. Nếu thông tin đã đúng, vui lòng thử lại sau hoặc gửi mã BANK_LOOKUP_UNAVAILABLE cho bộ phận hỗ trợ. Chưa thể tạo yêu cầu xác minh.';
   }

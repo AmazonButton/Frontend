@@ -1,8 +1,11 @@
-import React, { useState, useEffect } from 'react';
+import React, { Suspense, useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
-import { api } from '../../services/api';
+import { createDeviceTelemetry, deviceRuntime } from '../../services/device-runtime';
+import { api, apiSessionMarker } from '../../services/api';
+import { connectBle, createDevicePageLoader, assertDeviceScope, upsertScopedDevice, normalizeDevice, readDeviceCache, saveDeviceCache, readScopedDevice, saveCustomerDeviceConfig, sendBleWifi } from '../../services/device-connection';
+import { getApiRetryUntil } from '../../services/request-backoff';
 import { mergeOrderUpdate, normalizeOrder } from '../../services/order-events';
 import { deviceDashboardMetrics } from '../../services/dashboard-metrics';
 import { useAuth } from '../../context/AuthContext';
@@ -13,8 +16,8 @@ import { Device, Order, Product } from '../../types';
 import { Radio, ShoppingBag, ShoppingCart, Clock, CheckCircle2, AlertCircle, X, ChevronRight, MapPin, Truck, RefreshCw, Battery, Wifi, Zap, Sparkles, Plus, Share2, QrCode, WifiOff, Key, Camera, Hash, Check, Lightbulb, Bluetooth, Sliders, Power, Edit3, Settings, ChevronDown, RotateCcw, Store, Unlink2, Trash2, Volume2, VolumeX, Cpu } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { Floating3DCard } from '../../components/3d/Floating3DCard';
-import { WebBluetoothProvisioner } from '../../components/devices/WebBluetoothProvisioner';
-import { WhiteDeviceAirPodsModal } from '../../components/devices/WhiteDeviceAirPodsModal';
+
+const WhiteDeviceAirPodsModal = React.lazy(() => import('../../components/devices/WhiteDeviceAirPodsModal').then(m => ({ default: m.WhiteDeviceAirPodsModal })));
 import { OrderSuccessModal } from '../../components/orders/OrderSuccessModal';
 import { CustomerStoreSelectorModal, StoreItem } from '../../components/customer/CustomerStoreSelectorModal';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
@@ -29,9 +32,10 @@ interface DeviceCardUIProps {
   name: string;
   productDesc?: string;
   priceStr: string | null;
-  isOnline: boolean;
-  battery: number;
-  rssi: number;
+  runtime: ReturnType<typeof deviceRuntime>;
+  error?: string;
+  battery: number | null;
+  rssi: number | null;
   isPressing: boolean;
   simulatingId: string | null;
   onOrder: (id: string) => void;
@@ -41,7 +45,7 @@ interface DeviceCardUIProps {
 }
 
 const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
-  dev, productImg, name, productDesc, priceStr, isOnline, battery, rssi,
+  dev, productImg, name, productDesc, priceStr, runtime, error, battery, rssi,
   isPressing, simulatingId,
   onOrder, onSimulate, onConfigOpen, onWifiOpen,
 }) => {
@@ -119,22 +123,27 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
               className={`w-2 h-2 rounded-full ${
                 dev.status === 'DISABLED'
                   ? 'bg-rose-400'
-                  : isOnline
+                  : runtime.running
                   ? 'bg-emerald-500'
                   : 'bg-slate-300'
               }`}
-              title={dev.status === 'DISABLED' ? 'Đã tắt' : isOnline ? 'Online' : 'Offline'}
+              title={runtime.hint || runtime.label}
             />
-            <span className="device-state text-xs font-medium text-slate-500">{dev.status === 'DISABLED' ? 'Đã tắt' : isOnline ? 'Hoạt động' : 'Ngoại tuyến'}</span>
-            <span className="text-xs font-medium text-slate-500 tabular-nums"><Battery className="inline h-3.5 w-3.5 mr-1" />{battery}%</span>
+            <span className="device-state text-xs font-medium text-slate-500">{runtime.label}</span>
+            <span className="text-xs font-medium text-slate-500 tabular-nums"><Battery className="inline h-3.5 w-3.5 mr-1" />{battery == null ? '—' : `${battery}%`}</span>
           </div>
         </div>
+
+        {runtime.hint && <p className="text-[11px] leading-4 text-slate-500">{runtime.hint}</p>}
+        {error && <p role="alert" className="text-xs leading-5 text-amber-700">{error}</p>}
 
         {/* Single Primary Action Button: "Đặt ngay — [Price]" */}
         <motion.button
           whileTap={{ scale: 0.98 }}
           onClick={() => onOrder(dev.deviceId)}
-          className="w-full py-2.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all duration-150 ease-out active:scale-[0.98] cursor-pointer shadow-xs"
+          disabled={!runtime.canOrder}
+          title={runtime.canOrder ? "Đặt trên web; trạng thái mạng của nút được theo dõi riêng" : runtime.hint}
+          className="w-full py-2.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all duration-150 ease-out active:scale-[0.98] cursor-pointer shadow-xs disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <ShoppingBag className="w-3.5 h-3.5" />
           <span className="tabular-nums">{priceStr ? `Đặt ngay — ${priceStr}` : 'Đặt ngay'}</span>
@@ -156,7 +165,7 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
                 <div className="flex items-center justify-between text-[11px] text-slate-400 tabular-nums px-0.5">
                   <span className="flex items-center gap-1">
                     <Wifi className="w-3 h-3 text-slate-400" />
-                    {rssi} dBm
+                    {rssi == null ? '—' : `${rssi} dBm`}
                   </span>
                   <span className="truncate max-w-[85px] text-slate-400 tabular-nums" title={dev.deviceId}>
                     {dev.deviceId}
@@ -185,11 +194,11 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
                   <button
                     type="button"
                     onClick={() => onSimulate(dev.deviceId)}
-                    disabled={simulatingId === dev.deviceId}
+                    disabled={simulatingId === dev.deviceId || !runtime.canOrder}
                     className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors"
                   >
                     <Radio className={`w-3 h-3 text-slate-400 ${simulatingId === dev.deviceId ? 'animate-spin' : ''}`} />
-                    <span>Thử nút</span>
+                    <span>Thử đặt trên web</span>
                   </button>
                   <motion.button
                     whileTap={{ scale: 0.94 }}
@@ -221,11 +230,17 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
 
 export const CustomerHomePage: React.FC = () => {
   const { user } = useAuth();
+  return <CustomerHomeWorkspace key={`${user?.id}:${user?.customerProfileId}`} />;
+};
+const CustomerHomeWorkspace: React.FC = () => {
+  const { user } = useAuth();
   const navigate = useNavigate();
   const { playOrderChime, playCancelChime, isSoundEnabled, toggleSound } = useSound();
-  const [devices, setDevices] = useState<Device[]>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_cust_devices') : null; if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; } } catch {} return []; });
+  const [devices, setDevices] = useState<Device[]>(() => { try { return readDeviceCache(sessionStorage, user); } catch { return []; } });
   const [orders, setOrders] = useState<Order[]>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_cust_orders') : null; if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; } } catch {} return []; });
-  const [loading, setLoading] = useState(true);
+  const [orderListReady, setOrderListReady] = useState(orders.length > 0);
+  const [ordersLoading, setOrdersLoading] = useState(orders.length === 0);
+  const [loading, setLoading] = useState(devices.length === 0);
   const [showAirPodsModal, setShowAirPodsModal] = useState(false);
 
   // Store Selector Modal (GPS Radius & Store Code)
@@ -306,24 +321,27 @@ export const CustomerHomePage: React.FC = () => {
   );
   useBodyScrollLock(isAnyInlineModalOpen);
 
-  const [homeDevicesReady, setHomeDevicesReady] = useState(() => { try { return Boolean(typeof window !== 'undefined' && window.sessionStorage?.getItem('sob_cached_cust_devices')); } catch { return false; } });
+  const [homeDevicesReady, setHomeDevicesReady] = useState(devices.length > 0);
   const [homeDataError, setHomeDataError] = useState('');
+  const deviceLoader = useRef(createDevicePageLoader());
+  const deviceRevision = useRef(0);
+  const deviceTelemetry = useRef(createDeviceTelemetry());
+  const [deviceNow, setDeviceNow] = useState(Date.now);
+  useEffect(() => { const timer = window.setInterval(() => setDeviceNow(Date.now()), 5000); return () => window.clearInterval(timer); }, []);
+  const dataFailures = useRef(new Set<string>());
+  const productsLoaded = useRef(false);
+  useEffect(() => { deviceLoader.current = createDevicePageLoader(); return () => deviceLoader.current.dispose(); }, []);
   const fetchData = async (isPolling = false) => {
-    try {
-      const [devResult, ordResult, prodResult] = await Promise.allSettled([
-        api.get('/devices'),
-        api.get('/orders'),
-        api.get('/products').catch(() => ({ data: { success: false, data: [] } })),
-      ]);
-      const unavailable = { data: { success: false, data: [] as any[] } };
-      const devRes = devResult.status === 'fulfilled' ? devResult.value : unavailable;
-      const ordRes = ordResult.status === 'fulfilled' ? ordResult.value : unavailable;
-      const prodRes = prodResult.status === 'fulfilled' ? prodResult.value : unavailable;
-      setHomeDataError(devRes.data.success && ordRes.data.success ? '' : 'Chưa cập nhật đủ dữ liệu. Các mục đã tải vẫn được giữ lại.');
-      if (devRes.data.success && Array.isArray(devRes.data.data)) { setDevices(devRes.data.data); setHomeDevicesReady(true); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_cust_devices', JSON.stringify(devRes.data.data)); } catch {} }
-      if (ordRes.data.success && Array.isArray(ordRes.data.data)) {
+    const loader = deviceLoader.current; const scope = apiSessionMarker(); const revision = deviceRevision.current;
+    const valid = () => loader.valid() && apiSessionMarker() === scope;
+    const report = (key: string, failed: boolean) => { if (!valid()) return; if (failed) dataFailures.current.add(key); else dataFailures.current.delete(key); setHomeDataError(dataFailures.current.size ? 'Chưa cập nhật đủ dữ liệu. Các mục đã tải vẫn được giữ lại.' : ''); };
+    const jobs = [async () => {
+      try { const res = await api.get('/devices'); if (!res.data?.success || !Array.isArray(res.data.data)) throw new Error('Invalid devices'); if (!valid() || revision !== deviceRevision.current) return; const rows = deviceTelemetry.current.merge<Device>(res.data.data.map((raw: any) => assertDeviceScope(raw, user))); setDevices(rows); setHomeDevicesReady(true); try { saveDeviceCache(sessionStorage, user, rows); } catch {} report('devices', false); }
+      catch { report('devices', true); } finally { if (valid()) setLoading(false); }
+    }, async () => {
+      try { const ordRes = await api.get('/orders'); if (!ordRes.data?.success || !Array.isArray(ordRes.data.data)) throw new Error('Invalid orders'); if (!valid()) return;
         const fetchedOrders: Order[] = ordRes.data.data.map(normalizeOrder);
-        setOrders(fetchedOrders); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_cust_orders', JSON.stringify(fetchedOrders)); } catch {}
+        setOrderListReady(true); setOrders(fetchedOrders); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_cust_orders', JSON.stringify(fetchedOrders)); } catch {}
 
         // Check activeCancelOrder: if status is no longer PENDING (e.g. accepted by store/shipper), clear immediately!
         setActiveCancelOrder((current) => {
@@ -349,16 +367,17 @@ export const CustomerHomePage: React.FC = () => {
           }
           return current;
         });
-      }
-      if (prodRes.data?.success) setAvailableProducts(prodRes.data.data);
-    } catch (e) {
-      toast.error('Không tải được dữ liệu. Vui lòng thử lại.');
-    } finally {
-      setLoading(false);
-    }
+        report('orders', false);
+      } catch { report('orders', true); } finally { if (valid()) setOrdersLoading(false); }
+    }];
+    if (!productsLoaded.current || !isPolling) jobs.push(async () => {
+      try { const res = await api.get('/products'); if (!res.data?.success || !Array.isArray(res.data.data)) throw new Error('Invalid products'); if (!valid()) return; setAvailableProducts(res.data.data); productsLoaded.current = true; report('products', false); }
+      catch { report('products', true); }
+    });
+    return loader.run(jobs);
   };
 
-  const customerDeviceMetrics = deviceDashboardMetrics(devices);
+  const customerDeviceMetrics = { ...deviceDashboardMetrics(devices), active: devices.filter(device => deviceRuntime(device, deviceNow).running).length };
   const customerId = user?.customerProfileId || (user as any)?.customerProfile?.id;
 
   useEffect(() => {
@@ -421,18 +440,8 @@ export const CustomerHomePage: React.FC = () => {
     };
 
     const handleDeviceHeartbeat = (data: any) => {
-      setDevices((prev) =>
-        prev.map((d) =>
-          d.deviceId === data.deviceId
-            ? {
-                ...d,
-                batteryLevel: data.batteryLevel,
-                wifiRSSI: data.wifiRSSI,
-                lastSeenAt: data.lastSeenAt,
-              }
-            : d
-        )
-      );
+      deviceTelemetry.current.record(data);
+      setDevices(previous => deviceTelemetry.current.merge(previous));
     };
 
     const handleButtonPressing = (data: any) => {
@@ -467,8 +476,11 @@ export const CustomerHomePage: React.FC = () => {
       setTimeout(() => setThrottledNotice(null), 6000);
     };
 
-    const handleDeviceClaimed = () => {
-      fetchData();
+    const handleDeviceClaimed = (event?: any) => {
+      deviceRevision.current++;
+      const raw = event?.detail?.device;
+      if (raw) { try { const saved = assertDeviceScope(raw, user); setDevices(previous => { const next = upsertScopedDevice(previous, saved, user); try { saveDeviceCache(sessionStorage, user, next); } catch {} return next; }); setHomeDevicesReady(true); } catch {} }
+      void fetchData();
     };
     window.addEventListener('sob_device_claimed_success', handleDeviceClaimed);
 
@@ -483,11 +495,13 @@ export const CustomerHomePage: React.FC = () => {
     socket.on('ORDER_DUPLICATE_THROTTLED', handleOrderThrottled);
     socket.on('device:claimed', handleDeviceClaimed);
     socket.on('device:wifi_changed', handleDeviceClaimed);
+    socket.on('DEVICE_PROVISIONED', handleDeviceClaimed);
+    socket.on('device:product_changed', handleDeviceClaimed);
 
     // Continuous 4s background polling ensures real-time parity even if WebSocket drops
     const pollInterval = setInterval(() => {
-      fetchData();
-    }, 4000);
+      if (document.visibilityState === 'visible' && !getApiRetryUntil()) void fetchData(true);
+    }, 15000);
 
     return () => {
       clearInterval(pollInterval);
@@ -503,6 +517,8 @@ export const CustomerHomePage: React.FC = () => {
       socket.off('ORDER_DUPLICATE_THROTTLED', handleOrderThrottled);
       socket.off('device:claimed', handleDeviceClaimed);
       socket.off('device:wifi_changed', handleDeviceClaimed);
+      socket.off('DEVICE_PROVISIONED', handleDeviceClaimed);
+      socket.off('device:product_changed', handleDeviceClaimed);
     };
   }, [user, customerId]);
 
@@ -536,8 +552,12 @@ export const CustomerHomePage: React.FC = () => {
 
   // App-triggered Quick Reorder
   const handleQuickReorder = async (deviceId: string) => {
+    const state = deviceRuntime(devices.find(d => d.deviceId === deviceId));
+    if (!state.canOrder) { setDeviceErrors(prev => ({ ...prev, [deviceId]: state.hint })); return; }
+    setDeviceErrors(prev => ({ ...prev, [deviceId]: '' }));
     try {
       const res = await api.post('/orders/quick-reorder', { deviceId });
+      if (!res.data?.success) throw new Error(res.data?.message || 'Không thể tạo đơn hàng');
       if (res.data.success) {
         const { order, cancelWindowSeconds } = res.data.data;
         setActiveSuccessOrder(normalizeOrder(order));
@@ -547,7 +567,7 @@ export const CustomerHomePage: React.FC = () => {
         fetchData();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể tạo đơn hàng');
+      setDeviceErrors(prev => ({ ...prev, [deviceId]: err.response?.data?.message || err.message || 'Không thể tạo đơn hàng' }));
     }
   };
 
@@ -581,17 +601,22 @@ export const CustomerHomePage: React.FC = () => {
     }, 4000);
   };
 
+  const [deviceErrors, setDeviceErrors] = useState<Record<string, string>>({});
   const [simulatingDeviceId, setSimulatingDeviceId] = useState<string | null>(null);
 
   const handleSimulatePress = async (deviceId: string) => {
+    const state = deviceRuntime(devices.find(d => d.deviceId === deviceId));
+    if (!state.canOrder) { setDeviceErrors(prev => ({ ...prev, [deviceId]: state.hint })); return; }
+    setDeviceErrors(prev => ({ ...prev, [deviceId]: '' }));
     setSimulatingDeviceId(deviceId);
     try {
       const res = await api.post(`/devices/${deviceId}/simulate-press`, { eventType: 'DOUBLE_PRESS' });
+      if (!res.data?.success) throw new Error(res.data?.message || 'Mô phỏng bấm nút thất bại');
       if (res.data.success) {
         fetchData();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Mô phỏng bấm nút thất bại');
+      setDeviceErrors(prev => ({ ...prev, [deviceId]: err.response?.data?.message || err.message || 'Mô phỏng bấm nút thất bại' }));
     } finally {
       setSimulatingDeviceId(null);
     }
@@ -708,141 +733,45 @@ export const CustomerHomePage: React.FC = () => {
   };
 
   // Kết nối Web Bluetooth
+  const wifiOperation = useRef(false);
   const handleConnectBluetooth = async () => {
-    if (typeof navigator === 'undefined' || !('bluetooth' in navigator)) {
-      setWifiErrorMsg('Trình duyệt của bạn chưa hỗ trợ Web Bluetooth. Vui lòng mở bằng Google Chrome hoặc Microsoft Edge.');
-      return;
-    }
-    setIsBleScanning(true);
-    setWifiErrorMsg(null);
+    if (wifiOperation.current) return;
+    wifiOperation.current = true; setIsBleScanning(true); setWifiErrorMsg(null);
+    let connection: any = null;
     try {
-      const navBluetooth = (navigator as any).bluetooth;
-      const device = await navBluetooth.requestDevice({
-        filters: [
-          { namePrefix: 'BTN' },
-          { namePrefix: 'SmartOrder' },
-          { namePrefix: 'SmartButton' },
-          { namePrefix: 'Smart' },
-          { namePrefix: 'ESP' },
-          { namePrefix: 'SOB' },
-        ],
-        optionalServices: [
-          '0000fff0-0000-1000-8000-00805f9b34fb',
-          0xfff0,
-        ],
-      });
-      setConnectedBleDevice(device);
-      let server = device.gatt;
-      if (!server.connected) {
-        try {
-          server = await device.gatt.connect();
-        } catch (_) {
-          if (device.gatt?.connected) server = device.gatt;
-        }
-      }
-      setBleGattServer(server);
-    } catch (err: any) {
-      if (err.name !== 'NotFoundError') {
-        setWifiErrorMsg('Không thể kết nối Bluetooth. Đảm bảo nút đang bật và ở gần.');
-      }
-    } finally {
-      setIsBleScanning(false);
-    }
+      connection = await connectBle(navigator);
+      const saved = await readScopedDevice(api, connection.info.deviceId, user);
+      if (!deviceLoader.current.valid()) { connection.hardware.gatt.disconnect(); return; }
+      setConnectedBleDevice(connection.hardware); setBleGattServer(connection.server);
+      setChangeWifiDevice(saved); setWifiLookupFoundDev(saved); setWifiSelectedDevId(saved.deviceId);
+    } catch (error: any) { connection?.hardware?.gatt?.disconnect(); if (error.name !== 'NotFoundError') setWifiErrorMsg(error.response?.data?.message || error.message || 'Chưa kết nối được đúng nút.'); }
+    finally { wifiOperation.current = false; if (deviceLoader.current.valid()) setIsBleScanning(false); }
   };
 
   // Cập nhật cấu hình Wi-Fi trực tiếp trên Web / BLE / USB
   const handleSaveAndProvisionWifi = async () => {
-    const targetDev = changeWifiDevice || wifiLookupFoundDev || devices.find(d => d.deviceId === wifiSelectedDevId) || devices[0];
-    const devId = connectedBleDevice?.name || targetDev?.deviceId || 'BTN-8829-WTR';
-
-    if (!wifiSsidInput.trim()) {
-      setWifiErrorMsg('Vui lòng nhập Tên mạng Wi-Fi (2.4GHz)');
-      return;
-    }
-
-    setWifiUpdating(true);
-    setWifiErrorMsg(null);
-    setWifiSuccessMsg(null);
-
+    if (wifiOperation.current) return;
+    const target = changeWifiDevice || wifiLookupFoundDev || devices.find(d => d.deviceId === wifiSelectedDevId) || (wifiPanelTab === 'SELECT' ? devices[0] : null);
+    if (!target?.deviceId || !wifiSsidInput.trim()) { setWifiErrorMsg('Chọn đúng nút đã ghép nối và nhập tên Wi-Fi.'); return; }
+    wifiOperation.current = true; setWifiUpdating(true); setWifiErrorMsg(null); setWifiSuccessMsg(null);
     try {
-      // 1. Nếu đang ở tab BLE và đã kết nối
-      if (wifiPanelTab === 'BLE' && (connectedBleDevice || bleGattServer)) {
-        try {
-          let server = bleGattServer;
-          if (!server || !server.connected) {
-            if (connectedBleDevice?.gatt) {
-              server = await connectedBleDevice.gatt.connect();
-              setBleGattServer(server);
-            }
-          }
-          if (server) {
-            let service = null;
-            try {
-              service = await server.getPrimaryService('0000fff0-0000-1000-8000-00805f9b34fb');
-            } catch {
-              service = await server.getPrimaryService(0xfff0);
-            }
-            if (service) {
-              let char = await service.getCharacteristic('0000fff2-0000-1000-8000-00805f9b34fb').catch(() => null);
-              if (!char) {
-                char = await service.getCharacteristic('0000fff1-0000-1000-8000-00805f9b34fb').catch(() => null);
-              }
-              if (char) {
-                const encoder = new TextEncoder();
-                const payload = encoder.encode(`${wifiSsidInput.trim()}:${wifiPasswordInput}\n`);
-                try {
-                  if (typeof (char as any).writeValueWithResponse === 'function') {
-                    await (char as any).writeValueWithResponse(payload);
-                  } else if (typeof (char as any).writeValue === 'function') {
-                    await char.writeValue(payload);
-                  }
-                } catch (_e1) {
-                  if (typeof (char as any).writeValueWithoutResponse === 'function') {
-                    await (char as any).writeValueWithoutResponse(payload);
-                  }
-                }
-              }
-            }
-          }
-        } catch (_bleErr) {
-          // BLE write is best-effort; errors are non-critical
-        }
-      } else if (wifiPanelTab === 'USB' && typeof navigator !== 'undefined' && 'serial' in navigator) {
-        // 2. Nếu đang ở tab USB
-        try {
-          const port = await (navigator as any).serial.requestPort();
-          await port.open({ baudRate: 115200 });
-          const encoder = new TextEncoder();
-          const writer = port.writable.getWriter();
-          await writer.write(encoder.encode(`WIFI:${wifiSsidInput.trim()}:${wifiPasswordInput}\n`));
-          writer.releaseLock();
-          await port.close();
-        } catch (usbErr: any) {
-          // NotFoundError = user dismissed port picker, other errors are non-critical
-          void usbErr;
-        }
-      }
-
-      // 3. Luôn đồng bộ cấu hình Wi-Fi lên server
-      const res = await api.post(`/devices/${devId}/change-wifi`, {
-        ssid: wifiSsidInput.trim(),
-        password: wifiPasswordInput,
-      });
-
-      if (res.data.success) {
-        setWifiSuccessMsg(`Đã cập nhật Wi-Fi "${wifiSsidInput.trim()}" cho nút ${devId} thành công.`);
-        confetti({ particleCount: 60, spread: 60, origin: { y: 0.5 } });
-        fetchData();
-        setTimeout(() => {
-          setChangeWifiDevice(null);
-          setWifiSuccessMsg(null);
-        }, 1200);
-      }
-    } catch (err: any) {
-      setWifiErrorMsg(err.response?.data?.message || 'Không thể lưu cấu hình Wi-Fi');
-    } finally {
-      setWifiUpdating(false);
-    }
+      const saved = await readScopedDevice(api, target.deviceId, user);
+      if (!deviceLoader.current.valid()) return;
+      if (wifiPanelTab === 'BLE') {
+        await sendBleWifi(bleGattServer || connectedBleDevice?.gatt, saved.deviceId, wifiSsidInput, wifiPasswordInput);
+      } else if (wifiPanelTab === 'USB') {
+        if (!(navigator as any).serial) throw new Error('Trình duyệt chưa hỗ trợ USB Serial.');
+        if (/[:\r\n]/.test(wifiSsidInput) || /[\r\n]/.test(wifiPasswordInput)) throw new Error('Thông tin Wi-Fi không được chứa xuống dòng; tên Wi-Fi không được chứa dấu hai chấm.');
+        const port = await (navigator as any).serial.requestPort();
+        await port.open({ baudRate: 115200 });
+        try { const writer = port.writable.getWriter(); try { await writer.write(new TextEncoder().encode('WIFI:' + wifiSsidInput.trim() + ':' + wifiPasswordInput + '\n')); } finally { writer.releaseLock(); } } finally { await port.close(); }
+      } else throw new Error('Chọn Bluetooth hoặc USB để truyền cấu hình tới nút. Chỉ chọn nút trên web chưa thay đổi Wi-Fi trong phần cứng.');
+      if (!deviceLoader.current.valid()) return;
+      setWifiPasswordInput('');
+      setWifiSuccessMsg('Đã gửi cấu hình qua ' + (wifiPanelTab === 'USB' ? 'cổng USB bạn chọn; cần kiểm tra đúng nút vật lý' : 'Bluetooth tới nút ' + saved.deviceId) + '. Chờ nút khởi động lại và cập nhật kết nối Internet. Nút, cửa hàng và sản phẩm vẫn được giữ nguyên.');
+      void fetchData(true);
+    } catch (error: any) { if (deviceLoader.current.valid()) setWifiErrorMsg(error.response?.data?.message || error.message || 'Chưa gửi được cấu hình Wi-Fi.'); }
+    finally { wifiOperation.current = false; if (deviceLoader.current.valid()) setWifiUpdating(false); }
   };
 
   const handleSaveWifiOnWeb = async (devToConfig?: Device | null) => {
@@ -887,8 +816,8 @@ export const CustomerHomePage: React.FC = () => {
     setConfigModalDevice(dev);
     setConfigCustomName(dev.customName || dev.configuration?.customName || '');
     setConfigProductId(dev.configuration?.productId || dev.productId || '');
-    setConfigQuantity(dev.configuration?.defaultQuantity || 1);
-    setConfigStatus(dev.status === 'DISABLED' ? 'DISABLED' : 'ACTIVE');
+    setConfigQuantity(dev.configuration?.defaultQuantity || (dev as any).products?.[0]?.quantity || 1);
+    setConfigStatus(dev.status === 'ACTIVE' ? 'ACTIVE' : 'DISABLED');
     setConfigSuccessMsg(null);
     setConfigError(null);
   };
@@ -902,20 +831,10 @@ export const CustomerHomePage: React.FC = () => {
     setConfigLoading(true);
     setConfigError(null);
     try {
-      const res = await api.put(`/devices/${configModalDevice.id}/customer-config`, {
-        customName: configCustomName,
-        productId: configProductId,
-        defaultQuantity: configQuantity,
-        status: configStatus,
-      });
-      if (res.data.success) {
-        setConfigSuccessMsg('Đã lưu cấu hình nút thành công!');
-        const updatedDev = res.data.data;
-        if (updatedDev) {
-          setDevices((prev) =>
-            prev.map((d) => (d.id === updatedDev.id || d.deviceId === updatedDev.deviceId ? updatedDev : d))
-          );
-        }
+      const updatedDev = await saveCustomerDeviceConfig(api, configModalDevice.deviceId, configProductId, configQuantity, configCustomName, user, () => deviceLoader.current.valid());
+      if (deviceLoader.current.valid()) {
+        setConfigSuccessMsg('Máy chủ đã lưu đúng sản phẩm và số lượng cho nút này.');
+        setDevices(prev => prev.map(d => d.deviceId === updatedDev.deviceId ? updatedDev : d));
         await fetchData();
         setTimeout(() => {
           setConfigModalDevice(null);
@@ -1021,7 +940,7 @@ export const CustomerHomePage: React.FC = () => {
         {/* Minimalist Linear/Stripe Status Bar */}
         <div className="devices-status flex flex-wrap items-center gap-4 py-2.5 px-4 bg-slate-50 border border-slate-200/80 rounded-xl text-xs text-slate-600">
           <span className="inline-flex items-center gap-2 font-medium">
-            <span className="w-2 h-2 rounded-full bg-emerald-500 inline-block animate-pulse shrink-0" />
+            <span className={`w-2 h-2 rounded-full inline-block shrink-0 ${homeDevicesReady && customerDeviceMetrics.active > 0 ? "bg-emerald-500 motion-safe:animate-pulse" : "bg-slate-300"}`} />
             <span className="tabular-nums font-semibold text-slate-800">
               {!homeDevicesReady ? '—' : customerDeviceMetrics.active}/{!homeDevicesReady ? '—' : customerDeviceMetrics.total}
             </span>{' '}
@@ -1149,7 +1068,7 @@ export const CustomerHomePage: React.FC = () => {
             <div className="w-5 h-5 border-2 border-slate-300 border-t-[#0E6BA8] rounded-full animate-spin mx-auto mb-3" />
             Đang tải dữ liệu thiết bị...
           </div>
-        ) : devices.length === 0 ? (
+        ) : !homeDevicesReady ? <div role="status" className="py-12 text-center text-sm text-amber-800 dark:text-amber-300">Chưa đọc được danh sách nút từ hệ thống. Thiết bị đã lưu không bị xóa. <button type="button" onClick={() => void fetchData()} className="ml-2 font-semibold underline">Tải lại danh sách</button></div> : devices.length === 0 ? (
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
@@ -1186,9 +1105,9 @@ export const CustomerHomePage: React.FC = () => {
             {devices.map((dev) => {
               const cfg = dev.configuration;
               const product = cfg?.product || dev.product;
-              const isOnline = dev.status !== 'DISABLED';
-              const battery = dev.batteryLevel ?? 100;
-              const rssi = dev.wifiRSSI ?? -55;
+              const runtime = deviceRuntime(dev, deviceNow);
+              const battery = dev.batteryLevel ?? null;
+              const rssi = dev.wifiRSSI ?? null;
               const isPressing = pressingDeviceId === dev.deviceId;
               const getCleanProductCutout = (p?: Product | null): string => {
                 if (p?.imageUrl && !p.imageUrl.includes('photo-1548839140-29a749e1bc4e') && !p.imageUrl.includes('photo-1586201375761-83865001e31c')) {
@@ -1231,7 +1150,8 @@ export const CustomerHomePage: React.FC = () => {
                   name={name}
                   productDesc={productDesc}
                   priceStr={priceStr}
-                  isOnline={isOnline}
+                  runtime={runtime}
+                  error={deviceErrors[dev.deviceId]}
                   battery={battery}
                   rssi={rssi}
                   isPressing={isPressing}
@@ -1261,7 +1181,7 @@ export const CustomerHomePage: React.FC = () => {
             <span className="text-xs text-slate-400 tabular-nums">5 đơn gần nhất</span>
           </div>
         </div>
-        {orders.length === 0 ? (
+        {!orderListReady ? <div role="status" className="py-10 text-center text-sm text-slate-500">{ordersLoading ? 'Đang tải lịch sử đơn hàng…' : 'Chưa đọc được lịch sử đơn hàng.'}{!ordersLoading && <button type="button" onClick={() => void fetchData()} className="ml-2 font-semibold text-[#287DA8] underline">Tải lại</button>}</div> : orders.length === 0 ? (
           <div className="py-12 text-center bg-white border border-slate-200/80 rounded-xl">
             <ShoppingBag className="w-8 h-8 text-slate-300 mx-auto mb-2.5" />
             <p className="text-sm font-medium text-slate-600">Chưa có đơn hàng nào</p>
@@ -1504,10 +1424,10 @@ export const CustomerHomePage: React.FC = () => {
                         <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
                         <div>
                           <div className="font-semibold text-slate-900 dark:text-white tabular-nums text-sm">
-                            {connectedBleDevice?.name || (changeWifiDevice || wifiLookupFoundDev)?.deviceId || wifiSelectedDevId || 'BTN-8829-WTR'}
+                            {(changeWifiDevice || wifiLookupFoundDev)?.deviceId || wifiSelectedDevId || 'Chưa xác nhận mã nút'}
                           </div>
                           <div className="text-xs text-slate-500 dark:text-slate-400">
-                            Đã kết nối · Sẵn sàng nạp Wi-Fi
+                            Đã chọn nút · Bluetooth cần được xác nhận trước khi nạp
                           </div>
                         </div>
                       </div>
@@ -1771,7 +1691,7 @@ export const CustomerHomePage: React.FC = () => {
                   </span>
                   <span>·</span>
                   <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                    {configStatus === 'ACTIVE' ? 'Đang hoạt động' : 'Tạm khóa'}
+                    {deviceRuntime(devices.find(d => d.deviceId === configModalDevice.deviceId) || configModalDevice, deviceNow).label}
                   </span>
                 </div>
               </div>
@@ -1827,7 +1747,7 @@ export const CustomerHomePage: React.FC = () => {
                       className="w-full px-3 py-2 text-sm rounded-lg bg-white dark:bg-zinc-900 border border-slate-200/90 dark:border-zinc-800 text-slate-900 dark:text-white tabular-nums focus:outline-none focus:ring-2 focus:ring-[#0E6BA8]/20 focus:border-[#0E6BA8] transition-all"
                     >
                       <option value="">-- Chọn sản phẩm --</option>
-                      {availableProducts.map((p) => (
+                      {availableProducts.filter(p => String(p.storeId) === String(configModalDevice.storeId)).map((p) => (
                         <option key={p.id} value={p.id}>
                           {p.name} {p.unit ? `(${p.unit})` : ''} — {p.price?.toLocaleString('vi-VN')} đ
                         </option>
@@ -1877,13 +1797,13 @@ export const CustomerHomePage: React.FC = () => {
                     Cho phép đặt hàng từ nút này
                   </h4>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Tạm khóa nút nếu bạn đi vắng hoặc sợ trẻ nhỏ bấm nhầm
+                    Trạng thái được hệ thống và cửa hàng quản lý; liên hệ cửa hàng nếu cần tạm ngừng nút.
                   </p>
                 </div>
                 <motion.button
                   whileTap={{ scale: 0.92 }}
                   type="button"
-                  onClick={() => setConfigStatus((prev) => (prev === 'ACTIVE' ? 'DISABLED' : 'ACTIVE'))}
+                  disabled aria-label="Trạng thái nút do cửa hàng quản lý" title="Trạng thái nút do cửa hàng quản lý"
                   className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
                     configStatus === 'ACTIVE' ? 'bg-[#0E6BA8]' : 'bg-slate-200 dark:bg-zinc-700'
                   }`}
@@ -2052,14 +1972,14 @@ export const CustomerHomePage: React.FC = () => {
       )}
 
       {/* Apple-Style AirPods White Device Pairing Modal */}
-      <WhiteDeviceAirPodsModal
+      {showAirPodsModal && <Suspense fallback={<p role="status" className="fixed bottom-5 right-5 rounded-xl bg-white p-4 shadow-lg">Đang mở kết nối nút…</p>}><WhiteDeviceAirPodsModal
         isOpen={showAirPodsModal}
         onClose={() => setShowAirPodsModal(false)}
         availableProducts={availableProducts}
         onDeviceBound={() => {
           fetchData();
         }}
-      />
+      /></Suspense>}
 
       {/* Customer Store Selector Modal (GPS Radius & Store Code Discovery) */}
       <CustomerStoreSelectorModal

@@ -184,6 +184,7 @@ export interface OrderItem {
 
 export interface Order {
   id: string;
+  assignedDriverId?: string | null;
   orderId?: string;
   orderCode?: string;
   orderStatus?: string;
@@ -197,6 +198,10 @@ export interface Order {
     | 'PENDING'
     | 'CONFIRMED'
     | 'PREPARING'
+    | 'READY_FOR_DELIVERY'
+    | 'SHIPPING'
+    | 'DELIVERED'
+    | 'DELIVERY_FAILED'
     | 'OUT_FOR_DELIVERY'
     | 'COMPLETED'
     | 'CANCELLED'
@@ -210,6 +215,10 @@ export interface Order {
   shippingLongitude?: number | null;
   customerPhone: string;
   customerName: string;
+  shippingRecipientName?: string | null;
+  shippingPhone?: string | null;
+  recipientPhone?: string | null;
+  shippingAddress?: string | null;
   cancelExpiresAt?: string | null;
   cancelledAt?: string | null;
   cancellationReason?: string | null;
