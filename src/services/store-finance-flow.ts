@@ -33,6 +33,7 @@ export interface FinanceVerification {
   recipientAccountNumber?: string;
   recipientAccountHolder?: string;
   qrCodeUrl?: string;
+  checkoutUrl?: string;
   initialAccountStatus?: string;
 }
 
@@ -57,6 +58,9 @@ export function financeLookupError(error: any) {
   if (code === 'BANK_LOOKUP_UNAVAILABLE') {
     return 'Hệ thống chưa tra cứu được tên chủ tài khoản từ dịch vụ ngân hàng. Hãy kiểm tra lại ngân hàng và số tài khoản. Nếu thông tin đã đúng, vui lòng thử lại sau hoặc gửi mã BANK_LOOKUP_UNAVAILABLE cho bộ phận hỗ trợ. Chưa thể tạo yêu cầu xác minh.';
   }
+  if (code === 'ACCOUNT_NAME_UNRESOLVED') {
+    return 'Dịch vụ tra cứu tên chủ tài khoản tự động hiện không khả dụng ở gói ngân hàng hiện tại. Hãy nhập đúng tên chủ tài khoản để tiếp tục xác minh qua chuyển khoản 2.000 ₫.';
+  }
   return financeError(error);
 }
 
@@ -77,11 +81,19 @@ export function financeStoreId(user: any): string | null {
   return candidate && /^[1-9]\d*$/.test(String(candidate)) ? String(candidate) : null;
 }
 
-export function bankVerificationPayload(storeId: string, bankBin: string, accountNumber: string) {
+export function bankVerificationPayload(storeId: string, bankBin: string, accountNumber: string, accountName?: string) {
   const account = accountNumber.trim();
   if (!/^[0-9]{6}$/.test(bankBin)) throw new Error('Vui lòng chọn ngân hàng.');
   if (!/^[0-9a-zA-Z]{5,30}$/.test(account)) throw new Error('Số tài khoản cần có từ 5 đến 30 chữ hoặc số, không có khoảng trắng.');
-  return { storeId: positiveId(storeId), bankBin, accountNumber: account };
+  const normalizedName = accountName?.trim()
+    ? accountName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'D').trim().replace(/\s+/g, ' ').toUpperCase()
+    : '';
+  if (accountName !== undefined && !/^[A-Z ]{2,150}$/.test(normalizedName)) {
+    throw new Error('Vui lòng nhập tên chủ tài khoản bằng chữ, đúng tên tại ngân hàng.');
+  }
+  return normalizedName
+    ? { storeId: positiveId(storeId), bankBin, accountNumber: account, accountName: normalizedName }
+    : { storeId: positiveId(storeId), bankBin, accountNumber: account };
 }
 
 export function canSetFinanceDefault(account: FinanceBankAccount) {
@@ -129,8 +141,8 @@ export function createStoreFinanceFlow(transport: FinanceTransport) {
       if (!result?.accountName || result.bankBin !== bankBin) throw new Error('Chưa xác nhận được tên chủ tài khoản. Vui lòng kiểm tra lại.');
       return result;
     },
-    async verify(storeId: string, bankBin: string, accountNumber: string) {
-      const result = financeData<FinanceVerification>(await transport.post('/stores/bank-accounts/verification', bankVerificationPayload(storeId, bankBin, accountNumber)));
+    async verify(storeId: string, bankBin: string, accountNumber: string, accountName?: string) {
+      const result = financeData<FinanceVerification>(await transport.post('/stores/bank-accounts/verification', bankVerificationPayload(storeId, bankBin, accountNumber, accountName)));
       const validated = readFinanceVerification(JSON.stringify(result));
       if (!validated) throw new Error('Yêu cầu đã gửi nhưng thông tin hướng dẫn chưa đầy đủ. Hãy tải lại tài khoản trước khi thử lại.');
       return validated;

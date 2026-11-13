@@ -9,7 +9,7 @@ import { StoreSubscriptionPayments } from '../../components/store/StoreSubscript
 import { StoreBankVerificationHistory } from '../../components/store/StoreBankVerificationHistory';
 import { StoreRegisteredPeriods } from '../../components/store/StoreRegisteredPeriods';
 import { BankTransferInstructions } from '../../components/common/BankingPrimitives';
-import { createBankingFlow, type StoreBankTransaction } from '../../services/banking-flow';
+import { createBankingFlow, storeFailureMessage, type StoreBankTransaction } from '../../services/banking-flow';
 import { getApiRetryUntil } from '../../services/request-backoff';
 import { subscriptionDateLabel, subscriptionMoney, subscriptionNumber, subscriptionOverview, validateStoreSubscription } from '../../services/store-subscription-overview';
 import { bankVerificationPayload, canSetFinanceDefault, createStoreFinanceFlow, financeError, financeLookupError, financeStoreId, financeVerificationExpired, financeVerificationKey, readFinanceVerification, type FinanceBank, type FinanceBankAccount, type FinanceVerification } from '../../services/store-finance-flow';
@@ -20,17 +20,18 @@ const secondaryButton = 'inline-flex min-h-10 items-center justify-center gap-2 
 const inputClass = 'mt-1.5 min-h-11 w-full rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/15 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-white';
 const statusLabel = (status?: string) => ({ OWNERSHIP_VERIFIED: 'Đã xác minh chính chủ', PENDING: 'Chờ xác minh', SUSPENDED: 'Tạm khóa', REVOKED: 'Đã thu hồi' }[status || ''] || 'Chưa xác minh');
 
-export function financeViewForHash(hash: string) {
+export function financeViewForHash(hash: string, search = '') {
   if (hash === '#subscription-payments') return 'payments';
   if (['#store-bank-accounts', '#store-bank-verification-history', '#bank-verification-title'].includes(hash)) return 'banks';
+  if (!hash && /(?:^|[?&])status=(success|cancelled)(?:&|$)/.test(search)) return 'banks';
   return 'current';
 }
 type AccountAction = { kind: 'default' | 'delete'; account: FinanceBankAccount } | { kind: 'cancel' };
 
 export const StoreFinancePage: React.FC = () => {
   const { user } = useAuth();
-  const { hash } = useLocation();
-  const view = financeViewForHash(hash);
+  const { hash, search = '' } = useLocation();
+  const view = financeViewForHash(hash, search);
   const heading = {
     current: { title: 'Gói đang dùng', description: 'Theo dõi gói hiện tại, thời hạn sử dụng và các kỳ đã đăng ký của gian hàng.' },
     payments: { title: 'Chi phí & lịch sử đóng tiền', description: 'Xem các khoản phí và giao dịch đóng tiền đã được hệ thống ghi nhận.' },
@@ -66,6 +67,8 @@ export const StoreFinancePage: React.FC = () => {
   const [bankBin, setBankBin] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [lookup, setLookup] = useState<Awaited<ReturnType<typeof flow.lookup>> | null>(null);
+  const [manualNameRequired, setManualNameRequired] = useState(false);
+  const [manualAccountName, setManualAccountName] = useState('');
   const [nameConfirmed, setNameConfirmed] = useState(false);
   const [formError, setFormError] = useState('');
   const [creationUncertain, setCreationUncertain] = useState(false);
@@ -102,7 +105,7 @@ export const StoreFinancePage: React.FC = () => {
       referenceCode: transaction.referenceCode, amount: transaction.expectedAmount, expiresAt: transaction.expiresAt,
       instructions: transaction.instructions || '', recipientBankBin: transaction.recipientBankBin,
       recipientBankName: transaction.recipientBankName, recipientAccountNumber: transaction.recipientAccountNumber,
-      recipientAccountHolder: transaction.recipientAccountHolder, qrCodeUrl: transaction.qrCodeUrl }));
+      recipientAccountHolder: transaction.recipientAccountHolder, qrCodeUrl: transaction.qrCodeUrl, ...(transaction.checkoutUrl ? { checkoutUrl: transaction.checkoutUrl } : {}) }));
     if (!request) return false;
     if (JSON.stringify(requestRef.current) === JSON.stringify(request)) return true;
     if (!sameRequest) { setAction(null); setActionError(''); setCreationUncertain(false); setFormOpen(false); setLookup(null); setNameConfirmed(false); }
@@ -153,7 +156,7 @@ export const StoreFinancePage: React.FC = () => {
     requestRef.current = saved; setActiveRequest(saved); setRequestChecked(false);
     subscriptionOwner.current = scope;
     operationRef.current = ''; setOperation('');
-    setAccounts([]); setSubscription(null); setFormOpen(false); setAction(null); setNotice(''); setActionError(''); setFormError(''); setLookup(null); setNameConfirmed(false); setBankBin(''); setAccountNumber(''); setBanks([]); setBanksLoading(false); setBanksError(''); setCreationUncertain(false);
+    setAccounts([]); setSubscription(null); setFormOpen(false); setAction(null); setNotice(''); setActionError(''); setFormError(''); setLookup(null); setManualNameRequired(false); setManualAccountName(''); setNameConfirmed(false); setBankBin(''); setAccountNumber(''); setBanks([]); setBanksLoading(false); setBanksError(''); setCreationUncertain(false);
     setAccountsError(''); setAccountsLoading(canManageBanks && !!storeId);
     void loadSubscription();
     if (canManageBanks && storeId) void loadAccounts();
@@ -181,7 +184,14 @@ export const StoreFinancePage: React.FC = () => {
       try {
         const result = await banking.storeDetail(storeId, activeRequest.verificationId);
         if (stopped || scopeRef.current !== scope || requestRef.current?.verificationId !== result.verificationId) return;
-        if (result.status !== 'PENDING') { saveRequest(null); setBankRefresh(value => value + 1); setNotice('Phiên xác minh đã cập nhật. Xem kết quả xác minh và trạng thái hoàn tiền riêng tại lịch sử bên dưới.'); }
+        if (result.status !== 'PENDING') {
+          saveRequest(null); setBankRefresh(value => value + 1);
+          if (['VERIFIED', 'REFUND_PENDING', 'REFUNDED'].includes(result.status)) {
+            setNotice('Phiên xác minh đã cập nhật. Tài khoản đã xác minh chính chủ; trạng thái hoàn tiền được cập nhật tại lịch sử bên dưới.');
+          } else {
+            setActionError(result.status === 'EXPIRED' ? 'Phiên xác minh đã hết hạn. Vui lòng tạo yêu cầu mới nếu bạn chưa chuyển tiền.' : `Phiên xác minh chưa thành công: ${storeFailureMessage(result.failureReason)}`);
+          }
+        }
         else { restoreRequest(result); setRequestChecked(true); }
         await loadAccounts(true);
       } catch (error) {
@@ -193,10 +203,11 @@ export const StoreFinancePage: React.FC = () => {
     void refresh();
     const timer = window.setInterval(refresh, 4000);
     document.addEventListener('visibilitychange', refresh);
-    return () => { stopped = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh); };
+    window.addEventListener?.('focus', refresh);
+    return () => { stopped = true; window.clearInterval(timer); document.removeEventListener('visibilitychange', refresh); window.removeEventListener?.('focus', refresh); };
   }, [activeRequest, canManageBanks, storeId, scope, saveRequest, restoreRequest, loadAccounts, requestRefresh]);
 
-  const clearLookup = () => { lookupRequest.current += 1; setLookup(null); setNameConfirmed(false); setFormError(''); };
+  const clearLookup = () => { lookupRequest.current += 1; setLookup(null); setManualNameRequired(false); setManualAccountName(''); setNameConfirmed(false); setFormError(''); };
   const closeForm = () => { if (operationRef.current) return; setFormOpen(false); setFormError(''); addRef.current?.focus(); };
   const begin = useCallback((kind: string) => { if (operationRef.current) return false; operationRef.current = kind; setOperation(kind); setNotice(''); setActionError(''); return true; }, []);
   const end = useCallback(() => { if (scopeRef.current === scope) { operationRef.current = ''; setOperation(''); } }, [scope]);
@@ -214,12 +225,17 @@ export const StoreFinancePage: React.FC = () => {
     if (lookupTimer.current !== null) { window.clearTimeout(lookupTimer.current); lookupTimer.current = null; }
     if (!storeId || !canManageBanks || !begin('lookup')) return;
     const request = ++lookupRequest.current;
-    setFormError(''); setLookup(null); setNameConfirmed(false);
+    setFormError(''); setLookup(null); setManualNameRequired(false); setNameConfirmed(false);
     try {
       bankVerificationPayload(storeId, bankBin, accountNumber);
       const result = await flow.lookup(bankBin, accountNumber);
       if (request === lookupRequest.current && scopeRef.current === scope) setLookup(result);
-    } catch (error) { if (request === lookupRequest.current && scopeRef.current === scope) setFormError(financeLookupError(error)); }
+    } catch (error: any) {
+      if (request === lookupRequest.current && scopeRef.current === scope) {
+        if ((error?.response?.data?.errorCode || error?.response?.data?.code) === 'ACCOUNT_NAME_UNRESOLVED') setManualNameRequired(true);
+        setFormError(financeLookupError(error));
+      }
+    }
     finally { end(); }
   }, [storeId, canManageBanks, bankBin, accountNumber, begin, end, scope]);
   useEffect(() => {
@@ -231,12 +247,13 @@ export const StoreFinancePage: React.FC = () => {
     return () => { window.clearTimeout(timer); if (lookupTimer.current === timer) lookupTimer.current = null; };
   }, [formOpen, view, canManageBanks, storeId, banksLoading, bankBin, accountNumber, lookupAccount]);
   const createVerification = async () => {
-    if (!storeId || !canManageBanks || !lookup || !nameConfirmed || activeRequest || creationUncertain || !begin('create')) return;
+    const validManual = manualNameRequired && Boolean(manualAccountName.trim());
+    if (!storeId || !canManageBanks || (!lookup && !validManual) || !nameConfirmed || activeRequest || creationUncertain || !begin('create')) return;
     setFormError('');
     try {
-      const request = await flow.verify(storeId, bankBin, accountNumber);
+      const request = await flow.verify(storeId, bankBin, accountNumber, lookup ? undefined : manualAccountName);
       if (scopeRef.current !== scope) return;
-      saveRequest({ ...request, initialAccountStatus: accounts.find(account => String(account.id) === request.bankAccountId)?.verificationStatus || 'PENDING' }); setRequestChecked(true); setNow(Date.now()); setFormOpen(false); setLookup(null); setNameConfirmed(false); setAccountNumber('');
+      saveRequest({ ...request, initialAccountStatus: accounts.find(account => String(account.id) === request.bankAccountId)?.verificationStatus || 'PENDING' }); setRequestChecked(true); setNow(Date.now()); setFormOpen(false); setLookup(null); setManualNameRequired(false); setManualAccountName(''); setNameConfirmed(false); setAccountNumber('');
       setNotice('Đã tạo yêu cầu xác minh. Tài khoản chỉ được xác nhận sau khi ngân hàng trả kết quả.');
       setBankRefresh(value => value + 1);
       await loadAccounts();
@@ -349,7 +366,7 @@ export const StoreFinancePage: React.FC = () => {
         <AnimatePresence initial={false}>{formOpen && <motion.div id="bank-account-form" key="bank-form" initial={{ opacity: reducedMotion ? 1 : 0, height: reducedMotion ? 'auto' : 0 }} animate={{ opacity: 1, height: 'auto' }} exit={{ opacity: reducedMotion ? 1 : 0, height: reducedMotion ? 'auto' : 0 }} transition={{ duration: reducedMotion ? 0 : 0.2 }} className="overflow-hidden"><div className="mt-5 rounded-xl border border-zinc-200 bg-zinc-50 p-4 sm:p-5 dark:border-zinc-800 dark:bg-zinc-950/50">
           <div className="flex items-center justify-between gap-3"><h3 className="font-semibold text-zinc-900 dark:text-white">Xác minh tài khoản mới</h3><button type="button" onClick={closeForm} disabled={isBusy} className="rounded-lg p-2 text-zinc-500 hover:bg-zinc-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287DA8] dark:hover:bg-zinc-800" aria-label="Đóng biểu mẫu ngân hàng"><X className="h-4 w-4" /></button></div><p className="mt-2 text-sm leading-6 text-zinc-500 dark:text-zinc-400">Chọn ngân hàng và nhập số tài khoản. Hệ thống tự tra cứu tên chủ tài khoản sau khi bạn ngừng nhập.</p>
           <form onSubmit={lookupAccount} className="mt-4 space-y-4"><p role="status" className="text-xs text-zinc-500 dark:text-zinc-400">{operation === 'lookup' ? 'Đang tra cứu tên chủ tài khoản…' : 'Tự động tra cứu sau khi ngừng nhập 0,7 giây. Bạn vẫn có thể bấm nút bên dưới để tra cứu lại.'}</p><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Ngân hàng<select ref={formRef} value={bankBin} onChange={event => { setBankBin(event.target.value); clearLookup(); }} className={inputClass} disabled={isBusy || banksLoading} required><option value="">{banksLoading ? 'Đang tải ngân hàng…' : 'Chọn ngân hàng'}</option>{banks.map(bank => <option key={bank.bin} value={bank.bin}>{bank.shortName} — {bank.name}</option>)}</select></label><label className="text-sm font-medium text-zinc-700 dark:text-zinc-300">Số tài khoản<input value={accountNumber} onChange={event => { setAccountNumber(event.target.value); clearLookup(); }} className={inputClass} type="text" autoComplete="off" spellCheck={false} minLength={5} maxLength={30} pattern="[0-9a-zA-Z]{5,30}" disabled={isBusy} placeholder="Nhập số tài khoản" required /></label></div>{banksError && <div role="alert" className="text-sm text-rose-700 dark:text-rose-300"><p>{banksError}</p><button type="button" onClick={() => void loadBanks()} disabled={banksLoading} className="mt-1 font-semibold underline underline-offset-4">Tải lại danh sách ngân hàng</button></div>}<button type="submit" disabled={isBusy || !bankBin || !accountNumber.trim() || banksLoading} className={secondaryButton}>{operation === 'lookup' ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <Landmark className="h-4 w-4" />}Tra cứu chủ tài khoản</button></form>
-          {lookup && <div className="mt-4 rounded-lg border border-sky-200 bg-white p-4 dark:border-sky-900 dark:bg-zinc-900"><p className="text-xs text-zinc-500 dark:text-zinc-400">Tên do ngân hàng cung cấp</p><p className="mt-1 break-words text-base font-semibold text-zinc-900 dark:text-white">{lookup.accountName}</p><p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{lookup.bankName} · {lookup.accountNumberMasked}</p><label className="mt-4 flex cursor-pointer items-start gap-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300"><input type="checkbox" className="mt-1 h-4 w-4 shrink-0 accent-[#287DA8]" checked={nameConfirmed} onChange={event => setNameConfirmed(event.target.checked)} disabled={isBusy} />Tôi đã kiểm tra và xác nhận đây là tài khoản của mình.</label><p className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">Bước tiếp theo sẽ hiển thị hướng dẫn chuyển tiền do hệ thống cung cấp. Chỉ chuyển khi có đủ thông tin người nhận và phiên còn hạn.</p><button type="button" onClick={createVerification} disabled={isBusy || !nameConfirmed || creationUncertain} className={`${primaryButton} mt-4 min-h-10 text-sm`}>{operation === 'create' ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <ShieldCheck className="h-4 w-4" />}Tạo yêu cầu xác minh</button></div>}
+          {(lookup || manualNameRequired) && <div className="mt-4 rounded-lg border border-sky-200 bg-white p-4 dark:border-sky-900 dark:bg-zinc-900">{lookup ? <><p className="text-xs text-zinc-500 dark:text-zinc-400">Tên do ngân hàng cung cấp</p><p className="mt-1 break-words text-base font-semibold text-zinc-900 dark:text-white">{lookup.accountName}</p><p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{lookup.bankName} · {lookup.accountNumberMasked}</p></> : <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300">Tên chủ tài khoản<input value={manualAccountName} onChange={event => setManualAccountName(event.target.value)} className={inputClass} type="text" maxLength={150} disabled={isBusy} placeholder="Ví dụ: NGUYEN VAN A" required /><span className="mt-1 block text-xs font-normal text-zinc-500 dark:text-zinc-400">Nhập đúng tên chủ tài khoản tại ngân hàng để đối chiếu khi chuyển 2.000 ₫.</span></label>}<label className="mt-4 flex cursor-pointer items-start gap-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300"><input type="checkbox" className="mt-1 h-4 w-4 shrink-0 accent-[#287DA8]" checked={nameConfirmed} onChange={event => setNameConfirmed(event.target.checked)} disabled={isBusy} />Tôi đã kiểm tra và xác nhận đây là tài khoản của mình.</label><p className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">Bước tiếp theo sẽ hiển thị hướng dẫn chuyển tiền do hệ thống cung cấp. Chỉ chuyển khi có đủ thông tin người nhận và phiên còn hạn.</p><button type="button" onClick={createVerification} disabled={isBusy || !nameConfirmed || creationUncertain || (!lookup && !manualAccountName.trim())} className={`${primaryButton} mt-4 min-h-10 text-sm`}>{operation === 'create' ? <Loader2 className="h-4 w-4 motion-safe:animate-spin" /> : <ShieldCheck className="h-4 w-4" />}Tạo yêu cầu xác minh</button></div>}
           {formError && <p role="alert" className="mt-4 text-sm leading-6 text-rose-700 dark:text-rose-300">{formError}</p>}{creationUncertain && <button type="button" disabled={isBusy} className={`${secondaryButton} mt-3`} onClick={async () => { if (!begin("recover")) return; try { await recoverExistingVerification(); } catch (error) { if (scopeRef.current === scope) setFormError(financeError(error)); } finally { end(); } }}><RefreshCw size={16} />Kiểm tra phiên đang chờ</button>}
         </div></motion.div>}</AnimatePresence>
         <AnimatePresence initial={false}>{action && <motion.div key="bank-confirmation" {...entrance} exit={{ opacity: 0 }} className="mt-5 rounded-xl border border-sky-200 bg-sky-50/60 p-4 dark:border-sky-900 dark:bg-sky-950/20"><h3 ref={actionRef} tabIndex={-1} className="font-semibold text-zinc-900 outline-none dark:text-white">{action.kind === 'delete' ? 'Xóa tài khoản ngân hàng?' : action.kind === 'default' ? 'Chọn làm tài khoản mặc định?' : 'Hủy yêu cầu xác minh?'}</h3><p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{action.kind === 'cancel' ? 'Yêu cầu hiện tại sẽ ngừng chờ xác minh. Nếu đã chuyển tiền, hãy kiểm tra với quản trị viên trước khi hủy.' : `${action.account.bankName} · ${action.account.accountNumberMasked} · ${action.account.accountName}`}</p>{action.kind === 'delete' && <p className="mt-1 text-sm leading-6 text-zinc-500 dark:text-zinc-400">{action.account.isDefault ? 'Tài khoản này đang được đánh dấu mặc định. Sau khi xóa, bạn cần chọn lại một tài khoản đã xác minh khác.' : 'Thao tác xóa không thể hoàn tác. Yêu cầu xác minh đang chờ cần được hủy trước.'}</p>}<div className="mt-4 flex flex-wrap gap-2"><button type="button" disabled={isBusy} onClick={confirmAction} className={`${primaryButton} min-h-10 text-sm ${action.kind === 'delete' ? 'bg-rose-600 hover:bg-rose-700' : ''}`}>{operation === 'action' && <Loader2 className="h-4 w-4 motion-safe:animate-spin" />}{action.kind === 'delete' ? 'Xác nhận xóa' : action.kind === 'default' ? 'Đặt làm mặc định' : 'Xác nhận hủy'}</button><button type="button" disabled={isBusy} onClick={() => { setAction(null); setActionError(''); }} className={secondaryButton}>Giữ nguyên</button></div></motion.div>}</AnimatePresence>

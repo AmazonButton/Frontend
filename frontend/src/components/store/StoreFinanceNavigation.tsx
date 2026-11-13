@@ -10,11 +10,12 @@ export const STORE_FINANCE_LINKS = [
   { to: '/store/finance#store-bank-accounts', label: 'Tài khoản ngân hàng', icon: Landmark },
 ];
 
-export function isStoreFinanceLinkActive(to: string, pathname: string, hash: string) {
+export function isStoreFinanceLinkActive(to: string, pathname: string, hash: string, search = '') {
   if (to === '/store/service-plans') return pathname === to;
   if (pathname !== '/store/finance') return false;
   const anchor = to.split('#')[1];
   if (anchor === 'store-bank-accounts' && ['#store-bank-verification-history', '#bank-verification-title'].includes(hash)) return true;
+  if (!hash && /(?:^|[?&])status=(success|cancelled)(?:&|$)/.test(search)) return anchor === 'store-bank-accounts';
   return (hash || '#subscription-current') === `#${anchor}`;
 }
 
@@ -43,7 +44,7 @@ export const StoreFinanceNavigation: React.FC<{
       {expanded && !collapsed && <motion.div id={submenuId} key="finance-submenu" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18, ease: 'easeOut' }} className="overflow-hidden">
         <ul className="my-1 ml-5 space-y-1 border-l border-zinc-200 pl-2 dark:border-zinc-800">
           {STORE_FINANCE_LINKS.filter(item => !item.ownerOnly || canRegister).map(({ to, label, icon: Icon }) => {
-            const active = isStoreFinanceLinkActive(to, location.pathname, location.hash || '');
+            const active = isStoreFinanceLinkActive(to, location.pathname, location.hash || '', location.search || '');
             return <li key={to}><Link to={to} onClick={() => {
               onNavigate?.();
               if (active && to.includes('#')) document.getElementById?.(to.split('#')[1])?.scrollIntoView({ behavior: reducedMotion ? 'auto' : 'smooth', block: 'start' });

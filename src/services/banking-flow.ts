@@ -34,7 +34,7 @@ export interface StoreBankTransaction {
   expectedAmount: number; actualAmount: number | null; status: string; refundStatus: string;
   expiresAt: string; verifiedAt?: string | null; createdAt: string;
   recipientBankBin?: string; recipientBankName?: string; recipientAccountNumber?: string;
-  recipientAccountHolder?: string; qrCodeUrl?: string; instructions?: string; failureReason?: string | null;
+  recipientAccountHolder?: string; qrCodeUrl?: string; checkoutUrl?: string; instructions?: string; failureReason?: string | null;
 }
 export interface BankingPage<T> { items: T[]; page: number; pageSize: number; total: number; pages: number }
 
@@ -54,13 +54,32 @@ export function bankRefundMessage(status: string | null | undefined, amount: unk
     PENDING: `Hệ thống đang chờ chuyển hoàn ${value}.`,
     PROCESSING: `Hệ thống đang xử lý chuyển hoàn ${value}; chưa xác nhận tiền đã về tài khoản.`,
     PENDING_RECONCILIATION: `Khoản hoàn ${value} đang chờ đối soát kết quả chi trả.`,
+    PENDING_MANUAL_REFUND: `Khoản hoàn ${value} đang chờ xử lý hoàn thủ công (thiếu thông tin tài khoản nguồn hoặc cần đối soát); vui lòng liên hệ hỗ trợ nếu cần.`,
+    PARTIALLY_REFUNDED: `Hệ thống đã hoàn một phần cho ${value}; phần còn lại đang được xử lý.`,
     FAILED_RETRY: `Khoản hoàn ${value} đang chờ hệ thống tự động thử lại.`,
     SUCCESS: `Hệ thống đã xác nhận hoàn ${value}.`,
     REFUNDED: `Hệ thống đã xác nhận hoàn ${value}.`,
+    REFUND_FAILED: `Khoản hoàn ${value} chưa thành công. Kiểm tra lại trạng thái hoặc liên hệ hỗ trợ.`,
     FAILED: `Khoản hoàn ${value} chưa thành công. Kiểm tra lại trạng thái hoặc liên hệ hỗ trợ.`,
+    NONE: 'Chưa ghi nhận yêu cầu hoàn tiền cho giao dịch này.',
   } as Record<string, string>)[status || ''] || 'Kết quả hoàn tiền được cập nhật riêng sau khi hệ thống xử lý; chưa có xác nhận hoàn thành.';
 }
 
+export function storeFailureMessage(reason?: string | null) {
+  return ({
+    SENDER_ACCOUNT_UNVERIFIABLE: 'Chưa nhận được số tài khoản chuyển tiền đầy đủ từ PayOS/ngân hàng (hoặc bị che dấu *). Nếu bạn đã chuyển 2.000 ₫, khoản tiền đang chờ hỗ trợ hoàn thủ công.',
+    SENDER_ACCOUNT_MISMATCH: 'Số tài khoản chuyển tiền không khớp với tài khoản cửa hàng đang xác minh.',
+    SENDER_BANK_MISMATCH: 'Ngân hàng chuyển tiền không khớp với ngân hàng đã đăng ký xác minh.',
+    AMOUNT_MISMATCH: 'Số tiền nhận được không khớp đúng số tiền yêu cầu xác minh.',
+    EXPIRED: 'Giao dịch được ghi nhận sau khi phiên xác minh đã hết hạn.',
+    USER_CANCELLED: 'Yêu cầu xác minh đã được hủy.',
+    DESTINATION_BANK_UNVERIFIABLE: 'Chưa xác thực được ngân hàng nhận tiền xác minh từ cổng thanh toán.',
+    DESTINATION_ACCOUNT_UNVERIFIABLE: 'Chưa xác thực được số tài khoản nhận tiền xác minh từ cổng thanh toán.',
+    DESTINATION_BANK_MISMATCH: 'Ngân hàng nhận tiền giao dịch không khớp kênh nhận xác minh của hệ thống.',
+    DESTINATION_ACCOUNT_MISMATCH: 'Tài khoản nhận tiền giao dịch không khớp kênh nhận xác minh của hệ thống.',
+    DUPLICATE_PROVIDER_TRANSACTION: 'Mã giao dịch ngân hàng này đã được ghi nhận cho một phiên xác minh khác.',
+  } as Record<string, string>)[reason || ''] || (reason ? `Lý do: ${reason}` : 'Yêu cầu xác minh chưa thành công.');
+}
 export function bankingId(value: unknown) {
   const id = String(value ?? '');
   if (!/^[1-9]\d*$/.test(id)) throw new Error('Không tìm thấy tài khoản hoặc cửa hàng hợp lệ.');
@@ -118,11 +137,19 @@ export function customerBankNeedsPolling(status: CustomerBankStatus | null, now 
   if (!session) return false;
   const waitingForPayment = session.sessionStatus === 'ACTIVE' && !session.isExpired && !bankSessionExpired(session.expiresAt, now)
     && status?.accountVerificationStatus !== 'VERIFIED';
-  return waitingForPayment || ['PENDING_REFUND', 'PROCESSING_REFUND', 'PARTIALLY_REFUNDED'].includes(session.refundStatus)
+  const waitingForActivation = ['PAID', 'PENDING_RECONCILIATION'].includes(session.paymentStatus)
+    && status?.accountVerificationStatus !== 'VERIFIED';
+  return waitingForPayment || waitingForActivation || ['PENDING_REFUND', 'PROCESSING_REFUND', 'PARTIALLY_REFUNDED'].includes(session.refundStatus)
     || session.paymentStatus === 'PENDING_RECONCILIATION';
 }
 /** Resume an existing server session after reload/PayOS return, without creating a payment. */
 export function customerBankResumeAccount(accounts: CustomerBankAccount[], history: CustomerBankHistory[]) {
+  const active = history.find(item => item.accountId && accounts.some(acc => acc.id === item.accountId && acc.verificationStatus !== 'VERIFIED')
+    && item.sessionStatus === 'ACTIVE' && item.verificationStatus === 'PENDING' && !bankSessionExpired(item.expiresAt));
+  if (active) {
+    const acc = accounts.find(a => a.id === active.accountId);
+    if (acc) return acc;
+  }
   const pending = history.filter(item => item.accountId && accounts.some(account => account.id === item.accountId)
     && (item.verificationStatus === 'PENDING' || item.verificationStatus === 'PENDING_SOURCE_EVIDENCE'
       || ['PENDING_REFUND', 'PROCESSING_REFUND', 'PARTIALLY_REFUNDED'].includes(item.refundStatus)));

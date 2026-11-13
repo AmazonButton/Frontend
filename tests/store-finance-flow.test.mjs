@@ -17,7 +17,7 @@ const receipt = { verificationId: '21', bankAccountId: '31', bankName: 'Test Ban
 const account = { id: '31', storeId: '12', bankBin: '970422', bankName: 'Test Bank', accountName: 'TEST OWNER', accountNumberMasked: '******123', verificationStatus: 'PENDING', isDefault: false };
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 
-function harness({ user = owner, api: overrides = {}, storage = new Map(), hash = '' } = {}) {
+function harness({ user = owner, api: overrides = {}, storage = new Map(), hash = '', search = '' } = {}) {
   const calls = [], slots = [], timers = new Map(), timeouts = new Map(), listeners = new Map();
   let timeoutId = 0;
   let cursor = 0, dirty = true, effects = [], tree, mounted = true;
@@ -51,7 +51,7 @@ function harness({ user = owner, api: overrides = {}, storage = new Map(), hash 
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
       if (name === 'framer-motion') return { motion: new Proxy({}, { get: (_, key) => `motion.${String(key)}` }), AnimatePresence: 'presence', useReducedMotion: () => true };
       if (name === 'lucide-react') return new Proxy({}, { get: (_, key) => `icon.${String(key)}` });
-      if (name === 'react-router-dom') return { Link: 'a', useLocation: () => ({ hash }) };
+      if (name === 'react-router-dom') return { Link: 'a', useLocation: () => ({ hash, search }) };
       if (name.endsWith('/api')) return { api: transport };
       if (name.endsWith('/AuthContext')) return { useAuth: () => ({ user }) };
       if (name.endsWith('/OperationPrimitives')) return { card: 'card', primaryButton: 'primary' };
@@ -415,4 +415,44 @@ test('provider authentication failure stays visible without enabling manual-name
   assert.match(h.text, /Xác thực dịch vụ thất bại/);
   assert.equal(h.nodes.some(n => n.type === 'button' && n.props.children === 'Tạo yêu cầu xác minh'), false);
   assert.equal(h.calls.some(c => c.path.endsWith('/verification')), false); h.unmount();
+});
+
+test('PayOS return search switches store finance to banks tab, preserves checkoutUrl, and surfaces failed sender evidence clearly', async () => {
+  const txWithCheckout = {
+    ...receipt, storeId: '12', expectedAmount: 2000, status: 'PENDING', checkoutUrl: 'https://pay.payos.vn/web/store-payos',
+    recipientBankBin: '970422', recipientBankName: 'MBBank', recipientAccountNumber: '0012345678', recipientAccountHolder: 'PLATFORM', qrCodeUrl: 'https://img.vietqr.io/image/test.png',
+  };
+  let detail = txWithCheckout;
+  const h = harness({ search: '?status=success', storage: new Map([[finance.financeVerificationKey('7', '12'), JSON.stringify(receipt)]]), api: {
+    get: async path => path === '/bank-account-verifications/21' ? ok(detail) : path === '/store/subscriptions/current' ? ok(null) : ok([account]),
+  } });
+  await h.flush();
+  const banksPanel = h.nodes.find(node => node.props['data-finance-view'] === 'banks');
+  assert.equal(banksPanel.props.hidden, false);
+  assert.equal(h.nodes.find(n => n.type === 'bank-transfer').props.receipt.checkoutUrl, txWithCheckout.checkoutUrl);
+  detail = { ...txWithCheckout, status: 'FAILED', failureReason: 'SENDER_ACCOUNT_UNVERIFIABLE', refundStatus: 'PENDING_MANUAL_REFUND' };
+  await h.tick();
+  assert.match(h.text, /Chưa nhận được số tài khoản chuyển tiền đầy đủ/);
+  assert.doesNotMatch(h.text, /Phiên xác minh đã cập nhật/);
+  h.unmount();
+});
+
+test('ACCOUNT_NAME_UNRESOLVED allows manual account name confirmation and submits accountName to verification', async () => {
+  const h = harness({ hash: '#store-bank-accounts', api: {
+    post: async (path, body) => {
+      if (path.endsWith('/lookup')) throw { response: { status: 400, data: { errorCode: 'ACCOUNT_NAME_UNRESOLVED', message: 'Không khả dụng ở gói Free' } } };
+      return ok({ ...receipt, accountName: body.accountName || 'CHUA_XAC_THUC', checkoutUrl: 'https://pay.payos.vn/web/manual' });
+    },
+  } });
+  await h.flush(); await h.click('Thêm tài khoản'); await h.change('select', '970422'); await h.change('input', '0012345'); await h.submit();
+  assert.match(h.text, /nhập đúng tên chủ tài khoản/i);
+  const nameInput = h.nodes.find(node => node.type === 'input' && node.props.placeholder === 'Ví dụ: NGUYEN VAN A');
+  assert.ok(nameInput);
+  nameInput.props.onChange({ target: { value: 'Nguyễn Văn A' } }); await h.flush();
+  h.nodes.find(node => node.type === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await h.flush();
+  await h.click('Tạo yêu cầu xác minh');
+  const postVerify = h.calls.find(c => c.path.endsWith('/verification'));
+  assert.deepEqual(postVerify.body, { storeId: '12', bankBin: '970422', accountNumber: '0012345', accountName: 'NGUYEN VAN A' });
+  assert.equal(h.nodes.find(n => n.type === 'bank-transfer').props.receipt.checkoutUrl, 'https://pay.payos.vn/web/manual');
+  h.unmount();
 });

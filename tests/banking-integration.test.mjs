@@ -512,5 +512,36 @@ for (const flow of [banking, frontendBanking]) {
       assert.equal(flow.storeBankNeedsPolling({ ...transaction, status: 'REFUND_PENDING', expiresAt: '2000-01-01', refundStatus }), true);
       assert.match(flow.bankRefundMessage(refundStatus, 3500), /3\.500/);
     }
+    assert.match(flow.bankRefundMessage('PENDING_MANUAL_REFUND', 2000), /hoàn thủ công/);
+    assert.match(flow.storeFailureMessage('SENDER_ACCOUNT_UNVERIFIABLE'), /PayOS\/ngân hàng/);
+  });
+}
+
+for (const prefix of ['../src/', '../frontend/src/']) {
+  test(`${prefix}store transfer instructions expose valid PayOS checkout link and hide expired or untrusted links`, () => {
+    const source = readFileSync(new URL(prefix + 'components/common/BankingPrimitives.tsx', import.meta.url), 'utf8');
+    const code = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
+    const exports = {}; vm.runInNewContext(code, { exports, URL, Date, require: name => name.endsWith('/banking-flow') ? banking : require(name) });
+    const render = value => renderToStaticMarkup(React.createElement(exports.BankTransferInstructions, { receipt: value }));
+    const withPayos = render({ amount: 2000, referenceCode: 'VERIFY_ABC', expiresAt: future, checkoutUrl: 'https://pay.payos.vn/web/store123', recipientBankBin: '970422', recipientBankName: 'MBBank', recipientAccountNumber: '0012345678', recipientAccountHolder: 'PLATFORM' });
+    assert.match(withPayos, /https:\/\/pay\.payos\.vn\/web\/store123/);
+    assert.match(withPayos, /Mở thanh toán PayOS/);
+    const expiredPayos = render({ amount: 2000, referenceCode: 'VERIFY_ABC', expiresAt: '2000-01-01', checkoutUrl: 'https://pay.payos.vn/web/store123' });
+    assert.doesNotMatch(expiredPayos, /Mở thanh toán PayOS/);
+    const evilPayos = render({ amount: 2000, referenceCode: 'VERIFY_ABC', expiresAt: future, checkoutUrl: 'https://payos.vn.evil.invalid/store123' });
+    assert.doesNotMatch(evilPayos, /Mở thanh toán PayOS/);
+  });
+
+  test(`${prefix}customer can re-initiate after FAILED_MISMATCH without unblocking PENDING_SOURCE_EVIDENCE`, async () => {
+    const app = harness(prefix);
+    const mismatch = pendingStatus();
+    mismatch.session = { ...mismatch.session, sessionStatus: 'CONSUMED', verificationStatus: 'FAILED_MISMATCH', paymentStatus: 'PAID', refundStatus: 'PENDING_MANUAL_REFUND' };
+    app.setStatus(mismatch);
+    await app.flush(); await app.click('Xem xác minh & hoàn tiền');
+    const initiate = app.find('button', 'Bắt đầu xác minh');
+    assert.equal(initiate.props.disabled, false);
+    await app.click('Bắt đầu xác minh');
+    assert.equal(app.calls.filter(c => c.path.endsWith('/initiate-verification')).length, 1);
+    app.unmount();
   });
 }
