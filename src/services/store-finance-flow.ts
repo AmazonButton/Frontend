@@ -4,6 +4,7 @@ export interface FinanceBank {
   name: string;
   shortName: string;
   lookupSupported?: boolean;
+  transferSupported?: boolean;
 }
 
 export interface FinanceBankAccount {
@@ -84,7 +85,7 @@ export function financeStoreId(user: any): string | null {
 export function bankVerificationPayload(storeId: string, bankBin: string, accountNumber: string, accountName?: string) {
   const account = accountNumber.trim();
   if (!/^[0-9]{6}$/.test(bankBin)) throw new Error('Vui lòng chọn ngân hàng.');
-  if (!/^[0-9a-zA-Z]{5,30}$/.test(account)) throw new Error('Số tài khoản cần có từ 5 đến 30 chữ hoặc số, không có khoảng trắng.');
+  if (!/^[0-9]{6,19}$/.test(account)) throw new Error('Số tài khoản cần có từ 6 đến 19 chữ số, không có khoảng trắng.');
   const normalizedName = accountName?.trim()
     ? accountName.normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[đĐ]/g, 'D').trim().replace(/\s+/g, ' ').toUpperCase()
     : '';
@@ -120,8 +121,8 @@ export function readFinanceVerification(value: string | null): FinanceVerificati
   } catch { return null; }
 }
 
-// Uses only the existing controller contracts. Account names and verification
-// amounts are always supplied by the backend, never accepted from the form.
+// Uses existing controller contracts. A user-entered name is sent only after
+// ACCOUNT_NAME_UNRESOLVED; the backend still decides ownership and the amount.
 export function createStoreFinanceFlow(transport: FinanceTransport) {
   return {
     async currentSubscription() { return financeData<any>(await transport.get('/store/subscriptions/current')); },

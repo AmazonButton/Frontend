@@ -145,6 +145,36 @@ test('verification payload accepts only controller fields and preserves large st
   for (const values of [['0', '970422', '0012345'], ['12', 'abc', '0012345'], ['12', '970422', '12 34'], ['12', '970422', '1234']]) assert.throws(() => finance.bankVerificationPayload(...values));
 });
 
+test('bank input matches current backend numeric DTO without losing leading zeros', async () => {
+  for (const root of ['../src/', '../frontend/src/']) {
+    const service = await import(root + 'services/store-finance-flow.ts');
+    for (const invalid of ['12345', '12345678901234567890', 'ABC12345', '123 456']) {
+      assert.throws(() => service.bankVerificationPayload('12', '970423', invalid));
+    }
+    for (const valid of ['000001', '0012345678901234567']) {
+      assert.equal(service.bankVerificationPayload('12', '970423', valid).accountNumber, valid);
+    }
+  }
+  const h = harness({ hash: '#store-bank-accounts' });
+  await h.flush(); await h.click('Thêm tài khoản'); await h.change('select', '970422');
+  for (const invalid of ['12345', 'ABC12345', '12345678901234567890']) {
+    await h.change('input', invalid); await h.lookupTimers();
+  }
+  assert.equal(h.calls.some(call => call.path.endsWith('/lookup')), false);
+  h.unmount();
+});
+
+test('banks with disabled lookup but supported transfers remain selectable', async () => {
+  const h = harness({ hash: '#store-bank-accounts', api: {
+    get: async path => path === '/banks'
+      ? ok([{ bin: '970423', shortName: 'TPBank', name: 'TPBank', lookupSupported: false, transferSupported: true }])
+      : path === '/store/subscriptions/current' ? ok(null) : ok([]),
+  } });
+  await h.flush(); await h.click('Thêm tài khoản');
+  assert.ok(h.nodes.some(node => node.type === 'option' && node.props.value === '970423'));
+  h.unmount();
+});
+
 test('default selection requires exact ownership-verified status', () => {
   assert.equal(finance.canSetFinanceDefault(account), false);
   assert.equal(finance.canSetFinanceDefault({ ...account, verificationStatus: 'OWNERSHIP_VERIFIED' }), true);
@@ -450,9 +480,31 @@ test('ACCOUNT_NAME_UNRESOLVED allows manual account name confirmation and submit
   assert.ok(nameInput);
   nameInput.props.onChange({ target: { value: 'Nguyễn Văn A' } }); await h.flush();
   h.nodes.find(node => node.type === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await h.flush();
+  nameInput.props.onChange({ target: { value: 'Nguyễn Văn B' } }); await h.flush();
+  assert.equal(h.nodes.find(node => node.type === 'input' && node.props.type === 'checkbox').props.checked, false);
+  assert.equal(h.find('button', 'Tạo yêu cầu xác minh').props.disabled, true);
+  nameInput.props.onChange({ target: { value: 'Nguyễn Văn A' } }); await h.flush();
+  h.nodes.find(node => node.type === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await h.flush();
   await h.click('Tạo yêu cầu xác minh');
   const postVerify = h.calls.find(c => c.path.endsWith('/verification'));
   assert.deepEqual(postVerify.body, { storeId: '12', bankBin: '970422', accountNumber: '0012345', accountName: 'NGUYEN VAN A' });
   assert.equal(h.nodes.find(n => n.type === 'bank-transfer').props.receipt.checkoutUrl, 'https://pay.payos.vn/web/manual');
+  h.unmount();
+});
+
+test('lookup becoming unresolved at creation returns to explicit name confirmation without retrying POST', async () => {
+  const h = harness({ hash: '#store-bank-accounts', api: {
+    post: async (path, body) => {
+      if (path.endsWith('/lookup')) return ok({ bankBin: body.bankBin, bankName: 'TPBank', accountName: 'TEST OWNER', accountNumberMasked: '******345' });
+      throw { response: { status: 400, data: { errorCode: 'ACCOUNT_NAME_UNRESOLVED' } } };
+    },
+  } });
+  await h.flush(); await h.click('Thêm tài khoản'); await h.change('select', '970422'); await h.change('input', '0012345'); await h.submit();
+  h.nodes.find(node => node.type === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); await h.flush();
+  await h.click('Tạo yêu cầu xác minh');
+  assert.ok(h.nodes.some(node => node.type === 'input' && node.props.placeholder === 'Ví dụ: NGUYEN VAN A'));
+  assert.equal(h.nodes.find(node => node.type === 'input' && node.props.type === 'checkbox').props.checked, false);
+  assert.equal(h.calls.filter(call => call.path.endsWith('/verification')).length, 1);
+  assert.equal(h.nodes.some(node => node.type === 'bank-transfer'), false);
   h.unmount();
 });

@@ -622,3 +622,28 @@
     flex-wrap: wrap;
   }
 }
+
+/* Scoped to the customer banking workspace; shared banking screens retain their styles. */
+.customer-banking { color-scheme: light; }
+.customer-banking > section { border: 1px solid #e2e8f0; border-radius: 12px; background: #fff; padding: 20px; box-shadow: none; }
+.customer-banking > section:first-of-type { border: 0; border-radius: 0; background: transparent; padding: 0; }
+.customer-banking .customer-banking-stat { border: 1px solid #e2e8f0; border-radius: 10px; background: #fff; padding: 16px 20px; box-shadow: none; }
+.customer-banking :is(h1, h2, h3, dd) { color: #0f172a; }
+.customer-banking :is([class*="text-zinc-500"], [class*="text-zinc-400"], [class*="text-zinc-600"]) { color: #475569; }
+.customer-banking :is([class*="border-zinc"], [class*="border-sky"]) { border-color: #e2e8f0; }
+.customer-banking :is([class*="bg-zinc-50"], [class*="bg-sky-50"]) { background-color: #f8fafc; }
+.customer-banking li + li { border-color: #e2e8f0; }
+.customer-banking li > div:last-child { margin-left: auto; justify-content: flex-end; }
+.customer-banking :is(button, a) { box-shadow: none; transition-property: color, background-color, border-color; transition-duration: 150ms; }
+.customer-banking button[class*="bg-white"] { border: 1px solid #cbd5e1; background: #fff; color: #334155; border-radius: 8px; }
+.customer-banking :is(button, a)[class*="bg-[#287DA8]"] { background: #0f172a; color: #fff; }
+.customer-banking :is(button, a)[class*="bg-[#287DA8]"]:hover { background: #1e293b; }
+.customer-banking button:hover:not(:disabled):not([class*="bg-[#287DA8]"]) { background: #f8fafc; }
+.customer-banking :is(input:not([type="checkbox"]), select) { border-color: #cbd5e1; background: #fff; color: #0f172a; }
+.customer-banking svg { width: 16px; height: 16px; stroke-width: 1.75; flex-shrink: 0; }
+.customer-banking td { vertical-align: middle; }
+.customer-banking span[class*="rounded-md"][class*="text-xs"] { font-weight: 600; white-space: nowrap; }
+.customer-banking thead { background: #f8fafc; color: #475569; }
+.customer-banking th { white-space: nowrap; font-weight: 600; }
+.customer-banking tbody, .customer-banking tbody tr { border-color: #e2e8f0; }
+.customer-banking tbody tr:hover { background: #f8fafc; }
