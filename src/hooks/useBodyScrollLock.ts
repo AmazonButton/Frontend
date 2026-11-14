@@ -37,7 +37,7 @@ const handleBackdropScroll = (e: WheelEvent | TouchEvent) => {
 };
 
 const setHeaderUnderneath = (underneath: boolean) => {
-  const header = document.querySelector('header, [data-navbar="true"]') as HTMLElement | null;
+  const header = document.querySelector('[data-navbar="true"]') as HTMLElement | null;
   if (header) {
     if (underneath) {
       header.style.setProperty('z-index', '0', 'important');

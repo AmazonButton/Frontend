@@ -41,6 +41,16 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   const confirmationSent = useRef(false);
   useBodyScrollLock(isOpen);
   useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && !busy) {
+        onClose();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [isOpen, busy, onClose]);
+  useEffect(() => {
     alive.current = isOpen; generation.current++;
     if (isOpen) {
       setStep('DISCOVER'); setRecord(null); setSession(null); setPairCode(''); setError(''); setNotice(''); setCatalog([]); setBusy(''); setUncertain(false); locked.current = false; confirmationSent.current = false;
@@ -142,7 +152,14 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   });
   if (!isOpen) return null;
   const selected = catalog.find(p => String(p.productId || p.id) === selectedProductId);
-  return createPortal(<div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4 responsive-modal overflow-y-auto">
+  return createPortal(<div
+    className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4 responsive-modal overflow-y-auto"
+    onClick={(event) => {
+      if (event.target === event.currentTarget && !busy) {
+        onClose();
+      }
+    }}
+  >
     <motion.section role="dialog" aria-modal="true" aria-labelledby="device-connect-title" initial={reduced ? false : { opacity: 0, y: 12, scale: .98 }} animate={{ opacity: 1, y: 0, scale: 1 }} transition={{ duration: .2 }} className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-3xl bg-white p-5 text-slate-900 shadow-xl dark:bg-zinc-900 dark:text-zinc-100 sm:p-6">
       <header className="flex items-start justify-between gap-3"><div><h2 id="device-connect-title" className="text-lg font-semibold">Kết nối nút bấm thông minh</h2><p className="mt-1 text-sm text-slate-500">{record?.deviceId || 'Đọc mã thật trên nút và đối chiếu với hệ thống.'}</p></div><button type="button" className={secondary} disabled={!!busy} aria-label="Đóng kết nối nút" onClick={onClose}><X size={18} /></button></header>
       <ol className="my-5 flex flex-wrap gap-2 text-xs" aria-label="Tiến trình kết nối">{(customer ? ['Nhận diện nút', 'Xác nhận & cấu hình', 'Đã lưu trên hệ thống'] : ['Đọc ID nút', 'Đối chiếu lô cửa hàng']).map((label, i) => <li key={label} className="rounded-lg bg-sky-50 px-3 py-2 text-[#287DA8] dark:bg-sky-950/40">{i + 1}. {label}</li>)}</ol>
