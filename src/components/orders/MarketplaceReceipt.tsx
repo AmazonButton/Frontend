@@ -4,7 +4,15 @@ import { CheckCircle2, X } from 'lucide-react';
 import type { MarketplaceCheckoutResult } from '../../services/marketplace-checkout';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 
-export function MarketplaceReceipt({ result, onClose }: { result: MarketplaceCheckoutResult; onClose: () => void }) {
+export function MarketplaceReceipt({
+  result,
+  onClose,
+  onPayOrder,
+}: {
+  result: MarketplaceCheckoutResult;
+  onClose: () => void;
+  onPayOrder?: (order: any) => void;
+}) {
   useBodyScrollLock(true);
   return (
     <div className="fixed inset-0 z-[100] grid place-items-center overflow-y-auto bg-slate-900/50 p-4">
@@ -20,7 +28,26 @@ export function MarketplaceReceipt({ result, onClose }: { result: MarketplaceChe
               <p className="mt-1 text-slate-500">Mã đơn: {order.orderNumber || order.orderCode || order.id || order.orderId}</p>
               <p className="mt-2 font-bold text-[#287DA8]">{Number(order.totalAmount).toLocaleString('vi-VN')} ₫</p>
               <p className="mt-1 text-slate-600">{order.paymentMethod === 'PAYOS' ? 'Chờ thanh toán PayOS riêng cho đơn này.' : 'Thanh toán khi nhận hàng (COD).'}</p>
-              {order.paymentMethod === 'PAYOS' && <Link to={`/customer/orders?orderId=${encodeURIComponent(order.id || order.orderId)}`} onClick={onClose} className="mt-3 inline-block font-semibold text-[#287DA8] underline">Thanh toán đơn này</Link>}
+              {order.paymentMethod === 'PAYOS' && (
+                <div className="mt-3 flex flex-wrap items-center gap-3">
+                  {onPayOrder && (
+                    <button
+                      type="button"
+                      onClick={() => onPayOrder(order)}
+                      className="inline-flex items-center gap-1.5 rounded-lg bg-[#287DA8] px-3 py-1.5 text-xs font-semibold text-white transition hover:bg-[#206588]"
+                    >
+                      Quét mã QR PayOS
+                    </button>
+                  )}
+                  <Link
+                    to={`/customer/orders?orderId=${encodeURIComponent(order.id || order.orderId)}`}
+                    onClick={onClose}
+                    className="inline-block text-xs font-semibold text-[#287DA8] underline"
+                  >
+                    Xem chi tiết trong lịch sử đơn
+                  </Link>
+                </div>
+              )}
             </div>
           ))}
         </div>

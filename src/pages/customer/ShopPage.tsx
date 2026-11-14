@@ -6,6 +6,7 @@ import { api, apiSessionMarker, isTokenExpired } from '../../services/api';
 import { getSocket } from '../../services/socket';
 import { toast } from '../../context/ToastContext';
 import { PayOSCancelRecoveryModal, PayOSRecoveryOrder } from '../../components/orders/PayOSCancelRecoveryModal';
+import { PayOSOrderQrModal } from '../../components/orders/PayOSOrderQrModal';
 import { normalizeOrder, publishOrderEvent } from '../../services/order-events';
 import { StorefrontReceipt } from '../../components/orders/StorefrontReceipt';
 import { MarketplaceReceipt } from '../../components/orders/MarketplaceReceipt';
@@ -68,6 +69,14 @@ export const ShopPage: React.FC = () => {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState('');
+  const [payosModalData, setPayosModalData] = useState<{
+    orderId: string;
+    orderNumber: string;
+    amount: number;
+    qrCode?: string;
+    checkoutUrl?: string;
+    paymentLinkId?: string;
+  } | null>(null);
   const [flyingProduct, setFlyingProduct] = useState<{ product: Product; x: number; y: number } | null>(null);
   const isCustomerLoggedIn = typeof window !== 'undefined' && Boolean(localStorage.getItem('smart_order_token'));
   const [form, setForm] = useState({
@@ -388,6 +397,23 @@ export const ShopPage: React.FC = () => {
           }
         });
         const checkoutUrl = payment.data?.data?.checkoutUrl || payment.data?.checkoutUrl;
+        const qrCode = payment.data?.data?.qrCode || payment.data?.qrCode;
+        const paymentLinkId = payment.data?.data?.paymentLinkId || payment.data?.paymentLinkId;
+        const oAmount = Number(payment.data?.data?.amount || payment.data?.amount || order.totalAmount);
+        const oCode = payment.data?.data?.orderCode || payment.data?.orderCode || order.orderNumber || order.id;
+
+        if (typeof setPayosModalData === 'function' && (qrCode || checkoutUrl)) {
+          setPayosModalData({
+            orderId: String(order.id),
+            orderNumber: String(oCode),
+            amount: oAmount,
+            qrCode,
+            checkoutUrl,
+            paymentLinkId,
+          });
+          return;
+        }
+
         if (typeof checkoutUrl === 'string' && checkoutUrl.trim()) {
           window.location.assign(checkoutUrl);
           return;
@@ -1040,7 +1066,49 @@ export const ShopPage: React.FC = () => {
     {marketplaceResult && <MarketplaceReceipt result={marketplaceResult} onClose={() => {
       if (marketplaceResult.failed.length) setCartOpen(true);
       setMarketplaceResult(null);
+    }} onPayOrder={async (placed) => {
+      const oId = String(placed.id || placed.orderId);
+      const oCode = placed.orderNumber || placed.orderCode || oId;
+      const oAmount = Number(placed.totalAmount || 0);
+      try {
+        toast.info('Đang tạo mã quét QR PayOS...');
+        const res = await api.post('/payments/payos/create-link', { orderId: oId });
+        const data = res.data?.data || res.data;
+        if (data?.checkoutUrl || data?.qrCode) {
+          setPayosModalData({
+            orderId: oId,
+            orderNumber: String(data.orderCode || oCode),
+            amount: Number(data.amount || oAmount),
+            qrCode: data.qrCode,
+            checkoutUrl: data.checkoutUrl,
+            paymentLinkId: data.paymentLinkId,
+          });
+        }
+      } catch (err: any) {
+        toast.error(err.response?.data?.message || 'Không thể mở mã QR PayOS lúc này.');
+      }
     }} />}
+    {payosModalData && (
+      <PayOSOrderQrModal
+        isOpen={Boolean(payosModalData)}
+        onClose={() => setPayosModalData(null)}
+        orderId={payosModalData.orderId}
+        orderNumber={payosModalData.orderNumber}
+        amount={payosModalData.amount}
+        qrCode={payosModalData.qrCode}
+        checkoutUrl={payosModalData.checkoutUrl}
+        paymentLinkId={payosModalData.paymentLinkId}
+        onSuccess={() => {
+          setPayosModalData(null);
+          setCart((old) => old.filter((line) => !line.selected));
+          setNotice(`Đơn hàng #${payosModalData.orderNumber} đã thanh toán PayOS thành công! Cửa hàng đang chuẩn bị sản phẩm.`);
+        }}
+        onCancelled={() => {
+          setPayosModalData(null);
+          setNotice(`Đã hủy đơn hàng #${payosModalData.orderNumber}.`);
+        }}
+      />
+    )}
     {busy && form.paymentMethod === 'PAYOS' && (
       <div role="status" aria-live="polite" className="fixed inset-0 z-[110] grid place-items-center bg-slate-900/45 p-4">
         <div className="flex items-center gap-3 rounded-2xl bg-white p-6 text-sm font-semibold text-slate-800 shadow-xl">
