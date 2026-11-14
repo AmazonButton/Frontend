@@ -1,3 +1,4 @@
+// @refresh reset
 import { formatMetric } from '../../services/dashboard-metrics';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { createPortal } from 'react-dom';
@@ -653,7 +654,11 @@ export const StoreProductsPage: React.FC = () => {
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="min-w-0">
               <div className="flex items-center gap-2">
-                {listingAccess.isGrandfathered ? (
+                {listingAccess.checking || listingAccess.error ? (
+                  <span className="inline-flex items-center gap-1 rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-800 dark:bg-amber-900/60 dark:text-amber-200">
+                    {listingAccess.checking ? 'Đang kiểm tra gói dịch vụ…' : 'Chưa kiểm tra được gói dịch vụ'}
+                  </span>
+                ) : listingAccess.isGrandfathered ? (
                   <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-semibold text-emerald-800 dark:bg-emerald-900/60 dark:text-emerald-200">
                     🛡️ Cửa hàng hiện hữu (Miễn trừ gói dịch vụ)
                   </span>
@@ -667,7 +672,9 @@ export const StoreProductsPage: React.FC = () => {
                   </span>
                 )}
                 <span className="font-semibold text-xs text-zinc-600 dark:text-zinc-400">
-                  {listingAccess.isGrandfathered
+                  {listingAccess.checking || listingAccess.error
+                    ? 'Quyền đăng sản phẩm: Chưa xác nhận'
+                    : listingAccess.isGrandfathered
                     ? 'Quyền đăng sản phẩm: Không giới hạn'
                     : listingAccess.allowed
                     ? `${listingAccess.totalProducts ?? 0}/${listingAccess.subscription?.plan?.maxProducts ?? '—'} sản phẩm`
@@ -677,6 +684,8 @@ export const StoreProductsPage: React.FC = () => {
               <p className="mt-1.5 text-xs text-zinc-700 dark:text-zinc-300">
                 {listingAccess.checking
                   ? 'Đang kiểm tra gói dịch vụ…'
+                  : listingAccess.error
+                  ? listingAccess.error
                   : listingAccess.isGrandfathered
                   ? 'Cửa hàng của bạn thuộc nhóm cửa hàng thành viên ban đầu, được miễn trừ bắt buộc đăng ký gói và toàn quyền đăng bán sản phẩm không giới hạn.'
                   : listingAccess.allowed
@@ -697,7 +706,7 @@ export const StoreProductsPage: React.FC = () => {
                 to={user?.role === 'STORE_OWNER' && !listingAccess.allowed ? '/store/service-plans' : '/store/finance#subscription-current'}
                 className="inline-flex min-h-9 items-center justify-center rounded-lg bg-[#287DA8] px-3.5 text-xs font-semibold text-white shadow-xs hover:bg-[#206588] transition-colors"
               >
-                {listingAccess.allowed ? 'Quản lý gói dịch vụ' : 'Đăng ký gói dịch vụ ngay →'}
+                {listingAccess.checking || listingAccess.error ? 'Xem gói dịch vụ' : listingAccess.allowed ? 'Quản lý gói dịch vụ' : 'Đăng ký gói dịch vụ ngay →'}
               </Link>
             </div>
           </div>

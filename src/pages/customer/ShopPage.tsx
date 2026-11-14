@@ -2,12 +2,15 @@ import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
 import { ArrowRight, CheckCircle2, Minus, PackageCheck, Plus, RefreshCw, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
-import { api, isTokenExpired } from '../../services/api';
+import { api, apiSessionMarker, isTokenExpired } from '../../services/api';
 import { getSocket } from '../../services/socket';
 import { toast } from '../../context/ToastContext';
 import { PayOSCancelRecoveryModal, PayOSRecoveryOrder } from '../../components/orders/PayOSCancelRecoveryModal';
 import { normalizeOrder, publishOrderEvent } from '../../services/order-events';
 import { StorefrontReceipt } from '../../components/orders/StorefrontReceipt';
+import { MarketplaceReceipt } from '../../components/orders/MarketplaceReceipt';
+import { checkoutAcrossStores, groupCartByStore, hasPendingMarketplaceCheckout } from '../../services/marketplace-checkout';
+import type { MarketplaceCheckoutResult } from '../../services/marketplace-checkout';
 import { Order } from '../../types';
 import { getShippingContactErrors, normalizeShippingContact, ShippingContactField } from '../../services/shipping-contact-validation';
 
@@ -78,6 +81,7 @@ export const ShopPage: React.FC = () => {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [recoveryOrder, setRecoveryOrder] = useState<PayOSRecoveryOrder | null>(null);
   const [receipt, setReceipt] = useState<Order | null>(null);
+  const [marketplaceResult, setMarketplaceResult] = useState<MarketplaceCheckoutResult | null>(null);
   const [contactTouched, setContactTouched] = useState<Record<ShippingContactField, boolean>>({ customerName: false, customerPhone: false, deliveryAddress: false });
   const contactErrors = getShippingContactErrors(form);
   const visibleContactError = (field: ShippingContactField) => contactTouched[field] ? contactErrors[field] : undefined;
@@ -230,13 +234,14 @@ export const ShopPage: React.FC = () => {
   const selectedCount = selectedCart.reduce((sum, line) => sum + line.quantity, 0);
   const total = selectedCart.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
   const selectedStore = selectedCart[0]?.product.storeId;
-  // Products can be saved from any store; store validation applies only to selected checkout items.
+  const cartGroups = useMemo(() => groupCartByStore(cart), [cart]);
+  const selectedGroups = useMemo(() => groupCartByStore(selectedCart), [selectedCart]);
+  // The existing API validates each store's order separately during checkout.
   const cartStore: string | undefined = undefined;
   const changeQuantity = (product: Product, delta: number) => setCart((old) => {
     const line = old.find((item) => item.product.id === product.id);
     if (!line && delta > 0) {
-      const activeStore = old.find((item) => item.selected)?.product.storeId;
-      return [...old, { product, quantity: 1, selected: !activeStore || activeStore === product.storeId }];
+      return [...old, { product, quantity: 1, selected: true }];
     }
     return old.map((item) => item.product.id === product.id ? { ...item, quantity: Math.max(0, item.quantity + delta) } : item).filter((item) => item.quantity > 0);
   });
@@ -244,11 +249,6 @@ export const ShopPage: React.FC = () => {
   const toggleCartSelection = (product: Product) => setCart((old) => {
     const target = old.find((line) => line.product.id === product.id);
     if (!target || target.selected) return old.map((line) => line.product.id === product.id ? { ...line, selected: false } : line);
-    const activeStore = old.find((line) => line.selected)?.product.storeId;
-    if (activeStore && activeStore !== product.storeId) {
-      setNotice('Mỗi lần thanh toán chỉ chọn sản phẩm của một cửa hàng. Hãy bỏ chọn cửa hàng hiện tại trước.');
-      return old;
-    }
     return old.map((line) => line.product.id === product.id ? { ...line, selected: true } : line);
   });
   const buyNow = (product: Product) => {
@@ -278,7 +278,7 @@ export const ShopPage: React.FC = () => {
       return;
     }
     const cart = selectedCart;
-    const cartStore = selectedStore;
+    const checkoutGroups = groupCartByStore(selectedCart);
     if (!selectedCart.length) { setNotice('Hãy chọn ít nhất một sản phẩm để thanh toán.'); return; }
     if (selectedCart.some((line) => !/^\d+$/.test(String(line.product.id)) || !/^\d+$/.test(String(line.product.storeId)))) {
       setCart((old) => old.filter((line) => !line.selected));
@@ -287,11 +287,40 @@ export const ShopPage: React.FC = () => {
       setNotice('Giỏ hàng có sản phẩm cũ không còn tồn tại trên hệ thống. Giỏ hàng đã được làm mới; vui lòng chọn lại sản phẩm thực tế.');
       return;
     }
-    if (cart.some((line) => line.product.storeId !== cartStore)) { setNotice('Mỗi đơn hàng chỉ gồm sản phẩm của một cửa hàng.'); return; }
-
     const token = typeof window !== 'undefined' ? localStorage.getItem('smart_order_token') : null;
     if (form.paymentMethod === 'PAYOS' && (!token || isTokenExpired(token))) {
       setNotice('Cổng thanh toán trực tuyến PayOS yêu cầu tài khoản khách hàng. Quý khách vui lòng đăng nhập hoặc chọn "Tiền mặt khi nhận hàng (COD)" để hoàn tất đơn ngay.');
+      return;
+    }
+
+    if (checkoutGroups.length > 1 || (user?.id && hasPendingMarketplaceCheckout(user.id, sessionStorage))) {
+      if (!token || isTokenExpired(token) || user?.role !== 'CUSTOMER') {
+        setNotice('Vui lòng đăng nhập bằng tài khoản khách hàng để đặt hàng từ nhiều cửa hàng.');
+        return;
+      }
+      setBusy(true); setNotice(''); setReceipt(null); setMarketplaceResult(null);
+      const checkoutSession = apiSessionMarker();
+      try {
+        const result = await checkoutAcrossStores({
+          lines: selectedCart,
+          contact: { ...contact, paymentMethod: form.paymentMethod },
+          accountId: user.id,
+          post: (path, payload, config) => api.post(path, payload, config),
+          storage: sessionStorage,
+          isSessionCurrent: () => apiSessionMarker() === checkoutSession,
+          onPlaced: (entry, purchased) => {
+            if (apiSessionMarker() !== checkoutSession) return;
+            const quantities = new Map(purchased.map((line) => [line.product.id, line.quantity]));
+            setCart((old) => old.map((line) => ({
+              ...line, quantity: line.quantity - (quantities.get(line.product.id) || 0),
+            })).filter((line) => line.quantity > 0));
+            publishOrderEvent('ORDER_CREATED', { order: normalizeOrder(entry.order) });
+          },
+        });
+        if (apiSessionMarker() !== checkoutSession) return;
+        setMarketplaceResult(result);
+        setCheckoutOpen(false); setCartOpen(false);
+      } finally { setBusy(false); }
       return;
     }
 
@@ -681,7 +710,7 @@ export const ShopPage: React.FC = () => {
             <div className="flex-1 overflow-auto p-5">
               {cart.length > 0 && (
                 <div className="mb-3 rounded-xl border border-sky-100 bg-sky-50 p-3 text-xs leading-5 text-slate-600">
-                  Bạn có thể lưu sản phẩm từ nhiều cửa hàng. Tích chọn những sản phẩm muốn mua; mỗi lần thanh toán chỉ chọn sản phẩm của một cửa hàng.
+                  Tích chọn sản phẩm từ nhiều cửa hàng để đặt cùng lúc. Mỗi cửa hàng sẽ nhận một đơn riêng; thanh toán và giao hàng được xử lý theo từng đơn.
                 </div>
               )}
               {cart.length === 0 ? (
@@ -691,7 +720,17 @@ export const ShopPage: React.FC = () => {
                 </div>
               ) : (
                 <AnimatePresence initial={false}>
-                  {cart.map(({ product, quantity, selected }) => (
+                  <label key="select-all-stores" className="mb-3 flex cursor-pointer items-center gap-2 text-sm font-semibold">
+                    <input type="checkbox" checked={cart.every((line) => line.selected)} onChange={(event) => setCart((old) => old.map((line) => ({ ...line, selected: event.target.checked })))} className="h-4 w-4 accent-[#287DA8]" />
+                    Chọn tất cả ({cartGroups.length} cửa hàng)
+                  </label>
+                  {cartGroups.map((group) => (
+                    <motion.section layout key={group.storeId} className="mb-4 overflow-hidden rounded-xl border border-slate-200 px-3">
+                      <label className="flex cursor-pointer items-center gap-2 border-b py-3 text-sm font-semibold">
+                        <input type="checkbox" checked={group.lines.every((line) => line.selected)} onChange={(event) => setCart((old) => old.map((line) => String(line.product.storeId) === group.storeId ? { ...line, selected: event.target.checked } : line))} className="h-4 w-4 accent-[#287DA8]" />
+                        <Store size={15} />{group.storeName}
+                      </label>
+                  {group.lines.map(({ product, quantity, selected }) => (
                     <motion.div
                       layout
                       key={product.id}
@@ -751,6 +790,8 @@ export const ShopPage: React.FC = () => {
                       </div>
                     </motion.div>
                   ))}
+                    </motion.section>
+                  ))}
                 </AnimatePresence>
               )}
             </div>
@@ -809,7 +850,7 @@ export const ShopPage: React.FC = () => {
             <div className="flex shrink-0 items-start justify-between gap-4 border-b border-slate-100 px-5 py-5 sm:px-7">
               <div>
                 <h2 className="text-xl font-bold text-slate-900">Thông tin giao hàng</h2>
-                <p className="mt-1 text-sm text-slate-500">Đơn hàng từ {selectedCart[0]?.product.store.name}</p>
+                <p className="mt-1 text-sm text-slate-500">{selectedGroups.length > 1 ? `${selectedGroups.length} cửa hàng · ${selectedGroups.length} đơn hàng riêng` : `Đơn hàng từ ${selectedCart[0]?.product.store.name || ''}`}</p>
               </div>
               <motion.button
                 whileHover={{ scale: 1.1, rotate: 90 }}
@@ -946,6 +987,10 @@ export const ShopPage: React.FC = () => {
             </div>
 
             <div className="mt-5 border-t border-slate-200 pt-4 lg:mt-auto lg:pt-5">
+            {selectedGroups.length > 1 && <div className="mb-4 space-y-2 rounded-xl bg-sky-50 p-3 text-xs text-slate-600">
+              {selectedGroups.map((group) => <div key={group.storeId} className="flex justify-between gap-3"><span>{group.storeName}</span><b>{money(group.totalAmount)}</b></div>)}
+              <p className="border-t border-sky-100 pt-2">{form.paymentMethod === 'PAYOS' ? 'Sau khi đặt hàng, thanh toán PayOS riêng cho từng đơn trong lịch sử đơn hàng.' : 'Thanh toán COD riêng khi nhận hàng của từng cửa hàng.'}</p>
+            </div>}
             <div className="flex items-center justify-between gap-3 text-sm">
               <span className="text-slate-600">Tổng thanh toán</span>
               <b className="text-lg text-[#287DA8]">{money(total)}</b>
@@ -957,7 +1002,7 @@ export const ShopPage: React.FC = () => {
               disabled={busy}
               className="mt-4 w-full rounded-xl bg-[#287DA8] py-3 font-bold text-white shadow-sm transition hover:bg-[#206588] disabled:opacity-60"
             >
-              {busy
+              {selectedGroups.length > 1 ? (busy ? 'Đang đặt hàng tại các cửa hàng...' : `Đặt ${selectedGroups.length} đơn hàng`) : busy
                 ? form.paymentMethod === 'PAYOS' ? 'Đang chuyển đến PayOS...' : 'Đang đặt hàng...'
                 : form.paymentMethod === 'PAYOS'
                   ? 'Thanh toán PayOS'
@@ -992,11 +1037,15 @@ export const ShopPage: React.FC = () => {
       }}
     />
     {receipt && <StorefrontReceipt order={receipt} loggedIn={isCustomerLoggedIn} paymentError={receipt.paymentMethod === 'PAYOS' ? notice : undefined} onClose={() => setReceipt(null)} />}
+    {marketplaceResult && <MarketplaceReceipt result={marketplaceResult} onClose={() => {
+      if (marketplaceResult.failed.length) setCartOpen(true);
+      setMarketplaceResult(null);
+    }} />}
     {busy && form.paymentMethod === 'PAYOS' && (
       <div role="status" aria-live="polite" className="fixed inset-0 z-[110] grid place-items-center bg-slate-900/45 p-4">
         <div className="flex items-center gap-3 rounded-2xl bg-white p-6 text-sm font-semibold text-slate-800 shadow-xl">
           <RefreshCw aria-hidden="true" className="h-5 w-5 animate-spin text-[#287DA8]" />
-          Đang chuyển đến trang thanh toán PayOS…
+          {selectedGroups.length > 1 ? 'Đang tạo đơn riêng cho từng cửa hàng…' : 'Đang chuyển đến trang thanh toán PayOS…'}
         </div>
       </div>
     )}

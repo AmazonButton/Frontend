@@ -1,3 +1,4 @@
+// @refresh reset
 import './StoreDashboard.css';
 import { deliveryMapUrl } from '../../services/delivery-location';
 import React, { useState, useEffect, useRef } from 'react';

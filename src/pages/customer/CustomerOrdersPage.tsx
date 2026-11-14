@@ -31,6 +31,7 @@ import { normalizeOrder, ORDER_EVENT, publishOrderEvent } from '../../services/o
 import { dashboardOrderStatus, isActiveDashboardOrder, orderDashboardMetrics } from '../../services/dashboard-metrics';
 import { useDashboardRefresh } from '../../hooks/useDashboardRefresh';
 import { ShippingContact } from '../../components/orders/ShippingContact';
+import { PayOSOrderQrModal } from '../../components/orders/PayOSOrderQrModal';
 
 type OrderFilter = 'ALL' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
 const ORDERS_PER_PAGE = 8;
@@ -88,12 +89,51 @@ export const CustomerOrdersPage: React.FC = () => {
   const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isSwitchingCod, setIsSwitchingCod] = useState<string | null>(null);
+  const [payosModalData, setPayosModalData] = useState<{
+    orderId: string | number;
+    orderNumber?: string;
+    amount: number;
+    qrCode?: string;
+    checkoutUrl?: string;
+    paymentLinkId?: string;
+  } | null>(null);
+  const [isCreatingPayosLink, setIsCreatingPayosLink] = useState<string | null>(null);
   const orderRequests = useRef({ generation: 0, flight: null as Promise<void> | null, queued: false });
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
     if (params.get('orderId')) setExpandedOrder(params.get('orderId'));
     if (params.get('order')) { setQuery(params.get('order') || ''); setFilter('ALL'); }
+
+    // Xử lý khi quay lại từ cổng thanh toán PayOS
+    const status = params.get('payos_status') || params.get('status');
+    const isCancelled = status === 'cancelled' || status === 'CANCELLED' || params.get('cancel') === 'true';
+    const isSuccess = status === 'success' || status === 'PAID';
+    const targetOrderId = params.get('orderId') || params.get('orderCode');
+
+    if (isCancelled && targetOrderId) {
+      api.post(`/orders/${targetOrderId}/cancel`, {
+        reason: 'Khách hàng hủy thanh toán trực tuyến PayOS',
+      }).then(() => {
+        publishOrderEvent('ORDER_CANCELLED', {
+          order: { id: targetOrderId, status: 'CANCELLED' },
+          reason: 'Khách hàng hủy thanh toán trực tuyến PayOS',
+        });
+        toast.info(`Đã hủy đơn hàng #${targetOrderId} theo yêu cầu. Cửa hàng đã được thông báo.`);
+        loadOrders();
+      }).catch(() => {
+        loadOrders();
+      });
+      try {
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch {}
+    } else if (isSuccess && targetOrderId) {
+      toast.success(`Đã nhận được kết quả thanh toán PayOS! Đang cập nhật trạng thái đơn...`);
+      loadOrders();
+      try {
+        window.history.replaceState({}, '', window.location.pathname);
+      } catch {}
+    }
   }, [location.search]);
 
   const loadOrders = useCallback(async (initial = false) => {
@@ -238,6 +278,7 @@ export const CustomerOrdersPage: React.FC = () => {
       }));
       setExpandedOrder(null);
       setOrderToCancel(null);
+      toast.info(`Đã hủy đơn hàng #${targetCode} thành công. Cửa hàng đã được thông báo đơn hàng đã hủy.`);
     } catch (requestError: any) {
       const errorMsg = requestError.response?.data?.message || requestError.message;
       if (requestError.response?.status === 400 && /PENDING|CONFIRMED|xác nhận|tiếp nhận/i.test(errorMsg)) {
@@ -478,26 +519,47 @@ export const CustomerOrdersPage: React.FC = () => {
                                     <>
                                       <button
                                         type="button"
+                                        disabled={isCreatingPayosLink === String(order.id || (order as any).orderId)}
                                         onClick={async (event) => {
                                           event.stopPropagation();
+                                          const oId = String(order.id || (order as any).orderId);
+                                          const oCode = order.orderNumber || (order as any).orderCode || oId;
+                                          const oAmount = Number(order.totalAmount || 0);
+                                          setIsCreatingPayosLink(oId);
                                           try {
-                                            toast.info('Đang mở liên kết thanh toán PayOS...');
+                                            toast.info('Đang tạo mã quét QR PayOS...');
                                             const res = await api.post('/payments/payos/create-link', {
-                                              orderId: order.id || (order as any).orderId,
+                                              orderId: oId,
                                             });
-                                            const checkoutUrl = res.data?.data?.checkoutUrl || res.data?.checkoutUrl;
-                                            if (checkoutUrl) {
-                                              window.location.href = checkoutUrl;
+                                            const data = res.data?.data || res.data;
+                                            const checkoutUrl = data?.checkoutUrl;
+                                            const qrCode = data?.qrCode;
+                                            const paymentLinkId = data?.paymentLinkId;
+                                            if (checkoutUrl || qrCode) {
+                                              setPayosModalData({
+                                                orderId: oId,
+                                                orderNumber: oCode,
+                                                amount: oAmount,
+                                                qrCode,
+                                                checkoutUrl,
+                                                paymentLinkId,
+                                              });
                                             } else {
                                               toast.error('Không tìm thấy liên kết thanh toán.');
                                             }
                                           } catch (err: any) {
                                             toast.error(err.response?.data?.message || 'Không thể tạo liên kết thanh toán PayOS.');
+                                          } finally {
+                                            setIsCreatingPayosLink(null);
                                           }
                                         }}
-                                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-[#0B5586]"
+                                        className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-[#0B5586] disabled:opacity-60"
                                       >
-                                        <CreditCard className="w-3.5 h-3.5" />
+                                        {isCreatingPayosLink === String(order.id || (order as any).orderId) ? (
+                                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                        ) : (
+                                          <CreditCard className="w-3.5 h-3.5" />
+                                        )}
                                         Thanh toán lại
                                       </button>
                                       <button
@@ -641,6 +703,34 @@ export const CustomerOrdersPage: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {payosModalData && (
+        <PayOSOrderQrModal
+          isOpen={!!payosModalData}
+          orderId={payosModalData.orderId}
+          orderNumber={payosModalData.orderNumber}
+          amount={payosModalData.amount}
+          qrCode={payosModalData.qrCode}
+          checkoutUrl={payosModalData.checkoutUrl}
+          paymentLinkId={payosModalData.paymentLinkId}
+          onClose={() => setPayosModalData(null)}
+          onSuccess={() => {
+            loadOrders();
+          }}
+          onCancelled={(cancelledId) => {
+            setOrders((current) =>
+              current.map((ord) => {
+                const oId = String(ord.id || (ord as any).orderId);
+                return oId === String(cancelledId)
+                  ? { ...ord, status: 'CANCELLED', orderStatus: 'CANCELLED' }
+                  : ord;
+              })
+            );
+            setExpandedOrder(null);
+            loadOrders();
+          }}
+        />
+      )}
     </main>
   );
 };
