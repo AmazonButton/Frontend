@@ -5,6 +5,7 @@ export const ADMIN_SECTIONS: Record<string, { title: string; description: string
   PLANS: { title: 'Gói dịch vụ', description: 'Quản lý chi phí, thời hạn và trạng thái các gói dành cho cửa hàng.' },
   RENTALS: { title: 'Gói thuê nút bấm', description: 'Quản lý gói thuê, số lượng nút và chi phí đặt cọc.' },
   DEVICES: { title: 'Kho nút bấm', description: 'Tạo lô thiết bị, phân bổ cho cửa hàng và quản lý mã ghép nối.' },
+  WARRANTY: { title: 'Bảo hành thiết bị', description: 'Tiếp nhận, phân loại lỗi Nhóm A/B/C/D, duyệt đổi mới 1-1 cho Store và khóa nút hỏng nặng.' },
   RBAC: { title: 'Tài khoản & phân quyền', description: 'Tìm tài khoản, quản lý vai trò và trạng thái truy cập.' },
   ANALYTICS: { title: 'Báo cáo & doanh thu', description: 'Xem các chỉ số vận hành và xuất báo cáo hiện có.' },
   NOTIFICATIONS: { title: 'Cài đặt thông báo', description: 'Quản lý nội dung thông báo tự động và cấu hình kết nối nâng cao.' },

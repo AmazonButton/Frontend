@@ -56,6 +56,7 @@ const adminLinks: NavigationItem[] = [
   { to: '/admin/dashboard?section=STORES', label: 'Cửa hàng', icon: Store },
   { to: '/admin/dashboard?section=RENTALS', label: 'Gói thuê nút bấm', icon: Cpu },
   { to: '/admin/dashboard?section=DEVICES', label: 'Kho nút bấm', icon: Cpu },
+  { to: '/admin/dashboard?section=WARRANTY', label: 'Bảo hành', icon: ShieldCheck },
   { to: '/admin/dashboard?section=RBAC', label: 'Tài khoản & phân quyền', icon: UserRound },
   { to: '/admin/dashboard?section=ANALYTICS', label: 'Báo cáo & doanh thu', icon: BarChart3 },
   { to: '/admin/dashboard?section=NOTIFICATIONS', label: 'Cài đặt thông báo', icon: ShoppingBag },
