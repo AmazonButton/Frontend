@@ -376,7 +376,7 @@ export class ProvisioningRepository {
     });
   }
 
-  async factoryResetAtomicTx(buttonId: bigint): Promise<any> {
+  async factoryResetAtomicTx(buttonId: bigint, clearStore = false): Promise<any> {
     return this.prisma.$transaction(async (tx) => {
       await tx.ioTButton.update({
         where: { buttonId },
@@ -385,6 +385,7 @@ export class ProvisioningRepository {
           addressId: null,
           status: 'INACTIVE',
           installedAt: null,
+          ...(clearStore ? { storeId: null } : {}),
         },
       });
 

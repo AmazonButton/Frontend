@@ -323,7 +323,8 @@ export class ProvisioningService {
   async factoryReset(id: string, user: any) {
     const button = await this.assertDeviceAccess(id, user);
 
-    await this.provRepo.factoryResetAtomicTx(button.buttonId);
+    const clearStore = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role);
+    await this.provRepo.factoryResetAtomicTx(button.buttonId, clearStore);
 
     return {
       success: true,

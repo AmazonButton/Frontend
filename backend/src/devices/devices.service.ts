@@ -735,8 +735,11 @@ export class DevicesService {
         continue;
       }
 
+      const isAdminReallocatable = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role)
+        && button.customerId === null
+        && button.status === 'INACTIVE';
       const isInKhoTong = button.storeId === null && button.customerId === null && button.status === 'INACTIVE';
-      if (!isInKhoTong) {
+      if (!isInKhoTong && !isAdminReallocatable) {
         invalidDeviceIds.push(button.deviceId || button.buttonCode || identifier);
       } else {
         validButtons.push(button);

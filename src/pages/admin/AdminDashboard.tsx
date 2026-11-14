@@ -430,6 +430,9 @@ export const AdminDashboard: React.FC = () => {
 
   // Device Batch Inventory & Allocation State
   const [unassignedDevices, setUnassignedDevices] = useState<any[]>([]);
+  const [allDevices, setAllDevices] = useState<any[]>([]);
+  const [deviceStoreFilter, setDeviceStoreFilter] = useState<string>('ALL');
+  const [deviceSearchQuery, setDeviceSearchQuery] = useState<string>('');
   const [allStores, setAllStores] = useState<any[]>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_admin_stores') : null; if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; } } catch {} return []; });
   const [storeSubs, setStoreSubs] = useState<AdminStoreSubscriptionItem[]>([]);
   const [storeSubsLoading, setStoreSubsLoading] = useState(false);
@@ -726,7 +729,7 @@ export const AdminDashboard: React.FC = () => {
     const marker = typeof apiSessionMarker === 'function' ? apiSessionMarker() : null;
     const request = ++adminRead.current;
     try {
-      const [pendingRes, statsRes, logsRes, unassignedRes, storesRes, usersRes, plansRes] = await Promise.all([
+      const [pendingRes, statsRes, logsRes, unassignedRes, storesRes, usersRes, plansRes, allDevicesRes] = await Promise.all([
         api.get('/admin/stores/pending'),
         api.get('/admin/stats'),
         api.get('/admin/audit-logs'),
@@ -734,6 +737,7 @@ export const AdminDashboard: React.FC = () => {
         api.get('/admin/stores'),
         api.get('/admin/users').catch(() => ({ data: { success: false, data: [] } })),
         api.get('/admin/plans').catch(() => ({ data: { success: false, data: [] } })),
+        api.get('/devices').catch(() => ({ data: { success: false, data: [] } })),
       ]);
 
       if (adminRead.current !== request || (marker && typeof apiSessionMarker === 'function' && apiSessionMarker() !== marker)) return;
@@ -752,7 +756,13 @@ export const AdminDashboard: React.FC = () => {
       } else {
         setAuditLogs(DEFAULT_AUDIT_LOGS);
       }
-      if (unassignedRes.data.success) setUnassignedDevices(unassignedRes.data.data || []);
+      if (unassignedRes.data.success) {
+        const rawUnassigned = Array.isArray(unassignedRes.data.data) ? unassignedRes.data.data : [];
+        setUnassignedDevices(rawUnassigned.filter((d: any) => !d?.storeId && !d?.customerId));
+      }
+      if (allDevicesRes?.data?.success && Array.isArray(allDevicesRes.data.data)) {
+        setAllDevices(allDevicesRes.data.data);
+      }
       if (storesRes.data.success) { setAllStores(storesRes.data.data || []); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_admin_stores', JSON.stringify(storesRes.data.data || [])); } catch {} }
       if (usersRes.data?.success && Array.isArray(usersRes.data.data) && usersRes.data.data.length > 0) {
         const mapped = usersRes.data.data.map((u: any) => ({
@@ -914,15 +924,6 @@ export const AdminDashboard: React.FC = () => {
       return;
     }
 
-    const unavailableDeviceIds = unassignedDevices
-      .filter((device) => selectedDeviceIds.includes(device.deviceId) && device.storeId)
-      .map((device) => device.deviceId);
-    if (unavailableDeviceIds.length > 0) {
-      toast.warning(`Nút ${unavailableDeviceIds.join(', ')} đã được bàn giao cho cửa hàng khác. Vui lòng tải lại danh sách kho.`);
-      fetchAdminData();
-      return;
-    }
-
     setIsProcessingBatch(true);
     try {
       const res = await api.post('/devices/allocate-store', {
@@ -930,6 +931,7 @@ export const AdminDashboard: React.FC = () => {
         deviceIds: selectedDeviceIds,
       });
       if (res.data.success) {
+        setUnassignedDevices((prev) => prev.filter((d) => !selectedDeviceIds.includes(d.deviceId)));
         setShowAllocateModal(false);
         setSelectedDeviceIds([]);
         toast.success(res.data.message || 'Cấp phát nút bấm thành công!');
@@ -1663,6 +1665,140 @@ export const AdminDashboard: React.FC = () => {
               </table>
             </div>
           )}
+
+          {/* Danh sách nút bấm đã cấp phát cho các cửa hàng */}
+          <div className="pt-6 border-t border-zinc-200 dark:border-zinc-800 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
+                  <span>Nút Bấm Đã Cấp Cho Cửa Hàng</span>
+                  <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-sky-50 dark:bg-sky-950/40 text-[#0E6BA8] dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+                    {allDevices.filter((d) => Boolean(d?.storeId)).length} nút
+                  </span>
+                </h3>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  Theo dõi các nút đang nằm tại từng đại lý/cửa hàng và khôi phục về kho tổng khi cần.
+                </p>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <input
+                  type="text"
+                  value={deviceSearchQuery}
+                  onChange={(e) => setDeviceSearchQuery(e.target.value)}
+                  placeholder="Tìm mã nút, cửa hàng..."
+                  className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#0E6BA8]"
+                />
+                <select
+                  value={deviceStoreFilter}
+                  onChange={(e) => setDeviceStoreFilter(e.target.value)}
+                  aria-label="Lọc nút theo cửa hàng"
+                  className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#0E6BA8]"
+                >
+                  <option value="ALL">Tất cả cửa hàng</option>
+                  {allStores.map((store) => (
+                    <option key={String(store.id || store.storeId)} value={String(store.id || store.storeId)}>
+                      {store.name || store.storeName} ({store.code || store.storeCode || `#${store.id || store.storeId}`})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {(() => {
+              const allocatedList = allDevices
+                .filter((d) => Boolean(d?.storeId))
+                .filter((d) => deviceStoreFilter === 'ALL' || String(d.storeId) === deviceStoreFilter)
+                .filter((d) => {
+                  const q = deviceSearchQuery.trim().toLowerCase();
+                  if (!q) return true;
+                  const matchedStore = allStores.find((s) => String(s.id || s.storeId) === String(d.storeId));
+                  const storeLabel = `${d.store?.storeName || d.store?.name || matchedStore?.name || ''} ${matchedStore?.code || ''}`.toLowerCase();
+                  return (
+                    String(d.deviceId || '').toLowerCase().includes(q) ||
+                    String(d.buttonCode || '').toLowerCase().includes(q) ||
+                    String(d.serialNumber || '').toLowerCase().includes(q) ||
+                    storeLabel.includes(q)
+                  );
+                });
+
+              if (allocatedList.length === 0) {
+                return (
+                  <div className="rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800 py-8 text-center text-xs text-zinc-500">
+                    Chưa có nút bấm nào phù hợp bộ lọc đang ở cửa hàng.
+                  </div>
+                );
+              }
+
+              return (
+                <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-zinc-50 dark:bg-zinc-900/60 text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
+                      <tr>
+                        <th className="py-2.5 px-3 font-medium">Mã Thiết Bị</th>
+                        <th className="py-2.5 px-3 font-medium">Cửa Hàng Đang Giữ</th>
+                        <th className="py-2.5 px-3 font-medium">Khách Hàng</th>
+                        <th className="py-2.5 px-3 font-medium">Trạng Thái</th>
+                        <th className="py-2.5 px-3 font-medium text-right">Thao Tác</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
+                      {allocatedList.slice(0, 100).map((dev) => {
+                        const matchedStore = allStores.find((s) => String(s.id || s.storeId) === String(dev.storeId));
+                        const storeName = dev.store?.storeName || dev.store?.name || matchedStore?.name || `Cửa hàng #${dev.storeId}`;
+                        const storeCode = matchedStore?.code || matchedStore?.storeCode || '';
+                        return (
+                          <tr key={dev.id || dev.deviceId} className="hover:bg-zinc-50 dark:hover:bg-zinc-850/40">
+                            <td className="py-2.5 px-3 font-semibold text-zinc-900 dark:text-white">
+                              <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-xs">
+                                {dev.deviceId}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-zinc-800 dark:text-zinc-200">
+                              <span className="font-medium">{storeName}</span>
+                              {storeCode && (
+                                <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
+                                  {storeCode}
+                                </span>
+                              )}
+                            </td>
+                            <td className="py-2.5 px-3 text-zinc-600 dark:text-zinc-400">
+                              {dev.customer?.fullName || (dev.customerId ? `Khách #${dev.customerId}` : 'Chưa gắn khách')}
+                            </td>
+                            <td className="py-2.5 px-3">
+                              <span
+                                className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+                                  dev.status === 'ACTIVE'
+                                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
+                                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700'
+                                }`}
+                              >
+                                {dev.status === 'ACTIVE' ? 'Đang hoạt động' : dev.status === 'INACTIVE' ? 'Chưa kích hoạt' : dev.status || '—'}
+                              </span>
+                            </td>
+                            <td className="py-2.5 px-3 text-right">
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setResettingDevice(dev);
+                                  setResetDeviceIdInput(dev.deviceId);
+                                  setShowFactoryResetModal(true);
+                                }}
+                                className="px-2 py-1 rounded text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 border border-rose-200/60 dark:border-rose-900/50 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                                title="Khôi phục về kho tổng"
+                              >
+                                <RotateCcw className="w-3 h-3" />
+                                <span>Khôi phục về kho</span>
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              );
+            })()}
+          </div>
         </div>
       )}
 

@@ -36,15 +36,15 @@
     overscroll-behavior: none !important;
   }
 
-  /* Universal: Whenever any modal/popup is open, header must lie underneath the backdrop */
-  html.modal-open-locked header,
-  body.modal-open-locked header,
+  /* Universal: Whenever any modal/popup is open, top navbar header must lie underneath the backdrop (never disable modal headers) */
   html.modal-open-locked [data-navbar="true"],
   body.modal-open-locked [data-navbar="true"],
-  body:has([class*="fixed"][class*="inset-0"]:not([class*="pointer-events-none"]):not([class*="-z-"])) header,
-  html:has([class*="fixed"][class*="inset-0"]:not([class*="pointer-events-none"]):not([class*="-z-"])) header,
-  body:has([role="dialog"]) header,
-  body:has([data-modal="true"]) header {
+  html.modal-open-locked header:not([role="dialog"] header):not(dialog header):not(.responsive-modal header):not([data-modal="true"] header),
+  body.modal-open-locked header:not([role="dialog"] header):not(dialog header):not(.responsive-modal header):not([data-modal="true"] header),
+  body:has([class*="fixed"][class*="inset-0"]:not([class*="pointer-events-none"]):not([class*="-z-"])) [data-navbar="true"],
+  html:has([class*="fixed"][class*="inset-0"]:not([class*="pointer-events-none"]):not([class*="-z-"])) [data-navbar="true"],
+  body:has([role="dialog"]) [data-navbar="true"],
+  body:has([data-modal="true"]) [data-navbar="true"] {
     z-index: 0 !important;
     pointer-events: none !important;
   }
