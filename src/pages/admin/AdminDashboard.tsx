@@ -752,7 +752,10 @@ export const AdminDashboard: React.FC = () => {
       } else {
         setAuditLogs(DEFAULT_AUDIT_LOGS);
       }
-      if (unassignedRes.data.success) setUnassignedDevices(unassignedRes.data.data || []);
+      if (unassignedRes.data.success) {
+        const rawUnassigned = Array.isArray(unassignedRes.data.data) ? unassignedRes.data.data : [];
+        setUnassignedDevices(rawUnassigned.filter((d: any) => !d?.storeId && !d?.customerId));
+      }
       if (storesRes.data.success) { setAllStores(storesRes.data.data || []); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_admin_stores', JSON.stringify(storesRes.data.data || [])); } catch {} }
       if (usersRes.data?.success && Array.isArray(usersRes.data.data) && usersRes.data.data.length > 0) {
         const mapped = usersRes.data.data.map((u: any) => ({
