@@ -750,12 +750,47 @@ export const ShopPage: React.FC = () => {
                     <input type="checkbox" checked={cart.every((line) => line.selected)} onChange={(event) => setCart((old) => old.map((line) => ({ ...line, selected: event.target.checked })))} className="h-4 w-4 accent-[#287DA8]" />
                     Chọn tất cả ({cartGroups.length} cửa hàng)
                   </label>
-                  {cartGroups.map((group) => (
-                    <motion.section layout key={group.storeId} className="mb-4 overflow-hidden rounded-xl border border-slate-200 px-3">
-                      <label className="flex cursor-pointer items-center gap-2 border-b py-3 text-sm font-semibold">
-                        <input type="checkbox" checked={group.lines.every((line) => line.selected)} onChange={(event) => setCart((old) => old.map((line) => String(line.product.storeId) === group.storeId ? { ...line, selected: event.target.checked } : line))} className="h-4 w-4 accent-[#287DA8]" />
-                        <Store size={15} />{group.storeName}
-                      </label>
+                  {cartGroups.map((group) => {
+                    const isAllGroupSelected = group.lines.length > 0 && group.lines.every((line) => line.selected);
+                    const groupTotal = group.lines.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
+
+                    return (
+                    <motion.section layout key={group.storeId} className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white p-3 shadow-xs">
+                      <div className="flex items-center justify-between border-b pb-2.5">
+                        <label className="flex cursor-pointer items-center gap-2 text-sm font-bold text-slate-800">
+                          <input
+                            type="checkbox"
+                            checked={isAllGroupSelected}
+                            onChange={(event) =>
+                              setCart((old) =>
+                                old.map((line) =>
+                                  String(line.product.storeId) === group.storeId
+                                    ? { ...line, selected: event.target.checked }
+                                    : line
+                                )
+                              )
+                            }
+                            className="h-4 w-4 accent-[#287DA8]"
+                          />
+                          <Store size={15} className="text-[#287DA8] shrink-0" />
+                          <span className="truncate max-w-[170px]" title={group.storeName}>{group.storeName}</span>
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setCart((old) =>
+                              old.map((line) => ({
+                                ...line,
+                                selected: String(line.product.storeId) === group.storeId,
+                              }))
+                            )
+                          }
+                          title="Bỏ chọn các cửa hàng khác, chỉ chọn cửa hàng này"
+                          className="rounded-md border border-slate-200 bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 transition hover:bg-slate-100 hover:text-slate-900 cursor-pointer"
+                        >
+                          Chỉ chọn quán này
+                        </button>
+                      </div>
                   {group.lines.map(({ product, quantity, selected }) => (
                     <motion.div
                       layout
@@ -764,7 +799,7 @@ export const ShopPage: React.FC = () => {
                       animate={{ opacity: 1, height: 'auto', y: 0 }}
                       exit={{ opacity: 0, height: 0, x: -30 }}
                       transition={{ duration: 0.25 }}
-                      className="flex gap-3 border-b py-4"
+                      className="flex gap-3 border-b py-3.5"
                     >
                       <label className="flex shrink-0 cursor-pointer items-center" title="Chọn sản phẩm để thanh toán">
                         <input
@@ -774,7 +809,7 @@ export const ShopPage: React.FC = () => {
                           className="h-4 w-4 accent-[#287DA8]"
                         />
                       </label>
-                      <div className="grid h-16 w-16 shrink-0 place-items-center overflow-hidden rounded-xl bg-slate-50 border border-slate-100">
+                      <div className="grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-xl bg-slate-50 border border-slate-100">
                         {product.imageUrl ? (
                           <img src={product.imageUrl} alt="" crossOrigin="anonymous" referrerPolicy="no-referrer" loading="lazy" className="h-full w-full object-cover" />
                         ) : (
@@ -784,45 +819,78 @@ export const ShopPage: React.FC = () => {
                       <div className="min-w-0 flex-1">
                         <p className="truncate text-sm font-semibold">{product.name}</p>
                         <p className="text-xs text-slate-500">{product.store.name}</p>
-                        <div className="mt-2 flex items-center justify-between">
+                        <div className="mt-1.5 flex items-center justify-between">
                           <b className="text-sm text-[#287DA8]">{money(product.price * quantity)}</b>
-                          <div className="flex items-center gap-2">
+                          <div className="flex items-center gap-1.5">
                             <motion.button
                               whileTap={{ scale: 0.8 }}
                               onClick={() => changeQuantity(product, -1)}
-                              className="grid h-6 w-6 place-items-center rounded-md text-slate-600 hover:bg-slate-100"
+                              className="grid h-6 w-6 place-items-center rounded-md text-slate-600 hover:bg-slate-100 cursor-pointer"
                             >
-                              <Minus size={14} />
+                              <Minus size={13} />
                             </motion.button>
-                            <span className="text-sm font-medium min-w-4 text-center">{quantity}</span>
+                            <span className="text-xs font-medium min-w-4 text-center">{quantity}</span>
                             <motion.button
                               whileTap={{ scale: 0.8 }}
                               onClick={() => changeQuantity(product, 1)}
-                              className="grid h-6 w-6 place-items-center rounded-md text-slate-600 hover:bg-slate-100"
+                              className="grid h-6 w-6 place-items-center rounded-md text-slate-600 hover:bg-slate-100 cursor-pointer"
                             >
-                              <Plus size={14} />
+                              <Plus size={13} />
                             </motion.button>
                             <motion.button
                               whileTap={{ scale: 0.8 }}
                               onClick={() => removeCartItem(product.id)}
                               aria-label={`Xóa ${product.name}`}
                               title="Xóa sản phẩm"
-                              className="ml-1 grid h-7 w-7 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors"
+                              className="ml-1 grid h-6 w-6 place-items-center rounded-md text-slate-400 hover:bg-rose-50 hover:text-rose-600 transition-colors cursor-pointer"
                             >
-                              <Trash2 size={15} />
+                              <Trash2 size={14} />
                             </motion.button>
                           </div>
                         </div>
                       </div>
                     </motion.div>
                   ))}
+                      <div className="mt-2.5 pt-1.5 flex items-center justify-between text-xs">
+                        <span className="text-slate-500">
+                          Tiền hàng: <b className="text-slate-800 font-semibold">{money(groupTotal)}</b>
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setCart((old) =>
+                              old.map((line) => ({
+                                ...line,
+                                selected: String(line.product.storeId) === group.storeId,
+                              }))
+                            );
+                            setCartOpen(false);
+                            setCheckoutOpen(true);
+                          }}
+                          className="inline-flex items-center gap-1 rounded-lg bg-[#287DA8] px-2.5 py-1.5 text-xs font-semibold text-white shadow-xs transition hover:bg-[#206588] cursor-pointer"
+                        >
+                          Mua riêng quán này <ArrowRight size={13} />
+                        </button>
+                      </div>
                     </motion.section>
-                  ))}
+                    );
+                  })}
                 </AnimatePresence>
               )}
             </div>
 
             <div className="border-t p-5 bg-slate-50/50">
+              {cartGroups.length > 1 && selectedGroups.length > 1 && (
+                <div className="mb-3 rounded-xl border border-sky-200 bg-sky-50/80 p-2.5 text-[11px] leading-relaxed text-sky-900">
+                  💡 <b>Mẹo quản lý:</b> Bạn đang chọn {selectedGroups.length} cửa hàng. Bạn có thể bấm <b>"Mua riêng quán này"</b> ở từng cửa hàng phía trên để thanh toán và nhận đơn riêng dễ dàng hơn!
+                </div>
+              )}
+              {selectedGroups.length === 1 && cartGroups.length > 1 && (
+                <div className="mb-3 rounded-xl border border-emerald-200 bg-emerald-50/80 p-2.5 text-xs text-emerald-800 flex items-center justify-between">
+                  <span className="truncate max-w-[240px]">✓ <b>Đang thanh toán riêng:</b> {selectedGroups[0].storeName}</span>
+                  <span className="font-bold text-[#287DA8]">{money(total)}</span>
+                </div>
+              )}
               <div className="mb-4 flex justify-between text-sm">
                 <span className="text-slate-600">Tổng cộng</span>
                 <b className="text-lg text-[#287DA8]">{money(total)}</b>
@@ -832,14 +900,16 @@ export const ShopPage: React.FC = () => {
                 whileTap={{ scale: 0.98 }}
                 disabled={!selectedCart.length}
                 onClick={() => setCheckoutOpen(true)}
-                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#287DA8] py-3 font-semibold text-white shadow-sm transition hover:bg-[#206588] disabled:bg-slate-300 disabled:cursor-not-allowed"
+                className="flex w-full items-center justify-center gap-2 rounded-xl bg-[#287DA8] py-3 font-semibold text-white shadow-sm transition hover:bg-[#206588] disabled:bg-slate-300 disabled:cursor-not-allowed cursor-pointer"
               >
-                Thanh toán {selectedCount} sản phẩm đã chọn <ArrowRight size={17} />
+                {selectedGroups.length === 1
+                  ? `Thanh toán riêng: ${selectedGroups[0].storeName} (${money(total)})`
+                  : `Thanh toán ${selectedCount} sản phẩm đã chọn`} <ArrowRight size={17} />
               </motion.button>
               {cart.length > 0 && (
                 <button
                   onClick={() => setCart([])}
-                  className="mt-3 w-full text-center text-xs text-slate-400 hover:text-rose-600 transition-colors"
+                  className="mt-3 w-full text-center text-xs text-slate-400 hover:text-rose-600 transition-colors cursor-pointer"
                 >
                   Xóa toàn bộ giỏ
                 </button>
