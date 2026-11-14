@@ -917,15 +917,6 @@ export const AdminDashboard: React.FC = () => {
       return;
     }
 
-    const unavailableDeviceIds = unassignedDevices
-      .filter((device) => selectedDeviceIds.includes(device.deviceId) && device.storeId)
-      .map((device) => device.deviceId);
-    if (unavailableDeviceIds.length > 0) {
-      toast.warning(`Nút ${unavailableDeviceIds.join(', ')} đã được bàn giao cho cửa hàng khác. Vui lòng tải lại danh sách kho.`);
-      fetchAdminData();
-      return;
-    }
-
     setIsProcessingBatch(true);
     try {
       const res = await api.post('/devices/allocate-store', {
@@ -933,6 +924,7 @@ export const AdminDashboard: React.FC = () => {
         deviceIds: selectedDeviceIds,
       });
       if (res.data.success) {
+        setUnassignedDevices((prev) => prev.filter((d) => !selectedDeviceIds.includes(d.deviceId)));
         setShowAllocateModal(false);
         setSelectedDeviceIds([]);
         toast.success(res.data.message || 'Cấp phát nút bấm thành công!');
