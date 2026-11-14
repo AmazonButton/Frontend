@@ -383,7 +383,7 @@ export const StoreDashboard: React.FC = () => {
     socket.on('ORDER_STATUS_CHANGED', handleOrderUpdated);
     socket.on('ORDER_PAYMENT_CHANGED', handleOrderUpdated);
     socket.on('ORDER_PAYMENT_CONFIRMED', (payload: any) => {
-      handleOrderUpdated(payload);
+      handleOrderUpdated({ ...payload, paymentStatus: 'PAID' });
       const rawNum = payload?.order?.orderNumber || payload?.orderCode || payload?.orderId || '';
       const amount = payload?.amount ? Number(payload.amount).toLocaleString('vi-VN') + ' ₫' : '';
       toast.success(
@@ -1192,6 +1192,8 @@ export const StoreDashboard: React.FC = () => {
                     const orderStatus = pendingStatus && pendingStatus !== 'COMPLETED' && !['COMPLETED', 'CANCELLED', 'REJECTED'].includes(confirmedStatus)
                       ? pendingStatus : confirmedStatus;
                     const isCancelled = ['CANCELLED', 'REJECTED'].includes(orderStatus);
+                    const paymentStatus = String(order.paymentStatus || (order as any).payment_status || '').toUpperCase();
+                    const paymentMethod = String(order.paymentMethod || (order as any).payment_method || '').toUpperCase();
                     return (
                       <motion.tr
                         key={order.id}
@@ -1268,16 +1270,16 @@ export const StoreDashboard: React.FC = () => {
                             </span>
                             {isCancelled ? (
                               <span className="text-zinc-600 dark:text-zinc-400">Đơn đã hủy · Không cần thanh toán</span>
-                            ) : order.paymentStatus === 'REFUND_PENDING' ? (
+                            ) : paymentStatus === 'REFUND_PENDING' ? (
                               <span className="text-rose-600 dark:text-rose-400">Đã nhận tiền · Chờ hoàn PayOS</span>
-                            ) : order.paymentStatus === 'PAID' ? (
+                            ) : paymentStatus === 'PAID' ? (
                               <span className="inline-flex items-center gap-1 text-emerald-700 dark:text-emerald-300 font-medium">
                                 <Check className="w-3 h-3" />
-                                {['CASH_ON_DELIVERY', 'COD'].includes(order.paymentMethod as string) ? 'Đã thu tiền mặt' : 'Đã thanh toán (PayOS)'}
+                                {['CASH_ON_DELIVERY', 'COD'].includes(paymentMethod) ? 'Đã thu tiền mặt' : 'Đã thanh toán thành công'}
                               </span>
-                            ) : ['CASH_ON_DELIVERY', 'COD'].includes(order.paymentMethod as string) ? (
+                            ) : ['CASH_ON_DELIVERY', 'COD'].includes(paymentMethod) ? (
                               <span className="text-amber-700 dark:text-amber-300 font-medium">COD · Chờ thu tiền khi giao</span>
-                            ) : order.paymentMethod === 'PAYOS' ? (
+                            ) : paymentMethod === 'PAYOS' ? (
                               <span className="text-amber-700 dark:text-amber-300 font-medium">Chờ thanh toán PayOS</span>
                             ) : (
                               <span className="text-zinc-600 dark:text-zinc-400">Chờ thanh toán</span>

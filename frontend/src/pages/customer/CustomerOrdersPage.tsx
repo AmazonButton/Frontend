@@ -472,7 +472,7 @@ export const CustomerOrdersPage: React.FC = () => {
                           <div className="text-right">
                             <p className="text-sm font-bold text-slate-900 tabular-nums dark:text-white">{formatPrice(order.totalAmount)}</p>
                             <p className={`mt-1 text-[10px] ${isUnpaid ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
-                              {isCancelled ? 'Đơn đã hủy · Không cần thanh toán' : order.paymentStatus === 'PAID' ? 'Đã thanh toán' : (order.paymentMethod === 'COD' || order.paymentMethod === 'CASH_ON_DELIVERY') ? 'Chờ thanh toán (Tiền mặt khi nhận)' : 'Chờ thanh toán (PayOS)'}
+                              {isCancelled ? 'Đơn đã hủy · Không cần thanh toán' : String(order.paymentStatus || '').toUpperCase() === 'PAID' ? 'Đã thanh toán thành công' : ['COD', 'CASH_ON_DELIVERY'].includes(String(order.paymentMethod || '').toUpperCase()) ? 'Chờ thanh toán (Tiền mặt khi nhận)' : 'Chờ thanh toán (PayOS)'}
                             </p>
                           </div>
                           <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
@@ -501,7 +501,7 @@ export const CustomerOrdersPage: React.FC = () => {
                               <div className="md:w-64 space-y-3 text-xs">
                                 <ShippingContact order={order} />
                                 {isCancelled && order.cancellationReason && <p className="text-rose-600">Lý do hủy: {order.cancellationReason}</p>}
-                                <div className="flex gap-2 text-slate-500 dark:text-zinc-400"><CreditCard className="w-3.5 h-3.5 shrink-0 text-slate-400" /><span>{isCancelled ? 'Đơn đã hủy, không phát sinh thanh toán' : ['COD', 'CASH_ON_DELIVERY'].includes(order.paymentMethod as string) ? (order.paymentStatus === 'PAID' ? 'Đã thu tiền mặt khi nhận hàng' : 'Tiền mặt khi nhận hàng (Chờ thanh toán)') : order.paymentStatus === 'PAID' ? 'Đã thanh toán trực tuyến qua PayOS' : 'Thanh toán trực tuyến PayOS (Chờ thanh toán)'}</span></div>
+                                <div className="flex gap-2 text-slate-500 dark:text-zinc-400"><CreditCard className="w-3.5 h-3.5 shrink-0 text-slate-400" /><span>{isCancelled ? 'Đơn đã hủy, không phát sinh thanh toán' : ['COD', 'CASH_ON_DELIVERY'].includes(String(order.paymentMethod || '').toUpperCase()) ? (String(order.paymentStatus || '').toUpperCase() === 'PAID' ? 'Đã thu tiền mặt khi nhận hàng' : 'Tiền mặt khi nhận hàng (Chờ thanh toán)') : String(order.paymentStatus || '').toUpperCase() === 'PAID' ? 'Đã thanh toán thành công qua PayOS' : 'Thanh toán trực tuyến PayOS (Chờ thanh toán)'}</span></div>
                               </div>
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-200/70 flex justify-between text-sm font-bold text-slate-900 dark:border-zinc-700 dark:text-white"><span>Tổng thanh toán</span><span className="tabular-nums">{formatPrice(order.totalAmount)}</span></div>
