@@ -9,6 +9,7 @@ import { useSearchParams } from 'react-router-dom';
 
 const AdminLiveAnalytics = React.lazy(() => import('./AdminLiveData').then(module => ({ default: module.AdminLiveAnalytics })));
 const AdminLiveDevices = React.lazy(() => import('./AdminLiveData').then(module => ({ default: module.AdminLiveDevices })));
+import { WarrantyPanel } from '../../components/devices/WarrantyPanel';
 
 const modalBackdropVariants: Variants = {
   hidden: { opacity: 0 },
@@ -1799,6 +1800,13 @@ export const AdminDashboard: React.FC = () => {
               );
             })()}
           </div>
+
+          <WarrantyPanel
+            mode="admin"
+            devices={allDevices}
+            stores={allStores}
+            onRefreshDevices={fetchAdminData}
+          />
         </div>
       )}
 

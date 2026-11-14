@@ -1,0 +1,514 @@
+import React, { useMemo, useState } from 'react';
+import { ShieldCheck, AlertTriangle, RefreshCw, Lock, CheckCircle2, XCircle, Plus, Wrench } from 'lucide-react';
+import { api } from '../../services/api';
+import { toast } from '../../context/ToastContext';
+import {
+  WARRANTY_GROUPS,
+  calculateWarrantyDeduction,
+  createWarrantyTicket,
+  loadWarrantyTickets,
+  updateWarrantyTicket,
+  type WarrantyFaultGroup,
+  type WarrantyTicket,
+  type WarrantyTicketStatus,
+} from '../../services/warranty';
+
+interface WarrantyPanelProps {
+  mode: 'admin' | 'staff';
+  devices?: any[];
+  stores?: any[];
+  currentStoreId?: string;
+  currentStoreName?: string;
+  currentUserName?: string;
+  currentUserRole?: string;
+  onRefreshDevices?: () => void;
+}
+
+const STATUS_BADGE: Record<WarrantyTicketStatus, { label: string; cls: string }> = {
+  PENDING: {
+    label: 'Chờ xử lý',
+    cls: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800',
+  },
+  APPROVED_SWAP: {
+    label: 'Đã duyệt đổi 1-1',
+    cls: 'bg-sky-50 text-[#0E6BA8] border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800',
+  },
+  RESOLVED: {
+    label: 'Hoàn tất',
+    cls: 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800',
+  },
+  REJECTED: {
+    label: 'Từ chối',
+    cls: 'bg-rose-50 text-rose-700 border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800',
+  },
+};
+
+export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
+  mode,
+  devices = [],
+  stores = [],
+  currentStoreId,
+  currentStoreName,
+  currentUserName,
+  currentUserRole,
+  onRefreshDevices,
+}) => {
+  const [tickets, setTickets] = useState<WarrantyTicket[]>(() => loadWarrantyTickets());
+  const [showPolicy, setShowPolicy] = useState(false);
+  const [showCreateForm, setShowCreateForm] = useState(false);
+  const [statusFilter, setStatusFilter] = useState<'ALL' | WarrantyTicketStatus>('ALL');
+  const [groupFilter, setGroupFilter] = useState<'ALL' | WarrantyFaultGroup>('ALL');
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  // Form state
+  const [deviceIdInput, setDeviceIdInput] = useState('');
+  const [selectedStoreId, setSelectedStoreId] = useState(currentStoreId || '');
+  const [faultGroup, setFaultGroup] = useState<WarrantyFaultGroup>('GROUP_A');
+  const [faultCode, setFaultCode] = useState(WARRANTY_GROUPS.GROUP_A.faults[0].code);
+  const [depositAmount, setDepositAmount] = useState<number>(100000);
+  const [deductionPercent, setDeductionPercent] = useState<number>(WARRANTY_GROUPS.GROUP_A.defaultDeduction);
+  const [inspectionNote, setInspectionNote] = useState('');
+
+  const activeGroup = WARRANTY_GROUPS[faultGroup];
+  const calc = useMemo(
+    () => calculateWarrantyDeduction(depositAmount, faultGroup, deductionPercent),
+    [depositAmount, faultGroup, deductionPercent]
+  );
+
+  const handleGroupChange = (nextGroup: WarrantyFaultGroup) => {
+    setFaultGroup(nextGroup);
+    const cfg = WARRANTY_GROUPS[nextGroup];
+    setFaultCode(cfg.faults[0].code);
+    setDeductionPercent(cfg.defaultDeduction);
+  };
+
+  const handleCreateTicket = (e: React.FormEvent) => {
+    e.preventDefault();
+    const cleanId = deviceIdInput.trim().toUpperCase();
+    if (!cleanId) {
+      toast.warning('Vui lòng nhập hoặc chọn mã nút bấm (VD: SOB-000003).');
+      return;
+    }
+    const matchedDevice = devices.find((d) => String(d.deviceId).toUpperCase() === cleanId);
+    const resolvedStoreId = selectedStoreId || currentStoreId || (matchedDevice?.storeId ? String(matchedDevice.storeId) : undefined);
+    const matchedStore = stores.find((s) => String(s.id || s.storeId) === String(resolvedStoreId));
+    const resolvedStoreName =
+      currentStoreName ||
+      matchedDevice?.store?.storeName ||
+      matchedDevice?.store?.name ||
+      matchedStore?.name ||
+      matchedStore?.storeName;
+
+    createWarrantyTicket({
+      deviceId: cleanId,
+      storeId: resolvedStoreId,
+      storeName: resolvedStoreName,
+      faultGroup,
+      faultCode,
+      depositAmount,
+      deductionPercent,
+      inspectionNote,
+      reportedBy: currentUserName || (mode === 'admin' ? 'Admin' : 'Nhân viên cửa hàng'),
+      reportedRole: currentUserRole || (mode === 'admin' ? 'ADMIN' : 'STAFF'),
+    });
+    setTickets(loadWarrantyTickets());
+    setShowCreateForm(false);
+    setDeviceIdInput('');
+    setInspectionNote('');
+    toast.success(`Đã lập phiếu bảo hành cho nút ${cleanId} (${activeGroup.shortLabel}).`);
+  };
+
+  const handleAdminAction = async (
+    ticket: WarrantyTicket,
+    action: 'APPROVE_SWAP' | 'LOCK_DEVICE' | 'EXTEND_WARRANTY' | 'CHILD_LOCK_2S' | 'RESOLVE' | 'REJECT'
+  ) => {
+    setBusyId(ticket.id);
+    try {
+      const encodedId = encodeURIComponent(ticket.deviceId);
+      if (action === 'APPROVE_SWAP') {
+        await api.post(`/devices/${encodedId}/factory-reset`).catch(() => null);
+        setTickets(updateWarrantyTicket(ticket.id, { status: 'APPROVED_SWAP', adminNote: 'Đã duyệt đổi mới 1-1 & thu hồi nút lỗi về kho.' }));
+        toast.success(`Đã duyệt đổi 1-1 cho nút ${ticket.deviceId}.`);
+        onRefreshDevices?.();
+      } else if (action === 'LOCK_DEVICE') {
+        await api.patch(`/devices/${encodedId}`, { status: 'DISABLED' }).catch(() => null);
+        setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED', adminNote: 'Đã khóa nút hỏng/mất (DISABLED).' }));
+        toast.success(`Đã khóa nút ${ticket.deviceId} và chốt phiếu.`);
+        onRefreshDevices?.();
+      } else if (action === 'EXTEND_WARRANTY') {
+        await api.patch(`/devices/${encodedId}/extend-warranty`, { months: 6 });
+        setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED', adminNote: 'Đã gia hạn bảo hành +6 tháng.' }));
+        toast.success(`Đã gia hạn bảo hành +6 tháng cho nút ${ticket.deviceId}.`);
+        onRefreshDevices?.();
+      } else if (action === 'CHILD_LOCK_2S') {
+        await api.patch(`/devices/${encodedId}`, { holdDurationMs: 2000 }).catch(() => null);
+        setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED', adminNote: 'Đã bật chế độ chống bấm nhầm (nhấn giữ 2s).' }));
+        toast.success(`Đã bật giữ nút 2 giây chống trẻ em bấm phá cho ${ticket.deviceId}.`);
+        onRefreshDevices?.();
+      } else if (action === 'RESOLVE') {
+        setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED' }));
+        toast.success(`Đã hoàn tất phiếu ${ticket.id}.`);
+      } else if (action === 'REJECT') {
+        setTickets(updateWarrantyTicket(ticket.id, { status: 'REJECTED' }));
+        toast.info(`Đã từ chối phiếu ${ticket.id}.`);
+      }
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Không thể thực hiện thao tác bảo hành.');
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const visibleTickets = useMemo(() => {
+    return tickets
+      .filter((t) => {
+        if (mode === 'staff' && currentStoreId && t.storeId && String(t.storeId) !== String(currentStoreId)) {
+          return false;
+        }
+        if (statusFilter !== 'ALL' && t.status !== statusFilter) return false;
+        if (groupFilter !== 'ALL' && t.faultGroup !== groupFilter) return false;
+        return true;
+      });
+  }, [tickets, mode, currentStoreId, statusFilter, groupFilter]);
+
+  return (
+    <div className="pt-6 border-t border-zinc-200 dark:border-zinc-800 space-y-4">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
+            <ShieldCheck className="w-4 h-4 text-[#0E6BA8]" />
+            <span>Bảo Hành & Đổi Trả 1-1 Thiết Bị</span>
+            <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-sky-50 dark:bg-sky-950/40 text-[#0E6BA8] dark:text-sky-300 border border-sky-200 dark:border-sky-800">
+              {visibleTickets.length} phiếu
+            </span>
+          </h3>
+          <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+            {mode === 'admin'
+              ? 'Tiếp nhận, phân loại lỗi Nhóm A/B/C/D, duyệt đổi mới 1-1 cho Store và khóa nút hỏng nặng.'
+              : 'Kiểm tra ngoại quan khi thu hồi/đổi nút, tính mức khấu trừ cọc (0% / 30% / 70-100%) và gửi yêu cầu bảo hành.'}
+          </p>
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setShowPolicy((v) => !v)}
+            className="px-3 py-1.5 rounded-lg text-xs font-medium border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors cursor-pointer"
+          >
+            {showPolicy ? 'Ẩn bảng quy chuẩn A/B/C/D' : 'Xem quy chuẩn Nhóm A/B/C/D'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setShowCreateForm((v) => !v)}
+            className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-[#0E6BA8] hover:bg-[#0B5585] text-white inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+          >
+            <Plus className="w-3.5 h-3.5" />
+            <span>Lập phiếu bảo hành</span>
+          </button>
+        </div>
+      </div>
+
+      {showPolicy && (
+        <div className="grid gap-3 sm:grid-cols-2">
+          {(Object.values(WARRANTY_GROUPS) as typeof WARRANTY_GROUPS[WarrantyFaultGroup][]).map((g) => (
+            <div key={g.id} className="rounded-xl border border-zinc-200 dark:border-zinc-800 p-3.5 bg-zinc-50/70 dark:bg-zinc-900/50 space-y-1.5 text-xs">
+              <div className="flex items-center justify-between gap-2">
+                <span className={`px-2 py-0.5 rounded-full text-[10px] font-semibold border ${g.badgeClass}`}>
+                  {g.shortLabel}
+                </span>
+              </div>
+              <p className="font-semibold text-zinc-900 dark:text-white">{g.title}</p>
+              <p className="text-zinc-600 dark:text-zinc-400"><strong>Cư dân:</strong> {g.customerPolicy}</p>
+              <p className="text-zinc-600 dark:text-zinc-400"><strong>Store ↔ Admin:</strong> {g.storeAdminPolicy}</p>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {showCreateForm && (
+        <form onSubmit={handleCreateTicket} className="rounded-xl border border-sky-200 dark:border-sky-900/60 bg-sky-50/40 dark:bg-sky-950/15 p-4 space-y-3 text-xs">
+          <div className="grid gap-3 sm:grid-cols-3">
+            <div>
+              <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">Mã nút bấm *</label>
+              <input
+                type="text"
+                list="warranty-device-options"
+                value={deviceIdInput}
+                onChange={(e) => setDeviceIdInput(e.target.value)}
+                placeholder="VD: SOB-000003"
+                className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white"
+                required
+              />
+              <datalist id="warranty-device-options">
+                {devices.slice(0, 100).map((d) => (
+                  <option key={d.deviceId} value={d.deviceId}>
+                    {d.deviceId} {d.store?.name || d.store?.storeName ? `— ${d.store?.name || d.store?.storeName}` : ''}
+                  </option>
+                ))}
+              </datalist>
+            </div>
+            {mode === 'admin' && (
+              <div>
+                <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">Cửa hàng liên quan</label>
+                <select
+                  value={selectedStoreId}
+                  onChange={(e) => setSelectedStoreId(e.target.value)}
+                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white"
+                >
+                  <option value="">Tự nhận theo nút / Kho tổng</option>
+                  {stores.map((s) => (
+                    <option key={String(s.id || s.storeId)} value={String(s.id || s.storeId)}>
+                      {s.name || s.storeName}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+            <div>
+              <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">Phân nhóm lỗi *</label>
+              <select
+                value={faultGroup}
+                onChange={(e) => handleGroupChange(e.target.value as WarrantyFaultGroup)}
+                className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white"
+              >
+                {Object.values(WARRANTY_GROUPS).map((g) => (
+                  <option key={g.id} value={g.id}>{g.shortLabel}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">Mã lỗi chi tiết *</label>
+              <select
+                value={faultCode}
+                onChange={(e) => setFaultCode(e.target.value)}
+                className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white"
+              >
+                {activeGroup.faults.map((f) => (
+                  <option key={f.code} value={f.code}>{f.label}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">Tiền cọc gốc (VNĐ)</label>
+              <input
+                type="number"
+                min={0}
+                step={10000}
+                value={depositAmount}
+                onChange={(e) => setDepositAmount(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white"
+              />
+            </div>
+            <div>
+              <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                % Khấu trừ cọc ({activeGroup.deductionMin}%–{activeGroup.deductionMax}%)
+              </label>
+              <input
+                type="number"
+                min={activeGroup.deductionMin}
+                max={activeGroup.deductionMax}
+                disabled={activeGroup.deductionMin === activeGroup.deductionMax}
+                value={deductionPercent}
+                onChange={(e) => setDeductionPercent(Number(e.target.value))}
+                className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white disabled:opacity-60"
+              />
+            </div>
+          </div>
+
+          <div>
+            <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">Ghi chú kiểm tra ngoại quan / tình trạng nút</label>
+            <input
+              type="text"
+              value={inspectionNote}
+              onChange={(e) => setInspectionNote(e.target.value)}
+              placeholder="VD: Vỏ nút bị nứt góc phải, mạch bên trong còn sống..."
+              className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-white"
+            />
+          </div>
+
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-2 border-t border-sky-200/70 dark:border-sky-900/50">
+            <div className="flex flex-wrap gap-4 text-xs">
+              <span>Khấu trừ: <strong className="text-rose-600 dark:text-rose-400">{calc.deductionAmount.toLocaleString('vi-VN')} ₫ ({calc.percent}%)</strong></span>
+              <span>Hoàn lại / Giữ cọc: <strong className="text-emerald-600 dark:text-emerald-400">{calc.refundAmount.toLocaleString('vi-VN')} ₫</strong></span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setShowCreateForm(false)}
+                className="px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 cursor-pointer"
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                className="px-4 py-1.5 rounded-lg bg-[#0E6BA8] text-white font-semibold hover:bg-[#0B5585] cursor-pointer"
+              >
+                Lưu phiếu bảo hành
+              </button>
+            </div>
+          </div>
+        </form>
+      )}
+
+      <div className="flex flex-wrap items-center gap-2">
+        <select
+          value={statusFilter}
+          onChange={(e) => setStatusFilter(e.target.value as 'ALL' | WarrantyTicketStatus)}
+          aria-label="Lọc theo trạng thái bảo hành"
+          className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
+        >
+          <option value="ALL">Tất cả trạng thái</option>
+          <option value="PENDING">Chờ xử lý</option>
+          <option value="APPROVED_SWAP">Đã duyệt đổi 1-1</option>
+          <option value="RESOLVED">Hoàn tất</option>
+          <option value="REJECTED">Từ chối</option>
+        </select>
+        <select
+          value={groupFilter}
+          onChange={(e) => setGroupFilter(e.target.value as 'ALL' | WarrantyFaultGroup)}
+          aria-label="Lọc theo nhóm lỗi bảo hành"
+          className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
+        >
+          <option value="ALL">Tất cả nhóm lỗi (A/B/C/D)</option>
+          <option value="GROUP_A">Nhóm A · Lỗi tự nhiên (0%)</option>
+          <option value="GROUP_B">Nhóm B · Mạng & Trẻ em (0đ)</option>
+          <option value="GROUP_C">Nhóm C · Vỡ vỏ nhẹ (30%)</option>
+          <option value="GROUP_D">Nhóm D · Hỏng nặng/Mất (70-100%)</option>
+        </select>
+      </div>
+
+      {visibleTickets.length === 0 ? (
+        <div className="rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800 py-8 text-center text-xs text-zinc-500">
+          Chưa có phiếu bảo hành nào. Bấm <strong>"Lập phiếu bảo hành"</strong> để ghi nhận nút lỗi hoặc hỗ trợ khách hàng.
+        </div>
+      ) : (
+        <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
+          <table className="w-full text-left text-xs">
+            <thead className="bg-zinc-50 dark:bg-zinc-900/60 text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
+              <tr>
+                <th className="py-2.5 px-3 font-medium">Mã Phiếu / Nút</th>
+                <th className="py-2.5 px-3 font-medium">Nhóm & Mã Lỗi</th>
+                <th className="py-2.5 px-3 font-medium">Khấu Trừ Cọc</th>
+                <th className="py-2.5 px-3 font-medium">Trạng Thái</th>
+                <th className="py-2.5 px-3 font-medium text-right">Thao Tác</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
+              {visibleTickets.map((ticket) => {
+                const grp = WARRANTY_GROUPS[ticket.faultGroup];
+                const st = STATUS_BADGE[ticket.status];
+                const isBusy = busyId === ticket.id;
+                return (
+                  <tr key={ticket.id} className="hover:bg-zinc-50 dark:hover:bg-zinc-850/40">
+                    <td className="py-2.5 px-3">
+                      <div className="font-semibold text-zinc-900 dark:text-white">{ticket.deviceId}</div>
+                      <div className="text-[11px] text-zinc-500">{ticket.id}{ticket.storeName ? ` · ${ticket.storeName}` : ''}</div>
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <span className={`inline-block px-2 py-0.5 rounded-full text-[10px] font-medium border ${grp.badgeClass}`}>
+                        {grp.shortLabel}
+                      </span>
+                      <div className="mt-1 font-medium text-zinc-800 dark:text-zinc-200">{ticket.faultLabel}</div>
+                      <div className="text-[11px] text-zinc-500 max-w-xs truncate" title={ticket.inspectionNote}>{ticket.inspectionNote}</div>
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <div className="font-semibold text-rose-600 dark:text-rose-400">
+                        -{ticket.deductionAmount.toLocaleString('vi-VN')} ₫ ({ticket.deductionPercent}%)
+                      </div>
+                      <div className="text-[11px] text-emerald-600 dark:text-emerald-400">
+                        Còn: {ticket.refundAmount.toLocaleString('vi-VN')} ₫
+                      </div>
+                    </td>
+                    <td className="py-2.5 px-3">
+                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${st.cls}`}>
+                        {st.label}
+                      </span>
+                      {ticket.adminNote && (
+                        <div className="mt-1 text-[10px] text-zinc-500 max-w-[180px] truncate" title={ticket.adminNote}>{ticket.adminNote}</div>
+                      )}
+                    </td>
+                    <td className="py-2.5 px-3 text-right">
+                      <div className="inline-flex flex-wrap justify-end gap-1.5">
+                        {ticket.faultGroup === 'GROUP_B' && ticket.status === 'PENDING' && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => void handleAdminAction(ticket, 'CHILD_LOCK_2S')}
+                            className="px-2 py-1 rounded text-[11px] font-medium bg-sky-50 text-[#0E6BA8] border border-sky-200 hover:bg-sky-100 inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                          >
+                            <Wrench className="w-3 h-3" />
+                            <span>Giữ 2s</span>
+                          </button>
+                        )}
+                        {mode === 'admin' && ticket.status === 'PENDING' && (
+                          <>
+                            {(ticket.faultGroup === 'GROUP_A' || ticket.faultGroup === 'GROUP_C') && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => void handleAdminAction(ticket, 'APPROVE_SWAP')}
+                                className="px-2 py-1 rounded text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              >
+                                <RefreshCw className="w-3 h-3" />
+                                <span>Duyệt đổi 1-1</span>
+                              </button>
+                            )}
+                            {ticket.faultGroup === 'GROUP_D' && (
+                              <button
+                                type="button"
+                                disabled={isBusy}
+                                onClick={() => void handleAdminAction(ticket, 'LOCK_DEVICE')}
+                                className="px-2 py-1 rounded text-[11px] font-medium bg-rose-50 text-rose-700 border border-rose-200 hover:bg-rose-100 inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              >
+                                <Lock className="w-3 h-3" />
+                                <span>Khóa nút</span>
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => void handleAdminAction(ticket, 'EXTEND_WARRANTY')}
+                              className="px-2 py-1 rounded text-[11px] font-medium border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                            >
+                              <CheckCircle2 className="w-3 h-3" />
+                              <span>+6T BH</span>
+                            </button>
+                            <button
+                              type="button"
+                              disabled={isBusy}
+                              onClick={() => void handleAdminAction(ticket, 'REJECT')}
+                              className="px-2 py-1 rounded text-[11px] font-medium text-zinc-500 hover:text-rose-600 inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                              title="Từ chối"
+                            >
+                              <XCircle className="w-3 h-3" />
+                            </button>
+                          </>
+                        )}
+                        {mode === 'admin' && ticket.status === 'APPROVED_SWAP' && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => void handleAdminAction(ticket, 'RESOLVE')}
+                            className="px-2 py-1 rounded text-[11px] font-medium bg-emerald-50 text-emerald-700 border border-emerald-200 hover:bg-emerald-100 inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                          >
+                            <CheckCircle2 className="w-3 h-3" />
+                            <span>Hoàn tất</span>
+                          </button>
+                        )}
+                        {mode === 'staff' && ticket.status === 'PENDING' && (
+                          <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
+                            <AlertTriangle className="w-3 h-3" />
+                            <span>Chờ Admin duyệt</span>
+                          </span>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+};

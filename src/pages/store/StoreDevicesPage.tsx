@@ -10,6 +10,7 @@ import { useAuth } from '../../context/AuthContext';
 import { deviceDashboardMetrics, formatMetric } from '../../services/dashboard-metrics';
 import { useDashboardRefresh } from '../../hooks/useDashboardRefresh';
 import { DeviceProductRemoval } from '../../components/devices/DeviceProductRemoval';
+import { WarrantyPanel } from '../../components/devices/WarrantyPanel';
 import { subscribeToStore, getSocket } from '../../services/socket';
 import { Device, Product, DeviceTelemetry, DeviceAuditLog } from '../../types';
 import { QRCodeSVG } from 'qrcode.react';
@@ -1464,6 +1465,18 @@ const StoreDevicesWorkspace: React.FC = () => {
           </motion.tbody>
           </table>
         )}
+      </div>
+
+      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-2xs">
+        <WarrantyPanel
+          mode="staff"
+          devices={devices}
+          currentStoreId={user?.storeId ? String(user.storeId) : undefined}
+          currentStoreName={user?.store?.name}
+          currentUserName={user?.fullName}
+          currentUserRole={user?.role}
+          onRefreshDevices={() => void fetchData()}
+        />
       </div>
 
       {/* ========================================================================= */}
