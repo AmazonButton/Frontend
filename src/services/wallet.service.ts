@@ -11,6 +11,7 @@ export interface StoreWalletInfo {
   payosPayoutBalance?: number;
   payosPayoutConnected?: boolean;
   bankAccount?: {
+    id?: string;
     bankName: string;
     bankBin: string;
     accountNumber: string;
@@ -80,32 +81,16 @@ export const walletService = {
    * Cập nhật tài khoản ngân hàng thụ hưởng nhận tiền rút
    */
   async updateBankAccount(data: UpdateBankAccountDto, storeId?: string | number) {
-    // Backend.git DTO: { bankName, bankAccountNumber, bankAccountHolder }
-    // Main.git DTO:    { bankName, bankBin, accountNumber, accountHolderName }
-    try {
-      const res = await api.put('/store/wallet/bank-account', {
-        bankName: data.bankName,
-        bankBin: data.bankBin,
-        bankAccountNumber: data.accountNumber,
-        bankAccountHolder: data.accountHolderName,
-      }, {
-        params: storeId ? { storeId } : undefined,
-      });
-      return res.data;
-    } catch (err: any) {
-      if (err.response?.status === 400) {
-        const res = await api.put('/store/wallet/bank-account', {
-          bankName: data.bankName,
-          bankBin: data.bankBin,
-          accountNumber: data.accountNumber,
-          accountHolderName: data.accountHolderName,
-        }, {
-          params: storeId ? { storeId } : undefined,
-        });
-        return res.data;
-      }
-      throw err;
-    }
+    // One canonical contract. A validation/business error must not retry a mutation.
+    const res = await api.put('/store/wallet/bank-account', {
+      bankName: data.bankName,
+      bankBin: data.bankBin,
+      bankAccountNumber: data.accountNumber,
+      bankAccountHolder: data.accountHolderName,
+    }, {
+      params: storeId ? { storeId } : undefined,
+    });
+    return res.data;
   },
 
   /**
@@ -164,6 +149,23 @@ export const walletService = {
   async lookupBankAccount(bankBin: string, accountNumber: string) {
     const res = await api.post('/stores/bank-accounts/lookup', { bankBin, accountNumber });
     return walletEnvelope(res.data);
+  },
+
+  async initiateBankVerification(data: { storeId: string; bankBin: string; accountNumber: string; accountName?: string; returnUrl?: string; cancelUrl?: string }) {
+    const res = await api.post('/stores/bank-accounts/verification', data);
+    return res.data;
+  },
+
+  async getBankVerification(id: string) {
+    const res = await api.get(`/bank-account-verifications/${encodeURIComponent(id)}`);
+    return res.data;
+  },
+
+  async getBankVerificationHistory(storeId: string) {
+    const res = await api.get(`/stores/${encodeURIComponent(storeId)}/bank-account-verifications`, {
+      params: { page: 1, pageSize: 20 },
+    });
+    return res.data;
   },
 
   /**
