@@ -304,17 +304,17 @@ export const AdminDashboard: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   // Navigation tabs organized sequentially by physical IoT operational lifecycle
   const [activeTab, setActiveTab] = useState<
-    'OVERVIEW' | 'STORES' | 'PLANS' | 'RENTALS' | 'CATALOG' | 'DEVICES' | 'RBAC' | 'TELEMETRY' | 'ANALYTICS' | 'NOTIFICATIONS'
+    'OVERVIEW' | 'STORES' | 'PLANS' | 'RENTALS' | 'CATALOG' | 'DEVICES' | 'WARRANTY' | 'RBAC' | 'TELEMETRY' | 'ANALYTICS' | 'NOTIFICATIONS'
   >(() => {
     const section = searchParams.get('section');
-    return ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS'].includes(section || '')
+    return ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'WARRANTY', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS'].includes(section || '')
       ? section as any
       : 'OVERVIEW';
   });
 
   useEffect(() => {
     const section = searchParams.get('section');
-    if (section && ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS'].includes(section)) {
+    if (section && ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'WARRANTY', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS'].includes(section)) {
       setActiveTab(section as any);
     } else {
       setActiveTab('OVERVIEW');
@@ -1800,7 +1800,11 @@ export const AdminDashboard: React.FC = () => {
               );
             })()}
           </div>
+        </div>
+      )}
 
+      {activeTab === 'WARRANTY' && (
+        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-2xs">
           <WarrantyPanel
             mode="admin"
             devices={allDevices}
