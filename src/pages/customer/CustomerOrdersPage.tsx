@@ -509,6 +509,8 @@ export const CustomerOrdersPage: React.FC = () => {
                 const isExpanded = expandedOrder === order.id;
 
                 const isCancelled = ['CANCELLED', 'REJECTED'].includes(currentStatus);
+                const isRefundPending = isCancelled && String(order.paymentStatus || '').toUpperCase() === 'REFUND_PENDING';
+                const isRefunded = isCancelled && String(order.paymentStatus || '').toUpperCase() === 'REFUNDED';
                 const isUnpaid = !isCancelled && (order.paymentStatus === 'UNPAID' || (order.paymentStatus !== 'PAID' && order.paymentMethod !== 'COD' && order.paymentMethod !== 'CASH_ON_DELIVERY'));
                 // Khách hàng có thể tự hủy đơn khi đơn đang ở trạng thái PENDING (chờ cửa hàng tiếp nhận)
                 const canCancel = !isCancelled && currentStatus === 'PENDING';
@@ -535,8 +537,18 @@ export const CustomerOrdersPage: React.FC = () => {
                         <div className="order-total shrink-0 flex items-center gap-2 sm:gap-3">
                           <div className="text-right">
                             <p className="text-sm font-bold text-slate-900 tabular-nums dark:text-white">{formatPrice(order.totalAmount)}</p>
-                            <p className={`mt-1 text-[10px] ${isUnpaid ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
-                              {isCancelled ? 'Đơn đã hủy · Không cần thanh toán' : String(order.paymentStatus || '').toUpperCase() === 'PAID' ? 'Đã thanh toán thành công' : ['COD', 'CASH_ON_DELIVERY'].includes(String(order.paymentMethod || '').toUpperCase()) ? 'Chờ thanh toán (Tiền mặt khi nhận)' : 'Chờ thanh toán (PayOS)'}
+                            <p className={`mt-1 text-[10px] ${isRefundPending ? 'text-amber-600 font-medium' : isRefunded ? 'text-emerald-600 font-medium' : isUnpaid ? 'text-amber-600 font-medium' : 'text-slate-400'}`}>
+                              {isRefundPending
+                                ? 'Đơn đã hủy · Chờ hoàn tiền (12–24h)'
+                                : isRefunded
+                                ? 'Đơn đã hủy · Đã hoàn tiền'
+                                : isCancelled
+                                ? 'Đơn đã hủy · Không cần thanh toán'
+                                : String(order.paymentStatus || '').toUpperCase() === 'PAID'
+                                ? 'Đã thanh toán thành công'
+                                : ['COD', 'CASH_ON_DELIVERY'].includes(String(order.paymentMethod || '').toUpperCase())
+                                ? 'Chờ thanh toán (Tiền mặt khi nhận)'
+                                : 'Chờ thanh toán (PayOS)'}
                             </p>
                           </div>
                           <ChevronDown className={`w-4 h-4 text-slate-400 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
@@ -565,7 +577,20 @@ export const CustomerOrdersPage: React.FC = () => {
                               <div className="md:w-64 space-y-3 text-xs">
                                 <ShippingContact order={order} />
                                 {isCancelled && order.cancellationReason && <p className="text-rose-600">Lý do hủy: {order.cancellationReason}</p>}
-                                <div className="flex gap-2 text-slate-500 dark:text-zinc-400"><CreditCard className="w-3.5 h-3.5 shrink-0 text-slate-400" /><span>{isCancelled ? 'Đơn đã hủy, không phát sinh thanh toán' : ['COD', 'CASH_ON_DELIVERY'].includes(String(order.paymentMethod || '').toUpperCase()) ? (String(order.paymentStatus || '').toUpperCase() === 'PAID' ? 'Đã thu tiền mặt khi nhận hàng' : 'Tiền mặt khi nhận hàng (Chờ thanh toán)') : String(order.paymentStatus || '').toUpperCase() === 'PAID' ? 'Đã thanh toán thành công qua PayOS' : 'Thanh toán trực tuyến PayOS (Chờ thanh toán)'}</span></div>
+                                <div className="flex gap-2 text-slate-500 dark:text-zinc-400">
+                                  <CreditCard className="w-3.5 h-3.5 shrink-0 text-slate-400" />
+                                  <span>
+                                    {isRefundPending
+                                      ? 'Khoản thanh toán trực tuyến sẽ được hoàn về tài khoản sau 12–24 giờ làm việc.'
+                                      : isRefunded
+                                      ? 'Hệ thống đã xác nhận hoàn tiền thành công về tài khoản.'
+                                      : isCancelled
+                                      ? 'Đơn đã hủy, không phát sinh thanh toán'
+                                      : ['COD', 'CASH_ON_DELIVERY'].includes(String(order.paymentMethod || '').toUpperCase())
+                                      ? (String(order.paymentStatus || '').toUpperCase() === 'PAID' ? 'Đã thu tiền mặt khi nhận hàng' : 'Tiền mặt khi nhận hàng (Chờ thanh toán)')
+                                      : String(order.paymentStatus || '').toUpperCase() === 'PAID' ? 'Đã thanh toán thành công qua PayOS' : 'Thanh toán trực tuyến PayOS (Chờ thanh toán)'}
+                                  </span>
+                                </div>
                               </div>
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-200/70 flex justify-between text-sm font-bold text-slate-900 dark:border-zinc-700 dark:text-white"><span>Tổng thanh toán</span><span className="tabular-nums">{formatPrice(order.totalAmount)}</span></div>

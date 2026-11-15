@@ -51,8 +51,8 @@ export function bankRefundMessage(status: string | null | undefined, amount: unk
   const value = bankMoney(amount);
   status = status === 'PENDING_REFUND' ? 'PENDING' : status === 'PROCESSING_REFUND' ? 'PROCESSING' : status;
   return ({
-    PENDING: `Hệ thống đang chờ chuyển hoàn ${value}.`,
-    PROCESSING: `Hệ thống đang xử lý chuyển hoàn ${value}; chưa xác nhận tiền đã về tài khoản.`,
+    PENDING: `Hệ thống đã ghi nhận hoàn ${value}; tiền sẽ được đối soát và chuyển hoàn về tài khoản sau 12–24 giờ làm việc.`,
+    PROCESSING: `Hệ thống đang tiến hành chi trả chuyển hoàn ${value}; đang chờ ngân hàng xác nhận giao dịch.`,
     PENDING_RECONCILIATION: `Khoản hoàn ${value} đang chờ đối soát kết quả chi trả.`,
     PENDING_MANUAL_REFUND: `Khoản hoàn ${value} đang chờ xử lý hoàn thủ công (thiếu thông tin tài khoản nguồn hoặc cần đối soát); vui lòng liên hệ hỗ trợ nếu cần.`,
     PARTIALLY_REFUNDED: `Hệ thống đã hoàn một phần cho ${value}; phần còn lại đang được xử lý.`,
@@ -165,10 +165,10 @@ export function bankStatusLabel(value?: string | null) {
     PENDING: 'Chờ xác minh', ACTIVE: 'Đang chờ', CONSUMED: 'Đã hoàn tất phiên', EXPIRED: 'Đã hết hạn',
     CANCELLED: 'Đã hủy', CANCELED: 'Đã hủy', FAILED: 'Không thành công', FAILED_MISMATCH: 'Thông tin không khớp',
     PENDING_SOURCE_EVIDENCE: 'Cần đối chiếu tài khoản nguồn', PAID: 'Đã nhận tiền',
-    PENDING_RECONCILIATION: 'Chờ đối soát', MANUAL_RECONCILIATION_REQUIRED: 'Cần đối soát thủ công', NONE: 'Chưa ghi nhận hoàn tiền', PENDING_REFUND: 'Chờ hoàn tiền',
+    PENDING_RECONCILIATION: 'Chờ đối soát', MANUAL_RECONCILIATION_REQUIRED: 'Cần đối soát thủ công', NONE: 'Chưa ghi nhận hoàn tiền', PENDING_REFUND: 'Chờ hoàn tiền (12–24h)',
     PROCESSING_REFUND: 'Đang hoàn tiền', PROCESSING: 'Đang xử lý', PARTIALLY_REFUNDED: 'Đã hoàn một phần',
     PENDING_MANUAL_REFUND: 'Chờ hỗ trợ hoàn tiền', REFUND_FAILED: 'Hoàn tiền chưa thành công',
-    REFUND_PENDING: 'Chờ hoàn tiền', REFUNDED: 'Đã hoàn tiền', SUCCESS: 'Thành công', SUSPENDED: 'Tạm khóa', REVOKED: 'Đã thu hồi',
+    REFUND_PENDING: 'Chờ hoàn tiền (12–24h)', REFUNDED: 'Đã hoàn tiền', SUCCESS: 'Thành công', SUSPENDED: 'Tạm khóa', REVOKED: 'Đã thu hồi',
     FAILED_RETRY: 'Đang chờ thử lại',
   } as Record<string, string>)[value || ''] || (value ? `Trạng thái: ${value}` : 'Chưa có dữ liệu');
 }

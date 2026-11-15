@@ -448,7 +448,7 @@ export const CustomerRentalsPage: React.FC = () => {
                 <div>
                   <h4 className="text-xs font-bold text-slate-900 dark:text-white">Hoàn Cọc 100%</h4>
                   <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-0.5 leading-relaxed">
-                    Khi không còn nhu cầu sử dụng, bạn chỉ cần gửi trả nút để nhận lại 100% tiền cọc ban đầu.
+                    Khi không còn nhu cầu sử dụng, bạn chỉ cần gửi trả nút để nhận lại 100% tiền cọc ban đầu (chuyển hoàn trong 12–24h làm việc sau khi kiểm tra thiết bị).
                   </p>
                 </div>
               </div>

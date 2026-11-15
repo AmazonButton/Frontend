@@ -1,3 +1,5 @@
+import { api } from './api';
+
 export type WarrantyFaultGroup = 'GROUP_A' | 'GROUP_B' | 'GROUP_C' | 'GROUP_D';
 
 export type WarrantyTicketStatus = 'PENDING' | 'APPROVED_SWAP' | 'RESOLVED' | 'REJECTED';
@@ -88,9 +90,13 @@ export const WARRANTY_GROUPS: Record<WarrantyFaultGroup, WarrantyGroupConfig> = 
 
 export interface WarrantyTicket {
   id: string;
+  ticketId?: string;
+  ticketCode?: string;
   deviceId: string;
+  buttonId?: string;
   storeId?: string;
   storeName?: string;
+  customerId?: string;
   faultGroup: WarrantyFaultGroup;
   faultCode: string;
   faultLabel: string;
@@ -145,6 +151,163 @@ export function saveWarrantyTickets(tickets: WarrantyTicket[]): void {
   }
 }
 
+function mapApiTicketToFrontend(item: any): WarrantyTicket {
+  const group = (item.faultGroup || 'GROUP_A') as WarrantyFaultGroup;
+  const cfg = WARRANTY_GROUPS[group] || WARRANTY_GROUPS.GROUP_A;
+  const fault = cfg.faults.find((f) => f.code === item.faultCode) || {
+    code: item.faultCode || 'HARDWARE_FAULT',
+    label: item.faultCode || 'Lỗi thiết bị',
+    description: item.inspectionNote || '',
+  };
+
+  const ticketCode = item.ticketCode || `WRT-${String(item.ticketId || '')}`;
+
+  return {
+    id: ticketCode,
+    ticketId: String(item.ticketId || item.id || ''),
+    ticketCode,
+    deviceId: item.deviceId || item.button?.deviceId || '',
+    buttonId: item.buttonId ? String(item.buttonId) : undefined,
+    storeId: item.storeId ? String(item.storeId) : undefined,
+    storeName: item.storeName || item.store?.name || undefined,
+    customerId: item.customerId ? String(item.customerId) : undefined,
+    faultGroup: group,
+    faultCode: item.faultCode || fault.code,
+    faultLabel: fault.label,
+    depositAmount: Number(item.depositAmount) || 100000,
+    deductionPercent: Number(item.deductionPercent) || 0,
+    deductionAmount: Number(item.deductionAmount) || 0,
+    refundAmount: Number(item.refundAmount) || 0,
+    inspectionNote: item.inspectionNote || fault.description || '',
+    status: (item.status || 'PENDING') as WarrantyTicketStatus,
+    reportedBy: item.reportedBy || item.reportedByUser?.fullName || item.reportedByUser?.username || 'Nhân viên',
+    reportedRole: item.reportedByUser?.role || 'STAFF',
+    replacementDeviceId: item.replacementDeviceId || item.replacementButton?.deviceId || undefined,
+    adminNote: item.adminNote || undefined,
+    createdAt: item.createdAt || new Date().toISOString(),
+    updatedAt: item.updatedAt || new Date().toISOString(),
+  };
+}
+
+/**
+ * Tải danh sách phiếu bảo hành từ Backend API (kèm fallback LocalStorage)
+ */
+export async function fetchWarrantyTickets(params?: {
+  status?: string;
+  faultGroup?: string;
+  storeId?: string;
+  deviceId?: string;
+  page?: number;
+  pageSize?: number;
+}): Promise<WarrantyTicket[]> {
+  try {
+    const res = await api.get('/warranty/tickets', { params });
+    const payload = res.data;
+    const rawList = Array.isArray(payload?.data) ? payload.data : [];
+    const mapped = rawList.map(mapApiTicketToFrontend);
+    if (mapped.length > 0 || !params || Object.keys(params).length === 0) {
+      saveWarrantyTickets(mapped);
+    }
+    return mapped;
+  } catch (err) {
+    console.warn('[WarrantyService] Fetch tickets from backend failed, using local cache:', err);
+    return loadWarrantyTickets();
+  }
+}
+
+/**
+ * Lập phiếu bảo hành mới qua Backend API (kèm fallback LocalStorage)
+ */
+export async function createWarrantyTicketAsync(input: {
+  deviceId: string;
+  storeId?: string;
+  storeName?: string;
+  faultGroup: WarrantyFaultGroup;
+  faultCode: string;
+  depositAmount?: number;
+  deductionPercent?: number;
+  inspectionNote?: string;
+  reportedBy?: string;
+  reportedRole?: string;
+}): Promise<WarrantyTicket> {
+  try {
+    const res = await api.post('/warranty/tickets', {
+      deviceId: input.deviceId.trim().toUpperCase(),
+      storeId: input.storeId,
+      faultGroup: input.faultGroup,
+      faultCode: input.faultCode,
+      depositAmount: input.depositAmount,
+      deductionPercent: input.deductionPercent,
+      inspectionNote: input.inspectionNote,
+    });
+    const created = mapApiTicketToFrontend(res.data?.data || res.data);
+    const current = loadWarrantyTickets();
+    saveWarrantyTickets([created, ...current.filter((t) => t.id !== created.id)]);
+    return created;
+  } catch (err) {
+    console.warn('[WarrantyService] Create ticket via API failed, creating local offline ticket:', err);
+    return createWarrantyTicket(input);
+  }
+}
+
+/**
+ * Admin duyệt đổi mới 1-1 qua Backend API
+ */
+export async function approveSwapTicketAsync(
+  ticketIdOrCode: string,
+  data?: { replacementDeviceId?: string; adminNote?: string }
+): Promise<WarrantyTicket> {
+  const res = await api.patch(`/warranty/tickets/${encodeURIComponent(ticketIdOrCode)}/approve-swap`, data || {});
+  const updated = mapApiTicketToFrontend(res.data?.data || res.data);
+  updateLocalTicket(updated);
+  return updated;
+}
+
+/**
+ * Admin khóa nút vĩnh viễn (Nhóm D) qua Backend API
+ */
+export async function lockDeviceTicketAsync(
+  ticketIdOrCode: string,
+  data?: { adminNote?: string }
+): Promise<WarrantyTicket> {
+  const res = await api.patch(`/warranty/tickets/${encodeURIComponent(ticketIdOrCode)}/lock-device`, data || {});
+  const updated = mapApiTicketToFrontend(res.data?.data || res.data);
+  updateLocalTicket(updated);
+  return updated;
+}
+
+/**
+ * Hoàn tất phiếu qua Backend API
+ */
+export async function resolveTicketAsync(
+  ticketIdOrCode: string,
+  data?: { adminNote?: string }
+): Promise<WarrantyTicket> {
+  const res = await api.patch(`/warranty/tickets/${encodeURIComponent(ticketIdOrCode)}/resolve`, data || {});
+  const updated = mapApiTicketToFrontend(res.data?.data || res.data);
+  updateLocalTicket(updated);
+  return updated;
+}
+
+/**
+ * Từ chối phiếu qua Backend API
+ */
+export async function rejectTicketAsync(
+  ticketIdOrCode: string,
+  data?: { adminNote?: string }
+): Promise<WarrantyTicket> {
+  const res = await api.patch(`/warranty/tickets/${encodeURIComponent(ticketIdOrCode)}/reject`, data || {});
+  const updated = mapApiTicketToFrontend(res.data?.data || res.data);
+  updateLocalTicket(updated);
+  return updated;
+}
+
+function updateLocalTicket(ticket: WarrantyTicket): void {
+  const current = loadWarrantyTickets();
+  const next = current.map((t) => (t.id === ticket.id || t.ticketId === ticket.ticketId ? ticket : t));
+  saveWarrantyTickets(next);
+}
+
 export function createWarrantyTicket(input: {
   deviceId: string;
   storeId?: string;
@@ -196,7 +359,7 @@ export function updateWarrantyTicket(
 ): WarrantyTicket[] {
   const current = loadWarrantyTickets();
   const next = current.map((t) =>
-    t.id === ticketId
+    t.id === ticketId || t.ticketId === ticketId
       ? {
           ...t,
           ...patch,
