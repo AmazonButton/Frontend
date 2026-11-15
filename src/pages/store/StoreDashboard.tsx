@@ -1289,7 +1289,67 @@ export const StoreDashboard: React.FC = () => {
 
                         {/* Trạng thái */}
                         <td className="store-orders-status-cell">
-                          {renderStatus(orderStatus)}
+                          <div className="flex flex-col gap-1.5 items-start">
+                            {renderStatus(orderStatus)}
+                            {!isCancelled && (
+                              <fieldset disabled={Boolean(pendingStatusUpdates[order.id])} aria-busy={Boolean(pendingStatusUpdates[order.id])} className="m-0 min-w-0 border-0 p-0 disabled:opacity-60">
+                                {orderStatus === 'PENDING' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateStatus(order.id, 'CONFIRMED')}
+                                    className="inline-flex items-center gap-1 rounded bg-[#206588] px-2 py-0.5 text-[11px] font-semibold text-white shadow-xs hover:bg-[#194f6b] transition cursor-pointer"
+                                  >
+                                    Tiếp nhận
+                                  </button>
+                                )}
+                                {orderStatus === 'CONFIRMED' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateStatus(order.id, 'PREPARING')}
+                                    className="inline-flex items-center gap-1 rounded bg-[#206588] px-2 py-0.5 text-[11px] font-semibold text-white shadow-xs hover:bg-[#194f6b] transition cursor-pointer"
+                                  >
+                                    Chuẩn bị &rarr;
+                                  </button>
+                                )}
+                                {orderStatus === 'PREPARING' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateStatus(order.id, 'READY_FOR_DELIVERY')}
+                                    className="inline-flex items-center gap-1 rounded bg-[#206588] px-2 py-0.5 text-[11px] font-semibold text-white shadow-xs hover:bg-[#194f6b] transition cursor-pointer"
+                                  >
+                                    Xuất giao &rarr;
+                                  </button>
+                                )}
+                                {orderStatus === 'READY_FOR_DELIVERY' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateStatus(order.id, 'SHIPPING')}
+                                    className="inline-flex items-center gap-1 rounded bg-[#206588] px-2 py-0.5 text-[11px] font-semibold text-white shadow-xs hover:bg-[#194f6b] transition cursor-pointer"
+                                  >
+                                    Bắt đầu giao &rarr;
+                                  </button>
+                                )}
+                                {(orderStatus === 'OUT_FOR_DELIVERY' || orderStatus === 'SHIPPING') && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateStatus(order.id, 'DELIVERED')}
+                                    className="inline-flex items-center gap-1 rounded bg-[#237455] px-2 py-0.5 text-[11px] font-semibold text-white shadow-xs hover:bg-[#195a40] transition cursor-pointer"
+                                  >
+                                    Đã giao ✓
+                                  </button>
+                                )}
+                                {orderStatus === 'DELIVERED' && (
+                                  <button
+                                    type="button"
+                                    onClick={() => handleUpdateStatus(order.id, 'COMPLETED')}
+                                    className="inline-flex items-center gap-1 rounded bg-[#237455] px-2 py-0.5 text-[11px] font-semibold text-white shadow-xs hover:bg-[#195a40] transition cursor-pointer"
+                                  >
+                                    Hoàn tất & cộng ví
+                                  </button>
+                                )}
+                              </fieldset>
+                            )}
+                          </div>
                         </td>
 
                         {/* Thao tác */}
