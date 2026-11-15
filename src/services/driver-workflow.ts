@@ -34,7 +34,7 @@ export function isValidPodEvidence(url: unknown, storeId?: string): boolean {
   }
   try {
     const parsed = new URL(clean);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return false;
+    if (parsed.protocol !== 'https:') return false;
     if (parsed.hostname === 'cloudinary.com' || parsed.hostname.endsWith('.cloudinary.com')) {
       const imagePath = parsed.pathname.split('/image/upload/')[1]?.replace(/^v\d+\//, '');
       return Boolean(imagePath && (storeId ? imagePath.startsWith(`stores/${storeId}/pod/`) : /^stores\/\d+\/pod\//.test(imagePath)));
@@ -43,7 +43,7 @@ export function isValidPodEvidence(url: unknown, storeId?: string): boolean {
       const path = parsed.pathname.replace(/^\/+/, '');
       return Boolean(storeId ? path.includes(`stores/${storeId}/pod/`) : /stores\/\d+\/pod\//.test(path));
     }
-    return true;
+    return false;
   } catch { return false; }
 }
 
@@ -81,20 +81,28 @@ export function buildDeliveryPayload(
     paymentMethod,
     ...(isObjectKey ? { podObjectKey: imageUrl, podImageUrl: imageUrl } : { podImageUrl: imageUrl }),
     ...(paymentMethod === 'COD' ? { collectedAmount } : {}),
-    ...(gps ? { driverLatitude: gps.latitude, driverLongitude: gps.longitude } : {}),
-    deliveredAt: new Date().toISOString(),
+    ...(gps ? { driverLatitude: gps.latitude, driverLongitude: gps.longitude, deliveredAt: new Date().toISOString() } : {}),
   };
   validateDeliveryPayload(data);
   return data;
 }
 
+export interface PodWatermarkOptions {
+  orderNumber?: string;
+  orderId?: string | number;
+  timestamp?: string;
+  coordinates?: { latitude: number; longitude: number } | null;
+}
+
 /**
  * Nén ảnh sang định dạng WebP trực tiếp trên trình duyệt (giảm dung lượng < 350KB)
+ * Tùy chọn đóng dấu Watermark định danh (Mã đơn hàng, Ngày giờ, Tọa độ GPS)
  */
 export async function compressImageToWebP(
   file: File,
   maxDimension: number = 1200,
   quality: number = 0.8,
+  watermark?: PodWatermarkOptions,
 ): Promise<{ blob: Blob; fileName: string }> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
@@ -123,6 +131,29 @@ export async function compressImageToWebP(
           return reject(new Error('Không thể khởi tạo bộ xử lý đồ họa (Canvas).'));
         }
         ctx.drawImage(img, 0, 0, width, height);
+
+        // Gắn Watermark định danh (Metadata Stamp: Mã đơn, Giờ, Tọa độ GPS)
+        if (watermark) {
+          const barHeight = Math.max(38, Math.round(height * 0.055));
+          ctx.fillStyle = 'rgba(0, 0, 0, 0.65)';
+          ctx.fillRect(0, height - barHeight, width, barHeight);
+
+          ctx.fillStyle = '#ffffff';
+          ctx.font = `600 ${Math.max(12, Math.round(barHeight * 0.38))}px sans-serif`;
+          ctx.textBaseline = 'middle';
+
+          const orderStr = watermark.orderNumber ? `#${watermark.orderNumber}` : (watermark.orderId ? `#${watermark.orderId}` : '');
+          const timeStr = watermark.timestamp || new Intl.DateTimeFormat('vi-VN', {
+            day: '2-digit', month: '2-digit', year: 'numeric',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
+          }).format(new Date());
+          const gpsStr = watermark.coordinates
+            ? `GPS: ${watermark.coordinates.latitude.toFixed(5)}, ${watermark.coordinates.longitude.toFixed(5)}`
+            : '';
+
+          const stampText = [orderStr, timeStr, gpsStr].filter(Boolean).join('  |  ');
+          ctx.fillText(stampText, 16, height - barHeight / 2);
+        }
 
         canvas.toBlob(
           (blob) => {

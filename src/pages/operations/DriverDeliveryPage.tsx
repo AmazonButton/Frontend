@@ -49,8 +49,18 @@ export const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'f
     lock.current = true;
     setUploading(true); setError(''); setImageUrl(''); setPreviewUrl('');
     try {
-      // 1. Nén ảnh WebP trên trình duyệt (< 300KB)
-      const compressed = await compressImageToWebP(file, 1200, 0.82);
+      // Lấy tọa độ GPS thiết bị thực tế trước để đóng dấu Watermark vào ảnh
+      let gps: { latitude: number; longitude: number } | null = null;
+      try {
+        gps = await getDriverCoordinates();
+      } catch {}
+
+      // 1. Nén ảnh WebP trên trình duyệt (< 300KB) kèm Watermark định danh (Mã đơn, Giờ, GPS)
+      const compressed = await compressImageToWebP(file, 1200, 0.82, {
+        orderNumber: order.orderNumber,
+        orderId: order.id,
+        coordinates: gps,
+      });
       const localPreview = URL.createObjectURL(compressed.blob);
       if (alive.current) setPreviewUrl(localPreview);
 
