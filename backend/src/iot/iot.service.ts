@@ -27,6 +27,36 @@ export class IotService {
     @Inject(OrdersService) private readonly ordersService: OrdersService,
   ) {}
 
+  private async emitDeviceFaultAlert(
+    device: any,
+    params: {
+      faultCode: string;
+      faultGroup?: string;
+      batteryLevel?: number;
+      rssi?: number;
+      message?: string;
+    },
+  ) {
+    const payload = {
+      id: `alert-${device.deviceId}-${Date.now()}`,
+      deviceId: device.deviceId,
+      buttonName: device.buttonName || device.deviceId,
+      storeId: device.storeId ? device.storeId.toString() : undefined,
+      faultCode: params.faultCode,
+      faultGroup: params.faultGroup || (params.faultCode === 'CHILD_SPAM_DETECTED' ? 'GROUP_B' : 'GROUP_A'),
+      batteryLevel: params.batteryLevel,
+      rssi: params.rssi,
+      message: params.message || `Nút ${device.deviceId} báo lỗi ${params.faultCode}`,
+      createdAt: new Date().toISOString(),
+    };
+    const gateway = this.ordersService?.['eventsGateway'];
+    gateway?.emitToAdmin?.('DEVICE_FAULT_ALERT', payload);
+    if (device.storeId) {
+      gateway?.emitToStore?.(device.storeId.toString(), 'DEVICE_FAULT_ALERT', payload);
+    }
+    return payload;
+  }
+
   async handleEvent(device: any, body: any) {
     const rawEvent = body.eventType || body.action || 'SINGLE_PRESS';
     const eventType = rawEvent.toUpperCase();
@@ -87,6 +117,21 @@ export class IotService {
 
     // 2. Handle Heartbeat (No order creation, no idempotency lock needed)
     if (eventType === 'HEARTBEAT') {
+      if (body.battery !== undefined && body.battery !== null && device.buttonId) {
+        await this.prisma.ioTButton.update({
+          where: { buttonId: BigInt(device.buttonId) },
+          data: { batteryLevel: Number(battery) },
+        }).catch(() => null);
+      }
+      if (Number(battery) <= 20) {
+        await this.emitDeviceFaultAlert(device, {
+          faultCode: 'LOW_BATTERY',
+          faultGroup: 'GROUP_A',
+          batteryLevel: Number(battery),
+          rssi,
+          message: `Nút ${device.deviceId} báo pin yếu (${battery}%)`,
+        });
+      }
       const hbPayload = {
         deviceId: device.deviceId,
         batteryLevel: battery,
@@ -104,6 +149,24 @@ export class IotService {
         code: 'DEVICE_HEARTBEAT_ACK',
         message: 'Ghi nhận nhịp tim thiết bị thành công!',
         data: { deviceId: device.deviceId },
+      };
+    }
+
+    // 2b. Handle Fault Alert reported directly by device
+    if (eventType === 'FAULT_ALERT') {
+      const faultCode = (body.faultCode || 'HARDWARE_FAULT').toUpperCase();
+      const alert = await this.emitDeviceFaultAlert(device, {
+        faultCode,
+        faultGroup: faultCode === 'CHILD_SPAM_DETECTED' ? 'GROUP_B' : 'GROUP_A',
+        batteryLevel: body.battery !== undefined ? Number(battery) : undefined,
+        rssi,
+        message: body.message || `Nút ${device.deviceId} gửi cảnh báo lỗi (${faultCode})`,
+      });
+      return {
+        success: true,
+        code: 'DEVICE_FAULT_ALERT_RECEIVED',
+        message: 'Đã ghi nhận cảnh báo lỗi từ nút bấm và chuyển về Admin.',
+        data: alert,
       };
     }
 
@@ -263,6 +326,21 @@ export class IotService {
 
   async handleTelemetry(device: any, body: any) {
     const { battery = 100, rssi = -50 } = body;
+    if (body.battery !== undefined && body.battery !== null && device.buttonId) {
+      await this.prisma.ioTButton.update({
+        where: { buttonId: BigInt(device.buttonId) },
+        data: { batteryLevel: Number(battery) },
+      }).catch(() => null);
+    }
+    if (Number(battery) <= 20) {
+      await this.emitDeviceFaultAlert(device, {
+        faultCode: 'LOW_BATTERY',
+        faultGroup: 'GROUP_A',
+        batteryLevel: Number(battery),
+        rssi,
+        message: `Nút ${device.deviceId} báo pin yếu (${battery}%)`,
+      });
+    }
     return {
       success: true,
       message: 'Ghi nhận thông số telemetry thành công',

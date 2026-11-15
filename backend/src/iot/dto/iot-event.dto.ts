@@ -6,6 +6,7 @@ export enum IotEventType {
   LONG_PRESS = 'LONG_PRESS',
   HEARTBEAT = 'HEARTBEAT',
   CANCEL = 'CANCEL',
+  FAULT_ALERT = 'FAULT_ALERT',
 }
 
 export enum IotPaymentMethod {
@@ -48,4 +49,14 @@ export class IotEventDto {
   @IsNumber({}, { message: 'shippingFee phải là số' })
   @Min(0, { message: 'shippingFee không được âm' })
   shippingFee?: number;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(64)
+  faultCode?: string;
+
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
+  message?: string;
 }
