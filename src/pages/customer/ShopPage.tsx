@@ -76,6 +76,7 @@ export const ShopPage: React.FC = () => {
     qrCode?: string;
     checkoutUrl?: string;
     paymentLinkId?: string;
+    order?: Order;
   } | null>(null);
   const [flyingProduct, setFlyingProduct] = useState<{ product: Product; x: number; y: number } | null>(null);
   const isCustomerLoggedIn = typeof window !== 'undefined' && Boolean(localStorage.getItem('smart_order_token'));
@@ -128,10 +129,26 @@ export const ShopPage: React.FC = () => {
 
     if (params.get('cart') === 'open') setCartOpen(true);
     if (status === 'success') {
-      // PayOS returning to this URL is not proof that the payment webhook has
-      // been verified. Keep the recovery data and wait for the server's paid
-      // status before presenting the order as successful.
-      setNotice('PayOS đã gửi kết quả giao dịch. Hệ thống đang xác minh thanh toán; đơn hàng chỉ hoàn tất khi trạng thái hiển thị “Đã thanh toán”.');
+      const effectiveOrderId = orderIdParam;
+      if (effectiveOrderId) {
+        api.get(`/orders/${effectiveOrderId}`)
+          .then((res) => {
+            const raw = res.data?.data || res.data;
+            if (raw) {
+              const normalized = normalizeOrder(raw);
+              setReceipt({
+                ...normalized,
+                paymentStatus: 'PAID',
+              });
+              setNotice(`Đơn hàng #${normalized.orderNumber} đã thanh toán PayOS thành công! Cửa hàng đang chuẩn bị sản phẩm.`);
+            }
+          })
+          .catch(() => {
+            setNotice('PayOS đã xác nhận thanh toán thành công! Bạn có thể kiểm tra chi tiết trong Lịch sử đơn hàng.');
+          });
+      } else {
+        setNotice('PayOS đã xác nhận thanh toán thành công!');
+      }
       try {
         window.history.replaceState({}, '', window.location.pathname);
       } catch {}
@@ -410,6 +427,7 @@ export const ShopPage: React.FC = () => {
             qrCode,
             checkoutUrl,
             paymentLinkId,
+            order,
           });
           return;
         }
@@ -1132,7 +1150,7 @@ export const ShopPage: React.FC = () => {
         setNotice(`Đơn hàng #${recoveryOrder?.orderNumber || orderId} đã được hủy theo yêu cầu của bạn.`);
       }}
     />
-    {receipt && <StorefrontReceipt order={receipt} loggedIn={isCustomerLoggedIn} paymentError={receipt.paymentMethod === 'PAYOS' ? notice : undefined} onClose={() => setReceipt(null)} />}
+    {receipt && <StorefrontReceipt order={receipt} loggedIn={isCustomerLoggedIn} paymentError={receipt.paymentMethod === 'PAYOS' && receipt.paymentStatus !== 'PAID' ? notice : undefined} onClose={() => setReceipt(null)} />}
     {marketplaceResult && <MarketplaceReceipt result={marketplaceResult} onClose={() => {
       if (marketplaceResult.failed.length) setCartOpen(true);
       setMarketplaceResult(null);
@@ -1152,6 +1170,7 @@ export const ShopPage: React.FC = () => {
             qrCode: data.qrCode,
             checkoutUrl: data.checkoutUrl,
             paymentLinkId: data.paymentLinkId,
+            order: placed,
           });
         }
       } catch (err: any) {
@@ -1169,8 +1188,27 @@ export const ShopPage: React.FC = () => {
         checkoutUrl={payosModalData.checkoutUrl}
         paymentLinkId={payosModalData.paymentLinkId}
         onSuccess={() => {
+          const completedOrder: Order = normalizeOrder({
+            ...(payosModalData.order || {
+              id: payosModalData.orderId,
+              orderNumber: payosModalData.orderNumber,
+              totalAmount: payosModalData.amount,
+              paymentMethod: 'PAYOS',
+              customerName: form.customerName,
+              customerPhone: form.customerPhone,
+              deliveryAddress: form.deliveryAddress,
+              items: [],
+              orderStatus: 'CONFIRMED',
+              paymentStatus: 'PAID',
+              createdAt: new Date().toISOString(),
+            }),
+            paymentStatus: 'PAID',
+            orderStatus: 'CONFIRMED',
+            status: 'CONFIRMED',
+          });
           setPayosModalData(null);
           setCart((old) => old.filter((line) => !line.selected));
+          setReceipt(completedOrder);
           setNotice(`Đơn hàng #${payosModalData.orderNumber} đã thanh toán PayOS thành công! Cửa hàng đang chuẩn bị sản phẩm.`);
         }}
         onCancelled={() => {

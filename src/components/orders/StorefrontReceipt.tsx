@@ -21,7 +21,21 @@ export const StorefrontReceipt: React.FC<{ order: Order; onClose: () => void; lo
         <div className="my-4 space-y-2 border-y border-slate-200 py-4 text-sm dark:border-zinc-700">
           {order.items.map((item, index) => <p key={item.id || index}>{item.quantity} × {item.productName}</p>)}
           <p className="font-bold">Tổng tiền: {Number(order.totalAmount).toLocaleString('vi-VN')} ₫</p>
-          <p>{awaitingPayment ? 'Vui lòng hoàn tất thanh toán PayOS trong lịch sử đơn hàng.' : order.paymentStatus === 'PAID' ? 'Đã thanh toán.' : 'Thanh toán tiền mặt khi nhận hàng (COD).'}</p>
+          <div className="pt-1">
+            {awaitingPayment ? (
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 border border-amber-200">
+                Chờ thanh toán PayOS
+              </span>
+            ) : order.paymentStatus === 'PAID' ? (
+              <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 border border-emerald-200">
+                ✓ Đã thanh toán thành công (PayOS)
+              </span>
+            ) : (
+              <span className="text-slate-600 dark:text-zinc-400">
+                Thanh toán tiền mặt khi nhận hàng (COD).
+              </span>
+            )}
+          </div>
         </div>
         {loggedIn ? <Link to="/customer/orders" onClick={onClose} className="block rounded-xl bg-[#287DA8] px-4 py-3 text-center font-semibold text-white">Theo dõi và quản lý đơn hàng</Link> : <p className="text-sm text-slate-500">Vui lòng giữ mã đơn và liên hệ cửa hàng khi cần thay đổi hoặc hủy đơn.</p>}
         <button type="button" onClick={onClose} className="mt-3 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">Tiếp tục mua sắm</button>
