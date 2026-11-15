@@ -1716,13 +1716,12 @@ export const AdminDashboard: React.FC = () => {
 
             {(() => {
               const allocatedList = allDevices
-                .filter((d) => Boolean(d?.custodyStoreId || (d?.inventoryState && d.inventoryState !== 'IN_PLATFORM_WAREHOUSE') || (!d?.inventoryState && d?.storeId)))
-                .filter((d) => deviceStoreFilter === 'ALL' || String(d.custodyStoreId || d.storeId) === deviceStoreFilter)
+                .filter((d) => Boolean(d?.storeId))
+                .filter((d) => deviceStoreFilter === 'ALL' || String(d.storeId) === deviceStoreFilter)
                 .filter((d) => {
                   const q = deviceSearchQuery.trim().toLowerCase();
                   if (!q) return true;
-                  const targetStoreId = d.custodyStoreId || d.storeId;
-                  const matchedStore = allStores.find((s) => String(s.id || s.storeId) === String(targetStoreId));
+                  const matchedStore = allStores.find((s) => String(s.id || s.storeId) === String(d.storeId));
                   const storeLabel = `${d.store?.storeName || d.store?.name || matchedStore?.name || ''} ${matchedStore?.code || ''}`.toLowerCase();
                   return (
                     String(d.deviceId || '').toLowerCase().includes(q) ||
