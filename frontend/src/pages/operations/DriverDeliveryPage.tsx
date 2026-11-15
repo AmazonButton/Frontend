@@ -6,13 +6,6 @@ import { driversService, DriverDutyStatus, DriverShift, DeliveryFailureCode } fr
 import { mediaService } from '../../services/media.service';
 import { buildDeliveryPayload, canClaimDelivery, canRecordDelivery, cloudinaryEvidenceUrl, deliveryPaymentMethod, driverError, evidenceFileError, failureReasons, money } from '../../services/driver-workflow';
 import { driverCard, driverInput, driverPrimary, driverSecondary, DriverDialog, DriverEntrance, DriverLoading, DriverNotice, DriverStatus } from './DriverWorkflowUI';
-const WarrantyPanel = typeof React?.lazy === 'function'
-  ? React.lazy(() => import('../../components/devices/WarrantyPanel').then(m => ({ default: m.WarrantyPanel })))
-  : (() => null);
-const DriverSuspense: React.FC<{ children: React.ReactNode }> = ({ children }) =>
-  typeof React?.Suspense === 'function' || React?.Suspense
-    ? <React.Suspense fallback={null}>{children}</React.Suspense>
-    : <>{children}</>;
 
 const paymentLabel = (order: any) => deliveryPaymentMethod(order) === 'COD' ? 'Thu tiền mặt' : 'Chuyển khoản';
 
@@ -172,16 +165,6 @@ export const DriverDeliveryPage: React.FC = () => {
         {(tab === 'ready' ? readyCount : pages) > 1 && <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-100 pt-4 text-sm dark:border-zinc-800"><span className="text-zinc-500">Trang {tab === 'ready' ? readyPage : page} / {tab === 'ready' ? readyCount : pages}</span><div className="flex gap-2"><button className={driverSecondary} disabled={loading || (tab === 'ready' ? readyPage : page) <= 1} onClick={() => tab === 'ready' ? setReadyPage(value => value - 1) : setPage(value => value - 1)}>Trước</button><button className={driverSecondary} disabled={loading || (tab === 'ready' ? readyPage >= readyCount : page >= pages)} onClick={() => tab === 'ready' ? setReadyPage(value => value + 1) : setPage(value => value + 1)}>Sau</button></div></div>}
       </section>
       <details className={driverCard} onToggle={event => setOnlineOpen(event.currentTarget.open)}><summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-200"><Users className="h-4 w-4 text-[#287DA8]" />Nhân viên đang sẵn sàng nhận đơn</summary>{onlineOpen && <div className="mt-4">{errors.online ? <DriverNotice>{errors.online}</DriverNotice> : loading ? <DriverLoading /> : online.length ? <ul className="grid gap-3 sm:grid-cols-2">{online.map(driver => <li key={driver.driverId} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-zinc-50 p-3 dark:bg-zinc-800/60"><span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{driver.fullName || `Nhân viên #${driver.driverId}`}</span>{driver.phone && <a className="text-sm text-[#287DA8]" href={`tel:${driver.phone.replace(/[^\d+]/g, '')}`}>{driver.phone}</a>}</li>)}</ul> : <p className="text-sm text-zinc-500">Chưa có nhân viên bật sẵn sàng nhận đơn.</p>}</div>}</details>
-      <section className={driverCard}>
-        <DriverSuspense>
-          <WarrantyPanel
-            mode="staff"
-            currentStoreId={storeId ? String(storeId) : undefined}
-            currentUserName={user?.fullName}
-            currentUserRole={role}
-          />
-        </DriverSuspense>
-      </section>
     </>}
     {claim && <DriverDialog title="Nhận giao đơn hàng" onClose={() => setClaim(null)} busy={busy}><p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">Bạn sẽ nhận giao đơn <strong className="text-zinc-900 dark:text-white">{claim.orderNumber || `#${claim.id}`}</strong> cho {claim.customerName || 'khách hàng'}. Đơn sẽ chuyển sang đang giao khi hệ thống xác nhận.</p>{errors.action && <div className="mt-3"><DriverNotice>{errors.action}</DriverNotice></div>}<div className="mt-5 flex justify-end gap-2"><button className={driverSecondary} disabled={busy} onClick={() => setClaim(null)}>Quay lại</button><button className={driverPrimary} disabled={busy} onClick={() => void run(() => driversService.claimOrder(claim.id), 'Đã nhận đơn. Bạn có thể theo dõi trong Đơn của tôi.').then(success => { if (success) { setTab('mine'); setFilter('SHIPPING'); setPage(1); } })}>{busy && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />}Xác nhận nhận đơn</button></div></DriverDialog>}
     {result && <DeliveryResultDialog order={result.order} mode={result.mode} userId={userId} role={role} onClose={() => setResult(null)} onDone={async message => { setResult(null); setNotice(message); await load(); }} />}
