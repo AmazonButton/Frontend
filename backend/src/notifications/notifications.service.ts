@@ -253,4 +253,72 @@ export class NotificationsService {
       },
     });
   }
+
+  /**
+   * Admin gui canh bao loi / bao hanh toi tai khoan dang su dung nut bam
+   */
+  async sendDeviceWarrantyWarning(body: {
+    deviceId: string;
+    faultGroup?: string;
+    faultCode?: string;
+    title?: string;
+    message?: string;
+  }) {
+    const cleanId = String(body?.deviceId || '').trim();
+    if (!cleanId) {
+      return { success: false, message: 'Thieu ma thiet bi (deviceId)' };
+    }
+
+    const button = await this.prisma.ioTButton.findFirst({
+      where: {
+        OR: [
+          { deviceId: cleanId },
+          { buttonCode: cleanId },
+        ],
+      },
+      include: {
+        customer: { select: { userId: true } },
+        store: { select: { ownerUserId: true, name: true } },
+      },
+    });
+
+    if (!button) {
+      return { success: false, message: `Khong tim thay nut ${cleanId}` };
+    }
+
+    const targetUserId = button.customer?.userId || button.store?.ownerUserId;
+    if (!targetUserId) {
+      return {
+        success: false,
+        message: `Nut ${button.deviceId} hien dang o kho tong, chua co tai khoan su dung.`,
+      };
+    }
+
+    const title = body?.title?.trim() || `Cảnh báo bảo hành nút ${button.deviceId}`;
+    const msg =
+      body?.message?.trim() ||
+      `Thiết bị ${button.deviceId} ghi nhận vấn đề (${body?.faultCode || body?.faultGroup || 'WARRANTY'}). Vui lòng kiểm tra hoặc liên hệ cửa hàng hỗ trợ.`;
+
+    const pushResult = await this.sendPushToUser(targetUserId, {
+      title,
+      body: msg,
+      data: {
+        type: 'DEVICE_WARRANTY_WARNING',
+        deviceId: button.deviceId,
+        faultGroup: body?.faultGroup || '',
+        faultCode: body?.faultCode || '',
+      },
+    });
+
+    return {
+      success: true,
+      message: `Đã gửi cảnh báo tới tài khoản đang dùng nút ${button.deviceId}.`,
+      data: {
+        deviceId: button.deviceId,
+        targetUserId: targetUserId.toString(),
+        targetType: button.customer?.userId ? 'CUSTOMER' : 'STORE_OWNER',
+        pushResult,
+      },
+    };
+  }
 }

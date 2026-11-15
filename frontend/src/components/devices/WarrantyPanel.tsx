@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { ShieldCheck, AlertTriangle, RefreshCw, Lock, CheckCircle2, XCircle, Plus, Wrench } from 'lucide-react';
+import { ShieldCheck, AlertTriangle, RefreshCw, Lock, CheckCircle2, XCircle, Plus, Wrench, BellRing } from 'lucide-react';
 import { api } from '../../services/api';
 import { toast } from '../../context/ToastContext';
 import {
@@ -120,12 +120,23 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
 
   const handleAdminAction = async (
     ticket: WarrantyTicket,
-    action: 'APPROVE_SWAP' | 'LOCK_DEVICE' | 'EXTEND_WARRANTY' | 'CHILD_LOCK_2S' | 'RESOLVE' | 'REJECT'
+    action: 'APPROVE_SWAP' | 'LOCK_DEVICE' | 'EXTEND_WARRANTY' | 'CHILD_LOCK_2S' | 'SEND_WARNING' | 'RESOLVE' | 'REJECT'
   ) => {
     setBusyId(ticket.id);
     try {
       const encodedId = encodeURIComponent(ticket.deviceId);
-      if (action === 'APPROVE_SWAP') {
+      if (action === 'SEND_WARNING') {
+        const res = await api.post('/notifications/device-warning', {
+          deviceId: ticket.deviceId,
+          faultGroup: ticket.faultGroup,
+          faultCode: ticket.faultCode,
+          title: `Cảnh báo bảo hành nút ${ticket.deviceId}`,
+          message: `${ticket.faultLabel}: ${ticket.inspectionNote}`,
+        }).catch(() => null);
+        const msg = res?.data?.message || `Đã ghi nhận gửi cảnh báo tới tài khoản đang dùng nút ${ticket.deviceId}.`;
+        setTickets(updateWarrantyTicket(ticket.id, { adminNote: msg }));
+        toast.success(msg);
+      } else if (action === 'APPROVE_SWAP') {
         await api.post(`/devices/${encodedId}/factory-reset`).catch(() => null);
         setTickets(updateWarrantyTicket(ticket.id, { status: 'APPROVED_SWAP', adminNote: 'Đã duyệt đổi mới 1-1 & thu hồi nút lỗi về kho.' }));
         toast.success(`Đã duyệt đổi 1-1 cho nút ${ticket.deviceId}.`);
@@ -437,6 +448,18 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
                           >
                             <Wrench className="w-3 h-3" />
                             <span>Giữ 2s</span>
+                          </button>
+                        )}
+                        {mode === 'admin' && (
+                          <button
+                            type="button"
+                            disabled={isBusy}
+                            onClick={() => void handleAdminAction(ticket, 'SEND_WARNING')}
+                            className="px-2 py-1 rounded text-[11px] font-medium bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+                            title="Gửi cảnh báo tới tài khoản đang dùng nút"
+                          >
+                            <BellRing className="w-3 h-3" />
+                            <span>Gửi cảnh báo</span>
                           </button>
                         )}
                         {mode === 'admin' && ticket.status === 'PENDING' && (

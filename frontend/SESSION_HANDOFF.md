@@ -1,5 +1,37 @@
 # Frontend scope and verification
 
+## 2026-11-14 — Keep Store verification return on the originating frontend and recover progress
+
+- Diagnosis: Backend default checkout return pointed to the production /store/finance route even when login happened on localhost. Browser auth storage is scoped to the frontend origin. Page-local verification state also vanished after reload, while the check-result feedback was not visible next to the action.
+- Changes: New verification requests send current-origin /store/wallet return/cancel URLs, validated by backend allowlist. Only verification ID is persisted per Store; authenticated API reload restores details. When no ID was stored, exact default account ID selects its latest history entry. Manual status check shows busy text, inline backend status/received amount/failure reason and refreshes wallet ownership data. Never trust return query parameters as proof of ownership.
+- Verification: `npm run test:wallet` PASS 16/16. Tests cover origin in creation payload, ID-only recovery, malformed ID rejection and exact-account history recovery. `npm run build` FAIL at pre-existing NotificationBellPopover.tsx:168 User.userId error; no edits to that file in this task.
+- Remaining: New backend must be deployed for redirect DTO/validation and wallet account ID. Existing PayOS links keep old redirects; do not pay again to test a redirect fix. Original local tab remains the correct logged-in origin. No production payments or API probes performed.
+- Additional recovery: When browser state is absent, history is selected by exact default bank account ID supplied by the wallet DTO; the page then fetches authenticated session detail. Status feedback appears even on recovery failures. Wallet regression count is now 16/16 PASS.
+- Final build: Fixed only NotificationBellPopover's invalid User.userId expression by reusing its existing getNotificationStorageKey(user) helper; all other pre-existing edits preserved. `npm run build` PASS exit 0 (large-bundle warning only). `node --test tests/hooks-fast-refresh.test.mjs` PASS 6/6. Backend typecheck/build and redirect/contract checks also passed in the paired workspace.
+
+## 2026-11-14 — Add Store wallet ownership-verification controls
+
+- Cause: The saved-account card always rendered a green verified badge, while withdrawal correctly required API verificationStatus OWNERSHIP_VERIFIED. No Store penny-verification controls existed on this page.
+- Changes: Badge now follows the authoritative wallet account status. Added full-number input, guarded creation of POST /stores/bank-accounts/verification, checkout/QR display and manual GET /bank-account-verifications/:id status check followed by wallet refresh. Session creation and payment-return URLs never set ownership locally. Saving a different bank clears the displayed session; duplicate clicks cannot create concurrent requests. Raw account input is not persisted in browser storage.
+- Verification: `npm run test:wallet` PASS 13/13, including real callback tests for invalid masked input, correct creation payload, duplicate-click suppression and authoritative refresh. `npm run build` FAIL only at the existing NotificationBellPopover.tsx:168 User.userId type error; that file was not edited.
+- Remaining: Live verification requires the updated backend wallet metadata, provider credentials and correct webhook routing. Backend, PayOS and production were not called or deployed in this follow-up. Refreshing the entire page does not restore the displayed verification session; avoid creating or paying duplicate sessions and use support/history for recovery.
+
+## 2026-11-14 — Prevent background bank lookup 400s after wallet refresh
+
+- Cause: StoreWalletPage's lookup effect ran outside edit mode, including after refresh copied a masked saved account number into form state. It also accepted five-character inputs while backend LookupBankAccountDto requires 6–19 numeric characters.
+- Changes: Lookup only runs while editing with a six-digit BIN and a full numeric 6–19 digit account number. Effect cleanup cancels debounce and invalidates in-flight results; invalid input and closing the form clear loading and prevent stale owner-name writes. Account numbers remain strings, preserving leading zeros. No backend validation was weakened.
+- Files: src/pages/store/StoreWalletPage.tsx; tests/wallet-bank-lookup.test.mjs; package.json (test:wallet now includes all three wallet test files).
+- Verification: `node --test tests/wallet-bank-lookup.test.mjs tests/wallet-bank-contract.test.mjs tests/wallet-partial-load.test.mjs` PASS 9/9. Tests execute the real lookup effect in a controlled timer/API harness: display-only, masked/invalid input, valid boundary lengths, debounce cancellation and stale response suppression.
+- Limitation: Valid full-number lookup can still return provider business errors; these require the actual Network response to diagnose. Existing account verification is not invalidated by an unrelated lookup request. No production API calls or deployment performed.
+- Build this turn: `npm run build` FAIL at the existing src/components/common/NotificationBellPopover.tsx:168 error (User.userId missing). That independently modified file was left unchanged.
+
+## 2026-11-14 — Fix store wallet bank-account save contract
+
+- Cause: wallet service sent bankBin to a backend DTO that did not accept it, then retried 400 responses with incompatible account field names.
+- Changes: src/services/wallet.service.ts now sends one canonical request containing bankName, bankBin, bankAccountNumber and bankAccountHolder. No automatic retry on validation/business errors. Backend DTO/persistence and masked wallet response were updated in ../backend. StoreWalletPage rejects masked/invalid account input locally and requires ownership verification before withdrawal.
+- Verification: `node --test tests/wallet-bank-contract.test.mjs` PASS 2/2; `node --test tests/wallet-partial-load.test.mjs` PASS 1/1. `npm run build` FAIL: src/components/common/NotificationBellPopover.tsx:168 User.userId does not exist. That file and its pre-existing edits were not changed by this task.
+- Testing: Vite currently proxies /api to production. To test the local backend fix, run the updated backend in the intended development environment and append ?api=http://localhost:5000 to the current frontend page (adjust backend port). Otherwise deploy backend first. Saving bank details does not verify ownership. No commit/push/deployment performed.
+
 ## 2026-11-03 — Immediate store order status feedback without changing the workflow
 
 - Root cause: the existing optimistic update changed only `status`, while action buttons preferred the unchanged `orderStatus` field, so the next action appeared only after the API response. Update both aliases immediately and retain a per-order pending display while the request is in flight. The next action is visible immediately but disabled with “Đang xác nhận…” until that same order is acknowledged, preventing duplicate or out-of-order transitions; other orders remain usable.
