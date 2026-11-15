@@ -759,7 +759,13 @@ export const AdminDashboard: React.FC = () => {
       }
       if (unassignedRes.data.success) {
         const rawUnassigned = Array.isArray(unassignedRes.data.data) ? unassignedRes.data.data : [];
-        setUnassignedDevices(rawUnassigned.filter((d: any) => !d?.storeId && !d?.customerId));
+        setUnassignedDevices(
+          rawUnassigned.filter(
+            (d: any) =>
+              !d?.customerId &&
+              (d?.inventoryState === 'IN_PLATFORM_WAREHOUSE' || (!d?.custodyStoreId && !d?.storeId))
+          )
+        );
       }
       if (allDevicesRes?.data?.success && Array.isArray(allDevicesRes.data.data)) {
         setAllDevices(allDevicesRes.data.data);
@@ -1005,6 +1011,9 @@ export const AdminDashboard: React.FC = () => {
         )
       );
       toast.success(`Đã cập nhật vai trò người dùng thành ${newRole}`);
+      if (newRole === 'STORE_OWNER') {
+        void fetchAdminData();
+      }
     } catch (_) {}
   };
 
@@ -1707,12 +1716,13 @@ export const AdminDashboard: React.FC = () => {
 
             {(() => {
               const allocatedList = allDevices
-                .filter((d) => Boolean(d?.storeId))
-                .filter((d) => deviceStoreFilter === 'ALL' || String(d.storeId) === deviceStoreFilter)
+                .filter((d) => Boolean(d?.custodyStoreId || (d?.inventoryState && d.inventoryState !== 'IN_PLATFORM_WAREHOUSE') || (!d?.inventoryState && d?.storeId)))
+                .filter((d) => deviceStoreFilter === 'ALL' || String(d.custodyStoreId || d.storeId) === deviceStoreFilter)
                 .filter((d) => {
                   const q = deviceSearchQuery.trim().toLowerCase();
                   if (!q) return true;
-                  const matchedStore = allStores.find((s) => String(s.id || s.storeId) === String(d.storeId));
+                  const targetStoreId = d.custodyStoreId || d.storeId;
+                  const matchedStore = allStores.find((s) => String(s.id || s.storeId) === String(targetStoreId));
                   const storeLabel = `${d.store?.storeName || d.store?.name || matchedStore?.name || ''} ${matchedStore?.code || ''}`.toLowerCase();
                   return (
                     String(d.deviceId || '').toLowerCase().includes(q) ||

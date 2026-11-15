@@ -9,7 +9,6 @@ import { useSearchParams } from 'react-router-dom';
 
 const AdminLiveAnalytics = React.lazy(() => import('./AdminLiveData').then(module => ({ default: module.AdminLiveAnalytics })));
 const AdminLiveDevices = React.lazy(() => import('./AdminLiveData').then(module => ({ default: module.AdminLiveDevices })));
-import { WarrantyPanel } from '../../components/devices/WarrantyPanel';
 
 const modalBackdropVariants: Variants = {
   hidden: { opacity: 0 },
@@ -304,17 +303,17 @@ export const AdminDashboard: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   // Navigation tabs organized sequentially by physical IoT operational lifecycle
   const [activeTab, setActiveTab] = useState<
-    'OVERVIEW' | 'STORES' | 'PLANS' | 'RENTALS' | 'CATALOG' | 'DEVICES' | 'WARRANTY' | 'RBAC' | 'TELEMETRY' | 'ANALYTICS' | 'NOTIFICATIONS'
+    'OVERVIEW' | 'STORES' | 'PLANS' | 'RENTALS' | 'CATALOG' | 'DEVICES' | 'RBAC' | 'TELEMETRY' | 'ANALYTICS' | 'NOTIFICATIONS'
   >(() => {
     const section = searchParams.get('section');
-    return ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'WARRANTY', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS'].includes(section || '')
+    return ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS'].includes(section || '')
       ? section as any
       : 'OVERVIEW';
   });
 
   useEffect(() => {
     const section = searchParams.get('section');
-    if (section && ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'WARRANTY', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS'].includes(section)) {
+    if (section && ['OVERVIEW', 'STORES', 'PLANS', 'RENTALS', 'CATALOG', 'DEVICES', 'RBAC', 'TELEMETRY', 'ANALYTICS', 'NOTIFICATIONS'].includes(section)) {
       setActiveTab(section as any);
     } else {
       setActiveTab('OVERVIEW');
@@ -431,10 +430,7 @@ export const AdminDashboard: React.FC = () => {
 
   // Device Batch Inventory & Allocation State
   const [unassignedDevices, setUnassignedDevices] = useState<any[]>([]);
-  const [allDevices, setAllDevices] = useState<any[]>([]);
-  const [deviceStoreFilter, setDeviceStoreFilter] = useState<string>('ALL');
-  const [deviceSearchQuery, setDeviceSearchQuery] = useState<string>('');
-  const [allStores, setAllStores] = useState<any[]>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_admin_stores') : null; if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; } } catch {} return []; });
+  const [allStores, setAllStores] = useState<any[]>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_admin_stores') : null; if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; } } catch { } return []; });
   const [storeSubs, setStoreSubs] = useState<AdminStoreSubscriptionItem[]>([]);
   const [storeSubsLoading, setStoreSubsLoading] = useState(false);
   const [storeSubsSearch, setStoreSubsSearch] = useState('');
@@ -730,7 +726,7 @@ export const AdminDashboard: React.FC = () => {
     const marker = typeof apiSessionMarker === 'function' ? apiSessionMarker() : null;
     const request = ++adminRead.current;
     try {
-      const [pendingRes, statsRes, logsRes, unassignedRes, storesRes, usersRes, plansRes, allDevicesRes] = await Promise.all([
+      const [pendingRes, statsRes, logsRes, unassignedRes, storesRes, usersRes, plansRes] = await Promise.all([
         api.get('/admin/stores/pending'),
         api.get('/admin/stats'),
         api.get('/admin/audit-logs'),
@@ -738,13 +734,12 @@ export const AdminDashboard: React.FC = () => {
         api.get('/admin/stores'),
         api.get('/admin/users').catch(() => ({ data: { success: false, data: [] } })),
         api.get('/admin/plans').catch(() => ({ data: { success: false, data: [] } })),
-        api.get('/devices').catch(() => ({ data: { success: false, data: [] } })),
       ]);
 
       if (adminRead.current !== request || (marker && typeof apiSessionMarker === 'function' && apiSessionMarker() !== marker)) return;
 
       if (pendingRes.data.success) setPendingStores(pendingRes.data.data);
-      if (statsRes.data.success) { setStats(statsRes.data.data); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_admin_stats', JSON.stringify(statsRes.data.data)); } catch {} }
+      if (statsRes.data.success) { setStats(statsRes.data.data); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_admin_stats', JSON.stringify(statsRes.data.data)); } catch { } }
       if (logsRes.data?.success && Array.isArray(logsRes.data.data) && logsRes.data.data.length > 0) {
         const backendLogs = logsRes.data.data;
         if (backendLogs.length >= 8) {
@@ -759,12 +754,15 @@ export const AdminDashboard: React.FC = () => {
       }
       if (unassignedRes.data.success) {
         const rawUnassigned = Array.isArray(unassignedRes.data.data) ? unassignedRes.data.data : [];
-        setUnassignedDevices(rawUnassigned.filter((d: any) => !d?.storeId && !d?.customerId));
+        setUnassignedDevices(
+          rawUnassigned.filter(
+            (d: any) =>
+              !d?.customerId &&
+              (d?.inventoryState === 'IN_PLATFORM_WAREHOUSE' || (!d?.custodyStoreId && !d?.storeId))
+          )
+        );
       }
-      if (allDevicesRes?.data?.success && Array.isArray(allDevicesRes.data.data)) {
-        setAllDevices(allDevicesRes.data.data);
-      }
-      if (storesRes.data.success) { setAllStores(storesRes.data.data || []); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_admin_stores', JSON.stringify(storesRes.data.data || [])); } catch {} }
+      if (storesRes.data.success) { setAllStores(storesRes.data.data || []); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_admin_stores', JSON.stringify(storesRes.data.data || [])); } catch { } }
       if (usersRes.data?.success && Array.isArray(usersRes.data.data) && usersRes.data.data.length > 0) {
         const mapped = usersRes.data.data.map((u: any) => ({
           ...u,
@@ -925,6 +923,15 @@ export const AdminDashboard: React.FC = () => {
       return;
     }
 
+    const unavailableDeviceIds = unassignedDevices
+      .filter((device) => selectedDeviceIds.includes(device.deviceId) && device.storeId)
+      .map((device) => device.deviceId);
+    if (unavailableDeviceIds.length > 0) {
+      toast.warning(`Nút ${unavailableDeviceIds.join(', ')} đã được bàn giao cho cửa hàng khác. Vui lòng tải lại danh sách kho.`);
+      fetchAdminData();
+      return;
+    }
+
     setIsProcessingBatch(true);
     try {
       const res = await api.post('/devices/allocate-store', {
@@ -996,7 +1003,7 @@ export const AdminDashboard: React.FC = () => {
   // Change user role
   const handleChangeUserRole = async (userId: string, newRole: string) => {
     try {
-      await api.post(`/admin/users/${encodeURIComponent(userId)}/role`, { role: newRole }).catch(() => {});
+      await api.post(`/admin/users/${encodeURIComponent(userId)}/role`, { role: newRole }).catch(() => { });
       setUsersList((prev) =>
         prev.map((u) =>
           u.id === userId || String(u.id) === String(userId) || String(u.userId) === String(userId)
@@ -1005,7 +1012,10 @@ export const AdminDashboard: React.FC = () => {
         )
       );
       toast.success(`Đã cập nhật vai trò người dùng thành ${newRole}`);
-    } catch (_) {}
+      if (newRole === 'STORE_OWNER') {
+        void fetchAdminData();
+      }
+    } catch (_) { }
   };
 
   // Add Product to Master Catalog
@@ -1115,553 +1125,666 @@ export const AdminDashboard: React.FC = () => {
       {/* Main Content Area */}
       <main className="admin-content">
 
-      {/* ========================================================================= */}
-      {/* MODULE 0: OVERVIEW, STATS & SYSTEM AUDIT TRAIL                           */}
-      {/* ========================================================================= */}
-      {activeTab === 'OVERVIEW' && (
-        <div className="space-y-8">
-          {/* System Stats Cards */}
-          {stats && (
-            <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
-              <div className="p-4 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-2xs">
-                <div className="text-xs font-medium text-slate-500 dark:text-zinc-400">Tổng cửa hàng</div>
-                <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white mt-1">{stats.totalStores}</p>
-                <p className="text-[11px] tabular-nums text-amber-600 dark:text-amber-400 font-medium mt-1">{stats.pendingStores} đang chờ duyệt</p>
-              </div>
+        {/* ========================================================================= */}
+        {/* MODULE 0: OVERVIEW, STATS & SYSTEM AUDIT TRAIL                           */}
+        {/* ========================================================================= */}
+        {activeTab === 'OVERVIEW' && (
+          <div className="space-y-8">
+            {/* System Stats Cards */}
+            {stats && (
+              <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-2xs">
+                  <div className="text-xs font-medium text-slate-500 dark:text-zinc-400">Tổng cửa hàng</div>
+                  <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white mt-1">{stats.totalStores}</p>
+                  <p className="text-[11px] tabular-nums text-amber-600 dark:text-amber-400 font-medium mt-1">{stats.pendingStores} đang chờ duyệt</p>
+                </div>
 
-              <div className="p-4 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-2xs">
-                <div className="text-xs font-medium text-slate-500 dark:text-zinc-400">Thiết bị đang hoạt động</div>
-                <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white mt-1">{stats.activeDevices}</p>
-                <p className="text-[11px] tabular-nums text-slate-500 dark:text-zinc-400 mt-1">/ {stats.totalDevices} thiết bị toàn mạng</p>
-              </div>
+                <div className="p-4 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-2xs">
+                  <div className="text-xs font-medium text-slate-500 dark:text-zinc-400">Thiết bị đang hoạt động</div>
+                  <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white mt-1">{stats.activeDevices}</p>
+                  <p className="text-[11px] tabular-nums text-slate-500 dark:text-zinc-400 mt-1">/ {stats.totalDevices} thiết bị toàn mạng</p>
+                </div>
 
-              <div className="p-4 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-2xs">
-                <div className="text-xs font-medium text-slate-500 dark:text-zinc-400">Tổng đơn hàng</div>
-                <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white mt-1">{stats.totalOrders}</p>
-                <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1">Đơn hàng đặt qua nút bấm</p>
-              </div>
+                <div className="p-4 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-2xs">
+                  <div className="text-xs font-medium text-slate-500 dark:text-zinc-400">Tổng đơn hàng</div>
+                  <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white mt-1">{stats.totalOrders}</p>
+                  <p className="text-[11px] text-slate-500 dark:text-zinc-400 mt-1">Đơn hàng đặt qua nút bấm</p>
+                </div>
 
-              <div className="p-4 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-2xs">
-                <div className="text-xs font-medium text-slate-500 dark:text-zinc-400">Doanh thu toàn hệ thống</div>
-                <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white mt-1">{stats.totalRevenue?.toLocaleString()} ₫</p>
-                <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">Tổng hợp trong hệ thống</p>
+                <div className="p-4 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-2xs">
+                  <div className="text-xs font-medium text-slate-500 dark:text-zinc-400">Doanh thu toàn hệ thống</div>
+                  <p className="text-2xl font-bold tabular-nums text-slate-900 dark:text-white mt-1">{stats.totalRevenue?.toLocaleString()} ₫</p>
+                  <p className="text-[11px] text-emerald-600 dark:text-emerald-400 font-medium mt-1">Tổng hợp trong hệ thống</p>
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* Quick Jump Action Bar */}
-          <div className="p-4 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-            <div className="space-y-0.5">
-              <span className="text-[10px] font-semibold   text-slate-500 dark:text-zinc-400">
-                Thao tác nhanh
-              </span>
-              <h4 className="text-xs font-semibold text-slate-900 dark:text-white">
-                Tạo thiết bị, thêm sản phẩm và xét duyệt cửa hàng
-              </h4>
-            </div>
-            <div className="admin-search-toolbar flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => {
-                  selectTab('DEVICES');
-                  setShowBatchModal(true);
-                }}
-                className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>Tạo lô thiết bị</span>
-              </button>
-              <button
-                onClick={() => {
-                  selectTab('CATALOG');
-                  setShowAddProductModal(true);
-                }}
-                className="px-3.5 py-2 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 font-medium text-xs flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Thêm sản phẩm</span>
-              </button>
-              {pendingStores.length > 0 && (
+            {/* Quick Jump Action Bar */}
+            <div className="p-4 bg-white dark:bg-zinc-900 border border-slate-200 dark:border-zinc-800 rounded-xl shadow-2xs flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+              <div className="space-y-0.5">
+                <span className="text-[10px] font-semibold   text-slate-500 dark:text-zinc-400">
+                  Thao tác nhanh
+                </span>
+                <h4 className="text-xs font-semibold text-slate-900 dark:text-white">
+                  Tạo thiết bị, thêm sản phẩm và xét duyệt cửa hàng
+                </h4>
+              </div>
+              <div className="admin-search-toolbar flex items-center gap-2 flex-wrap">
                 <button
-                  onClick={() => selectTab('STORES')}
-                  className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm active:scale-[0.97] transition-all cursor-pointer"
+                  onClick={() => {
+                    selectTab('DEVICES');
+                    setShowBatchModal(true);
+                  }}
+                  className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
                 >
-                  <Clock className="w-4 h-4" />
-                  <span>Duyệt {pendingStores.length} Đại Lý Chờ</span>
+                  <PlusCircle className="w-4 h-4" />
+                  <span>Tạo lô thiết bị</span>
                 </button>
+                <button
+                  onClick={() => {
+                    selectTab('CATALOG');
+                    setShowAddProductModal(true);
+                  }}
+                  className="px-3.5 py-2 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 font-medium text-xs flex items-center gap-1.5 transition-colors shadow-2xs cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Thêm sản phẩm</span>
+                </button>
+                {pendingStores.length > 0 && (
+                  <button
+                    onClick={() => selectTab('STORES')}
+                    className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm active:scale-[0.97] transition-all cursor-pointer"
+                  >
+                    <Clock className="w-4 h-4" />
+                    <span>Duyệt {pendingStores.length} Đại Lý Chờ</span>
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <p className="admin-data-note">Nhật ký có thể bao gồm sự kiện minh họa khi dữ liệu thực còn ít.</p>
+            {/* System Audit Trail (Nhật Ký Vận Hành Thực Tế) */}
+            <div className="space-y-2.5">
+              <div className="admin-section-heading">
+                <div className="flex items-center gap-2">
+                  <Terminal className="w-4 h-4 text-slate-700 dark:text-zinc-300" />
+                  <h3 className="text-xs font-semibold text-slate-900 dark:text-white  ">
+                    Hoạt động gần đây
+                  </h3>
+                  <span className="px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700">
+                    {auditLogs.length} sự kiện
+                  </span>
+                </div>
+                <span className="text-[11px] text-slate-600">Nhật ký hệ thống</span>
+              </div>
+
+              {auditLogs.length === 0 ? (
+                <div className="p-8 border border-dashed border-slate-200 dark:border-zinc-800 rounded-lg text-center space-y-1.5 bg-slate-50/50 dark:bg-zinc-900/50">
+                  <Activity className="w-5 h-5 text-slate-600 mx-auto" />
+                  <p className="text-xs font-semibold text-slate-700 dark:text-zinc-300">Chưa có hoạt động để hiển thị</p>
+                  <p className="text-[11px] text-slate-600">
+                    Các hoạt động phân quyền, phân bổ thiết bị và duyệt cửa hàng sẽ xuất hiện tại đây.
+                  </p>
+                </div>
+              ) : (
+                <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-slate-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-slate-50 dark:bg-zinc-850 border-b border-slate-200 dark:border-zinc-800 text-slate-500 text-[10px]  ">
+                      <tr>
+                        <th scope="col" className="py-2.5 px-3">Thời gian</th>
+                        <th scope="col" className="py-2.5 px-3">Tài khoản</th>
+                        <th scope="col" className="py-2.5 px-3">Hoạt động</th>
+                        <th scope="col" className="py-2.5 px-3">Đối tượng</th>
+                        <th scope="col" className="py-2.5 px-3">Chi tiết</th>
+                      </tr>
+                    </thead>
+                    <motion.tbody
+                      variants={tableBodyVariants}
+                      initial="hidden"
+                      animate="visible"
+                      className="divide-y divide-slate-200 dark:divide-zinc-800"
+                    >
+                      {auditLogs.slice(0, 15).map((log) => (
+                        <motion.tr
+                          variants={tableRowVariants}
+                          key={log.id}
+                          className="hover:bg-slate-50 dark:hover:bg-zinc-850/60 transition-colors"
+                        >
+                          <td className="py-2.5 px-3 text-slate-500 dark:text-zinc-400 text-[11px] tabular-nums whitespace-nowrap">
+                            {new Date(log.createdAt).toLocaleString('vi-VN')}
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-slate-900 dark:text-white whitespace-nowrap">
+                            {log.user?.fullName || log.user?.email || 'Hệ thống'}
+                          </td>
+                          <td className="py-2.5 px-3 whitespace-nowrap">
+                            <span className="px-1.5 py-0.5 rounded text-[10px]  font-medium bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700">
+                              {adminActionLabel(log.action)}
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-600 dark:text-zinc-400 whitespace-nowrap">
+                            <span>{adminEntityLabel(log.entity)}</span>{' '}
+                            {log.entityId && (
+                              <span className="text-[10px] text-slate-600 dark:text-zinc-400 ">
+                                ({log.entityId.slice(-6)})
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2.5 px-3 text-slate-700 dark:text-zinc-300 text-xs">
+                            {renderAuditLogDetails(log)}
+                          </td>
+                        </motion.tr>
+                      ))}
+                    </motion.tbody>
+                  </table>
+                </div>
               )}
             </div>
           </div>
+        )}
 
-          <p className="admin-data-note">Nhật ký có thể bao gồm sự kiện minh họa khi dữ liệu thực còn ít.</p>
-          {/* System Audit Trail (Nhật Ký Vận Hành Thực Tế) */}
-          <div className="space-y-2.5">
-            <div className="admin-section-heading">
-              <div className="flex items-center gap-2">
-                <Terminal className="w-4 h-4 text-slate-700 dark:text-zinc-300" />
-                <h3 className="text-xs font-semibold text-slate-900 dark:text-white  ">
-                  Hoạt động gần đây
-                </h3>
-                <span className="px-1.5 py-0.5 rounded text-[10px] font-medium tabular-nums bg-slate-100 dark:bg-zinc-800 text-slate-600 dark:text-zinc-400 border border-slate-200 dark:border-zinc-700">
-                  {auditLogs.length} sự kiện
-                </span>
+        {/* ========================================================================= */}
+        {/* MODULE 1: STORES & PARTNERS APPROVAL (1. DUYỆT ĐẠI LÝ)                     */}
+        {/* ========================================================================= */}
+        {activeTab === 'STORES' && (
+          <div className="space-y-5">
+            {/* Pending Store Approvals */}
+            <div className="space-y-2.5">
+              <div className="admin-section-heading">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-zinc-700 dark:text-zinc-300" />
+                  <h3 className="text-xs font-semibold text-zinc-900 dark:text-white   ">
+                    Cửa hàng chờ duyệt ({pendingStores.length})
+                  </h3>
+                </div>
+                <span className="text-[11px] text-zinc-600 ">Xác minh giấy phép & kho</span>
               </div>
-              <span className="text-[11px] text-slate-600">Nhật ký hệ thống</span>
-            </div>
 
-            {auditLogs.length === 0 ? (
-              <div className="p-8 border border-dashed border-slate-200 dark:border-zinc-800 rounded-lg text-center space-y-1.5 bg-slate-50/50 dark:bg-zinc-900/50">
-                <Activity className="w-5 h-5 text-slate-600 mx-auto" />
-                <p className="text-xs font-semibold text-slate-700 dark:text-zinc-300">Chưa có hoạt động để hiển thị</p>
-                <p className="text-[11px] text-slate-600">
-                  Các hoạt động phân quyền, phân bổ thiết bị và duyệt cửa hàng sẽ xuất hiện tại đây.
-                </p>
-              </div>
-            ) : (
-              <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-slate-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900">
-                <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 dark:bg-zinc-850 border-b border-slate-200 dark:border-zinc-800 text-slate-500 text-[10px]  ">
-                    <tr>
-                      <th scope="col" className="py-2.5 px-3">Thời gian</th>
-                      <th scope="col" className="py-2.5 px-3">Tài khoản</th>
-                      <th scope="col" className="py-2.5 px-3">Hoạt động</th>
-                      <th scope="col" className="py-2.5 px-3">Đối tượng</th>
-                      <th scope="col" className="py-2.5 px-3">Chi tiết</th>
-                    </tr>
-                  </thead>
-                  <motion.tbody
-                    variants={tableBodyVariants}
-                    initial="hidden"
-                    animate="visible"
-                    className="divide-y divide-slate-200 dark:divide-zinc-800"
-                  >
-                    {auditLogs.slice(0, 15).map((log) => (
-                      <motion.tr
-                        variants={tableRowVariants}
-                        key={log.id}
-                        className="hover:bg-slate-50 dark:hover:bg-zinc-850/60 transition-colors"
+              {pendingStores.length === 0 ? (
+                <div className="p-6 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg text-center space-y-1.5 bg-zinc-50/50 dark:bg-zinc-900/50">
+                  <CheckCircle2 className="w-5 h-5 text-emerald-500 mx-auto" />
+                  <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Không có đơn đại lý nào chờ duyệt</p>
+                  <p className="text-[11px] text-zinc-600 ">
+                    Tất cả các trạm cửa hàng đăng ký đều đã được xử lý hoàn tất.
+                  </p>
+                </div>
+              ) : (
+                <div className="space-y-2">
+                  {pendingStores.map((store) => {
+                    const sId = String(store.id || store.storeId || '');
+                    return (
+                      <div
+                        key={sId}
+                        className="p-3.5 border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900 flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-2xs"
                       >
-                        <td className="py-2.5 px-3 text-slate-500 dark:text-zinc-400 text-[11px] tabular-nums whitespace-nowrap">
-                          {new Date(log.createdAt).toLocaleString('vi-VN')}
-                        </td>
-                        <td className="py-2.5 px-3 font-semibold text-slate-900 dark:text-white whitespace-nowrap">
-                          {log.user?.fullName || log.user?.email || 'Hệ thống'}
-                        </td>
-                        <td className="py-2.5 px-3 whitespace-nowrap">
-                          <span className="px-1.5 py-0.5 rounded text-[10px]  font-medium bg-slate-100 dark:bg-zinc-800 text-slate-700 dark:text-zinc-300 border border-slate-200 dark:border-zinc-700">
-                            {adminActionLabel(log.action)}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-600 dark:text-zinc-400 whitespace-nowrap">
-                          <span>{adminEntityLabel(log.entity)}</span>{' '}
-                          {log.entityId && (
-                            <span className="text-[10px] text-slate-600 dark:text-zinc-400 ">
-                              ({log.entityId.slice(-6)})
+                        <div className="space-y-1 text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="font-semibold text-zinc-900 dark:text-white">{store.name}</span>
+                            <span className=" text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.2 rounded border border-zinc-200 dark:border-zinc-700">
+                              {store.code}
                             </span>
-                          )}
-                        </td>
-                        <td className="py-2.5 px-3 text-slate-700 dark:text-zinc-300 text-xs">
-                          {renderAuditLogDetails(log)}
-                        </td>
-                      </motion.tr>
-                    ))}
-                  </motion.tbody>
-                </table>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODULE 1: STORES & PARTNERS APPROVAL (1. DUYỆT ĐẠI LÝ)                     */}
-      {/* ========================================================================= */}
-      {activeTab === 'STORES' && (
-        <div className="space-y-5">
-          {/* Pending Store Approvals */}
-          <div className="space-y-2.5">
-            <div className="admin-section-heading">
-              <div className="flex items-center gap-2">
-                <Clock className="w-4 h-4 text-zinc-700 dark:text-zinc-300" />
-                <h3 className="text-xs font-semibold text-zinc-900 dark:text-white   ">
-                  Cửa hàng chờ duyệt ({pendingStores.length})
-                </h3>
-              </div>
-              <span className="text-[11px] text-zinc-600 ">Xác minh giấy phép & kho</span>
-            </div>
-
-            {pendingStores.length === 0 ? (
-              <div className="p-6 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-lg text-center space-y-1.5 bg-zinc-50/50 dark:bg-zinc-900/50">
-                <CheckCircle2 className="w-5 h-5 text-emerald-500 mx-auto" />
-                <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">Không có đơn đại lý nào chờ duyệt</p>
-                <p className="text-[11px] text-zinc-600 ">
-                  Tất cả các trạm cửa hàng đăng ký đều đã được xử lý hoàn tất.
-                </p>
-              </div>
-            ) : (
-              <div className="space-y-2">
-                {pendingStores.map((store) => {
-                  const sId = String(store.id || store.storeId || '');
-                  return (
-                    <div
-                      key={sId}
-                      className="p-3.5 border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900 flex flex-col md:flex-row md:items-center md:justify-between gap-3 shadow-2xs"
-                    >
-                      <div className="space-y-1 text-xs">
-                        <div className="flex items-center gap-2">
-                          <span className="font-semibold text-zinc-900 dark:text-white">{store.name}</span>
-                          <span className=" text-[10px] bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 px-1.5 py-0.2 rounded border border-zinc-200 dark:border-zinc-700">
-                            {store.code}
-                          </span>
+                          </div>
+                          <p className="text-zinc-500 dark:text-zinc-400 text-[11px]">
+                            Chủ: <strong className="text-zinc-700 dark:text-zinc-200">{store.ownerName || store.owner?.fullName || 'Chủ shop'}</strong> • {store.phone} • {store.email}
+                          </p>
+                          <p className="text-zinc-600 dark:text-zinc-400 text-[11px]">Kho: {store.address}</p>
                         </div>
-                        <p className="text-zinc-500 dark:text-zinc-400 text-[11px]">
-                          Chủ: <strong className="text-zinc-700 dark:text-zinc-200">{store.ownerName || store.owner?.fullName || 'Chủ shop'}</strong> • {store.phone} • {store.email}
-                        </p>
-                        <p className="text-zinc-600 dark:text-zinc-400 text-[11px]">Kho: {store.address}</p>
-                      </div>
 
-                      <div className="admin-actions flex items-center gap-2 shrink-0">
-                        <button
-                          onClick={() => handleApprove(sId)}
-                          className="px-3 py-1.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-medium shadow-sm flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer"
-                        >
-                          <CheckCircle2 className="w-3.5 h-3.5" />
-                          <span>Phê duyệt</span>
-                        </button>
-                        <button
-                          onClick={() => openStoreActionModal(sId, 'REJECT')}
-                          className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 flex items-center gap-1.5 active:scale-[0.97] transition-all shadow-2xs cursor-pointer"
-                        >
-                          <XCircle className="w-3.5 h-3.5" />
-                          <span>Từ chối</span>
-                        </button>
+                        <div className="admin-actions flex items-center gap-2 shrink-0">
+                          <button
+                            onClick={() => handleApprove(sId)}
+                            className="px-3 py-1.5 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-medium shadow-sm flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer"
+                          >
+                            <CheckCircle2 className="w-3.5 h-3.5" />
+                            <span>Phê duyệt</span>
+                          </button>
+                          <button
+                            onClick={() => openStoreActionModal(sId, 'REJECT')}
+                            className="px-3 py-1.5 rounded-lg bg-white border border-slate-200 hover:bg-slate-50 text-slate-700 text-xs font-medium dark:bg-zinc-800 dark:border-zinc-700 dark:text-zinc-200 flex items-center gap-1.5 active:scale-[0.97] transition-all shadow-2xs cursor-pointer"
+                          >
+                            <XCircle className="w-3.5 h-3.5" />
+                            <span>Từ chối</span>
+                          </button>
+                        </div>
                       </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
-
-          {/* Active Stores Fleet Directory */}
-          <div className="space-y-4">
-            <div className="admin-section-heading">
-              <div className="flex items-center gap-2">
-                <StoreIcon className="w-4 h-4 text-zinc-700 dark:text-zinc-300" />
-                <h3 className="text-xs font-semibold text-zinc-900 dark:text-white">
-                  Tất cả cửa hàng trong hệ thống ({allStores.length})
-                </h3>
-              </div>
-              <span className="text-[11px] text-zinc-600">Dữ liệu thời gian thực từ máy chủ</span>
+                    );
+                  })}
+                </div>
+              )}
             </div>
 
-            {/* Thống kê cửa hàng */}
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              <div className="rounded-lg border border-zinc-100 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/40">
-                <p className="text-[11px] font-medium text-zinc-500">Tổng cửa hàng</p>
-                <p className="mt-1 text-lg font-bold text-zinc-900 dark:text-white">{storesStats.total}</p>
-                <p className="text-[10px] text-zinc-400">Đã đăng ký tài khoản</p>
+            {/* Active Stores Fleet Directory */}
+            <div className="space-y-4">
+              <div className="admin-section-heading">
+                <div className="flex items-center gap-2">
+                  <StoreIcon className="w-4 h-4 text-zinc-700 dark:text-zinc-300" />
+                  <h3 className="text-xs font-semibold text-zinc-900 dark:text-white">
+                    Tất cả cửa hàng trong hệ thống ({allStores.length})
+                  </h3>
+                </div>
+                <span className="text-[11px] text-zinc-600">Dữ liệu thời gian thực từ máy chủ</span>
               </div>
-              <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-3 dark:border-emerald-950/40 dark:bg-emerald-950/20">
-                <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">Đang hoạt động</p>
-                <p className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-200">{storesStats.active}</p>
-                <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80">Kinh doanh bình thường</p>
-              </div>
-              <div className="rounded-lg border border-rose-100 bg-rose-50/50 p-3 dark:border-rose-950/40 dark:bg-rose-950/20">
-                <p className="text-[11px] font-medium text-rose-800 dark:text-rose-300">Ngừng hoạt động</p>
-                <p className="mt-1 text-lg font-bold text-rose-700 dark:text-rose-200">{storesStats.suspended}</p>
-                <p className="text-[10px] text-rose-600/80 dark:text-rose-400/80">Đã bị khóa / ngừng</p>
-              </div>
-              <div className="rounded-lg border border-amber-100 bg-amber-50/50 p-3 dark:border-amber-950/40 dark:bg-amber-950/20">
-                <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">Chờ phê duyệt</p>
-                <p className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-200">{storesStats.pending}</p>
-                <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80">Đơn mới nộp</p>
-              </div>
-            </div>
 
-            {/* Thanh lọc & tìm kiếm */}
-            <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
-              <div className="flex flex-wrap items-center gap-1.5">
-                {[
-                  { key: 'ALL', label: `Tất cả (${storesStats.total})` },
-                  { key: 'ACTIVE', label: `Đang hoạt động (${storesStats.active})` },
-                  { key: 'SUSPENDED', label: `Ngừng hoạt động (${storesStats.suspended})` },
-                  { key: 'PENDING', label: `Chờ duyệt (${storesStats.pending})` },
-                ].map((tab) => (
-                  <button
-                    key={tab.key}
-                    type="button"
-                    onClick={() => setStoresFilter(tab.key as any)}
-                    className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
-                      storesFilter === tab.key
+              {/* Thống kê cửa hàng */}
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="rounded-lg border border-zinc-100 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/40">
+                  <p className="text-[11px] font-medium text-zinc-500">Tổng cửa hàng</p>
+                  <p className="mt-1 text-lg font-bold text-zinc-900 dark:text-white">{storesStats.total}</p>
+                  <p className="text-[10px] text-zinc-400">Đã đăng ký tài khoản</p>
+                </div>
+                <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-3 dark:border-emerald-950/40 dark:bg-emerald-950/20">
+                  <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">Đang hoạt động</p>
+                  <p className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-200">{storesStats.active}</p>
+                  <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80">Kinh doanh bình thường</p>
+                </div>
+                <div className="rounded-lg border border-rose-100 bg-rose-50/50 p-3 dark:border-rose-950/40 dark:bg-rose-950/20">
+                  <p className="text-[11px] font-medium text-rose-800 dark:text-rose-300">Ngừng hoạt động</p>
+                  <p className="mt-1 text-lg font-bold text-rose-700 dark:text-rose-200">{storesStats.suspended}</p>
+                  <p className="text-[10px] text-rose-600/80 dark:text-rose-400/80">Đã bị khóa / ngừng</p>
+                </div>
+                <div className="rounded-lg border border-amber-100 bg-amber-50/50 p-3 dark:border-amber-950/40 dark:bg-amber-950/20">
+                  <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">Chờ phê duyệt</p>
+                  <p className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-200">{storesStats.pending}</p>
+                  <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80">Đơn mới nộp</p>
+                </div>
+              </div>
+
+              {/* Thanh lọc & tìm kiếm */}
+              <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                <div className="flex flex-wrap items-center gap-1.5">
+                  {[
+                    { key: 'ALL', label: `Tất cả (${storesStats.total})` },
+                    { key: 'ACTIVE', label: `Đang hoạt động (${storesStats.active})` },
+                    { key: 'SUSPENDED', label: `Ngừng hoạt động (${storesStats.suspended})` },
+                    { key: 'PENDING', label: `Chờ duyệt (${storesStats.pending})` },
+                  ].map((tab) => (
+                    <button
+                      key={tab.key}
+                      type="button"
+                      onClick={() => setStoresFilter(tab.key as any)}
+                      className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${storesFilter === tab.key
                         ? 'bg-[#0E6BA8] text-white shadow-2xs'
                         : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300'
-                    }`}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
+                        }`}
+                    >
+                      {tab.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="relative min-w-0 sm:w-64">
+                  <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+                  <input
+                    value={storesSearch}
+                    onChange={(e) => setStoresSearch(e.target.value)}
+                    placeholder="Tìm theo tên, mã, người đại diện…"
+                    className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-1.5 pl-8 pr-3 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                  />
+                </div>
               </div>
 
-              <div className="relative min-w-0 sm:w-64">
-                <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
-                <input
-                  value={storesSearch}
-                  onChange={(e) => setStoresSearch(e.target.value)}
-                  placeholder="Tìm theo tên, mã, người đại diện…"
-                  className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-1.5 pl-8 pr-3 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950 text-zinc-900 dark:text-white"
-                />
+              {filteredAllStores.length === 0 ? (
+                <p className="text-xs text-zinc-600 py-6 text-center ">Không tìm thấy cửa hàng nào phù hợp với bộ lọc.</p>
+              ) : (
+                <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900">
+                  <table className="w-full text-left text-xs">
+                    <thead className="bg-zinc-50 dark:bg-zinc-850 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500  text-[10px]  ">
+                      <tr>
+                        <th scope="col" className="py-2 px-3">Tên cửa hàng</th>
+                        <th scope="col" className="py-2 px-3">Mã cửa hàng</th>
+                        <th scope="col" className="py-2 px-3">Người đại diện</th>
+                        <th scope="col" className="py-2 px-3">Liên hệ</th>
+                        <th scope="col" className="py-2 px-3">Địa chỉ</th>
+                        <th scope="col" className="py-2 px-3">Trạng thái</th>
+                        <th scope="col" className="py-2 px-3 text-right">Thao tác</th>
+                      </tr>
+                    </thead>
+                    <motion.tbody
+                      variants={tableBodyVariants}
+                      initial="hidden"
+                      animate="visible"
+                      className="divide-y divide-zinc-200 dark:divide-zinc-800"
+                    >
+                      {filteredAllStores.map((s) => {
+                        const sId = s.id || s.storeId;
+                        return (
+                          <motion.tr
+                            variants={tableRowVariants}
+                            key={sId}
+                            className="hover:bg-zinc-50 dark:hover:bg-zinc-850/60 transition-colors"
+                          >
+                            <td className="py-2 px-3 font-semibold text-zinc-900 dark:text-white">{s.name}</td>
+                            <td className="py-2 px-3  font-medium text-xs text-zinc-700 dark:text-zinc-300">
+                              <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
+                                {s.code}
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-zinc-700 dark:text-zinc-300">
+                              {s.ownerName || s.owner?.fullName || 'Chưa cập nhật'}
+                            </td>
+                            <td className="py-2 px-3  text-zinc-500 dark:text-zinc-400 text-[11px]">
+                              <div>{s.phone}</div>
+                              <div className="text-[10px] text-zinc-600">{s.email}</div>
+                            </td>
+                            <td className="py-2 px-3 text-zinc-500 dark:text-zinc-400 text-[11px] admin-address">{s.address}</td>
+                            <td className="py-2 px-3">
+                              <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
+                                <span className={`w-1.5 h-1.5 rounded-full ${s.status === 'ACTIVE'
+                                  ? 'bg-emerald-500'
+                                  : s.status === 'SUSPENDED'
+                                    ? 'bg-rose-500'
+                                    : 'bg-amber-500'
+                                  }`}></span>
+                                <span>{
+                                  s.status === 'ACTIVE'
+                                    ? 'Đang hoạt động'
+                                    : s.status === 'SUSPENDED'
+                                      ? 'Ngừng hoạt động'
+                                      : 'Chờ phê duyệt'
+                                }</span>
+                              </span>
+                            </td>
+                            <td className="py-2 px-3 text-right">
+                              {s.status === 'ACTIVE' ? (
+                                <button
+                                  type="button"
+                                  onClick={() => openStoreActionModal(String(sId), 'SUSPEND')}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300 cursor-pointer"
+                                >
+                                  <ShieldAlert className="h-3.5 w-3.5" /> Ngừng hoạt động
+                                </button>
+                              ) : (
+                                <button
+                                  type="button"
+                                  onClick={() => handleApprove(String(sId))}
+                                  className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 cursor-pointer"
+                                >
+                                  <CheckCircle2 className="h-3.5 w-3.5" /> Kích hoạt lại
+                                </button>
+                              )}
+                            </td>
+                          </motion.tr>
+                        );
+                      })}
+                    </motion.tbody>
+                  </table>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* MODULE 3: DEVICES BATCH INVENTORY & ALLOCATION (3. KHO NÚT BẤM)           */}
+        {/* ========================================================================= */}
+        {activeTab === 'DEVICES' && (
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xs p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div className="flex items-center space-x-3">
+                <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 flex items-center justify-center border border-zinc-200 dark:border-zinc-700">
+                  <Cpu className="w-4 h-4" />
+                </div>
+                <div>
+                  <h2 className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                    <span>Kho Nút Bấm Trống & Bàn Giao Đại Lý</span>
+                    <span className="px-2 py-0.5 rounded text-[10px]  font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                      {unassignedDevices.length} nút chưa phân bổ
+                    </span>
+                  </h2>
+                  <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                    Tạo lô thiết bị mới và phân bổ cho các cửa hàng.
+                  </p>
+                </div>
+              </div>
+
+              <div className="admin-actions flex items-center gap-2">
+                <button
+                  onClick={() => setShowBatchModal(true)}
+                  className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-medium shadow-sm flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer"
+                >
+                  <PlusCircle className="w-4 h-4" />
+                  <span>Tạo Lô Nút Bấm Mới</span>
+                </button>
+                <button
+                  disabled={selectedDeviceIds.length === 0}
+                  onClick={() => setShowAllocateModal(true)}
+                  className={`px-3.5 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${selectedDeviceIds.length > 0
+                    ? 'bg-[#0E6BA8] hover:bg-[#0B5586] text-white shadow-sm active:scale-[0.97] cursor-pointer'
+                    : 'bg-slate-100 border border-slate-200 text-slate-600 cursor-not-allowed dark:bg-zinc-800/40 dark:border-zinc-800 dark:text-zinc-600'
+                    }`}
+                >
+                  <Send className="w-4 h-4" />
+                  <span>Cấp Phát Cho Cửa Hàng ({selectedDeviceIds.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setResettingDevice(null);
+                    setResetDeviceIdInput('');
+                    setShowFactoryResetModal(true);
+                  }}
+                  className="px-3.5 py-2 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-medium flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer shadow-xs"
+                >
+                  <RotateCcw className="w-3.5 h-3.5" />
+                  <span>Khôi phục cài đặt gốc</span>
+                </button>
               </div>
             </div>
 
-            {filteredAllStores.length === 0 ? (
-              <p className="text-xs text-zinc-600 py-6 text-center ">Không tìm thấy cửa hàng nào phù hợp với bộ lọc.</p>
+            <p className="text-xs text-zinc-600 dark:text-zinc-400">Danh sách hiển thị tối đa 50 thiết bị. Tổng trong kho: {unassignedDevices.length}.</p>
+            {unassignedDevices.length === 0 ? (
+              <motion.div
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.35, ease: 'easeOut' }}
+                className="p-12 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl text-center space-y-2 bg-zinc-50/50 dark:bg-zinc-900/50"
+              >
+                <Boxes className="w-8 h-8 text-zinc-600 mx-auto" />
+                <p className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">Kho nút tổng đang trống</p>
+                <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                  Nhấn nút <strong className="text-zinc-700 dark:text-zinc-300">"Tạo Lô Nút Bấm Mới"</strong> để nạp mã thiết bị vào hệ thống.
+                </p>
+              </motion.div>
             ) : (
-              <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900">
+              <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-zinc-50 dark:bg-zinc-850 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500  text-[10px]  ">
+                  <thead className="bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 font-semibold    text-[10px]">
                     <tr>
-                      <th scope="col" className="py-2 px-3">Tên cửa hàng</th>
-                      <th scope="col" className="py-2 px-3">Mã cửa hàng</th>
-                      <th scope="col" className="py-2 px-3">Người đại diện</th>
-                      <th scope="col" className="py-2 px-3">Liên hệ</th>
-                      <th scope="col" className="py-2 px-3">Địa chỉ</th>
-                      <th scope="col" className="py-2 px-3">Trạng thái</th>
-                      <th scope="col" className="py-2 px-3 text-right">Thao tác</th>
+                      <th scope="col" className="py-2.5 px-3 w-10">
+                        <button aria-label="Chọn tất cả thiết bị" onClick={toggleSelectAll} className="flex items-center cursor-pointer">
+                          {selectedDeviceIds.length === unassignedDevices.length && unassignedDevices.length > 0 ? (
+                            <CheckSquare className="w-4 h-4 text-[#0E6BA8]" />
+                          ) : (
+                            <Square className="w-4 h-4 text-zinc-600" />
+                          )}
+                        </button>
+                      </th>
+                      <th scope="col" className="py-2.5 px-3">Mã thiết bị</th>
+                      <th scope="col" className="py-2.5 px-3">Số sê-ri</th>
+                      <th scope="col" className="py-2.5 px-3">Mã ghép nối</th>
+                      <th scope="col" className="py-2.5 px-3">Tên kết nối</th>
+                      <th scope="col" className="py-2.5 px-3">Trạng thái</th>
+                      <th scope="col" className="py-2.5 px-3 text-right">Thao tác</th>
                     </tr>
                   </thead>
                   <motion.tbody
                     variants={tableBodyVariants}
                     initial="hidden"
                     animate="visible"
-                    className="divide-y divide-zinc-200 dark:divide-zinc-800"
+                    className="divide-y divide-zinc-100 dark:divide-zinc-800/60 "
                   >
-                    {filteredAllStores.map((s) => {
-                      const sId = s.id || s.storeId;
+                    {unassignedDevices.slice(0, 50).map((dev) => {
+                      const isSelected = selectedDeviceIds.includes(dev.deviceId);
                       return (
                         <motion.tr
                           variants={tableRowVariants}
-                          key={sId}
-                          className="hover:bg-zinc-50 dark:hover:bg-zinc-850/60 transition-colors"
+                          key={dev.id}
+                          onClick={() => toggleDeviceSelect(dev.deviceId)}
+                          className={`cursor-pointer transition-colors ${isSelected
+                            ? 'bg-zinc-100/70 dark:bg-zinc-800/60'
+                            : 'hover:bg-zinc-50 dark:hover:bg-zinc-850/40'
+                            }`}
                         >
-                          <td className="py-2 px-3 font-semibold text-zinc-900 dark:text-white">{s.name}</td>
-                          <td className="py-2 px-3  font-medium text-xs text-zinc-700 dark:text-zinc-300">
-                            <span className="px-1.5 py-0.2 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700">
-                              {s.code}
+                          <td className="py-2.5 px-3" onClick={(e) => e.stopPropagation()}>
+                            <button aria-label={`Chọn thiết bị ${dev.deviceId}`} aria-pressed={isSelected} onClick={() => toggleDeviceSelect(dev.deviceId)} className="cursor-pointer">
+                              {isSelected ? (
+                                <CheckSquare className="w-4 h-4 text-[#0E6BA8]" />
+                              ) : (
+                                <Square className="w-4 h-4 text-zinc-600" />
+                              )}
+                            </button>
+                          </td>
+                          <td className="py-2.5 px-3 font-semibold text-zinc-900 dark:text-white">
+                            <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-xs">
+                              {dev.deviceId}
                             </span>
                           </td>
-                          <td className="py-2 px-3 text-zinc-700 dark:text-zinc-300">
-                            {s.ownerName || s.owner?.fullName || 'Chưa cập nhật'}
+                          <td className="py-2.5 px-3 text-zinc-500 dark:text-zinc-400 text-[11px]">{dev.serialNumber}</td>
+                          <td className="py-2.5 px-3 text-zinc-800 dark:text-zinc-200 font-bold">{dev.pairingCode || '-'}</td>
+                          <td className="py-2.5 px-3 text-zinc-700 dark:text-zinc-300">
+                            <span className="text-[11px] font-sans text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded">
+                              SOB-{dev.deviceId}
+                            </span>
                           </td>
-                        <td className="py-2 px-3  text-zinc-500 dark:text-zinc-400 text-[11px]">
-                          <div>{s.phone}</div>
-                          <div className="text-[10px] text-zinc-600">{s.email}</div>
-                        </td>
-                        <td className="py-2 px-3 text-zinc-500 dark:text-zinc-400 text-[11px] admin-address">{s.address}</td>
-                        <td className="py-2 px-3">
-                          <span className="inline-flex items-center gap-1.5 text-xs font-medium text-zinc-700 dark:text-zinc-300">
-                            <span className={`w-1.5 h-1.5 rounded-full ${
-                              s.status === 'ACTIVE'
-                                ? 'bg-emerald-500'
-                                : s.status === 'SUSPENDED'
-                                ? 'bg-rose-500'
-                                : 'bg-amber-500'
-                            }`}></span>
-                            <span>{
-                              s.status === 'ACTIVE'
-                                ? 'Đang hoạt động'
-                                : s.status === 'SUSPENDED'
-                                ? 'Ngừng hoạt động'
-                                : 'Chờ phê duyệt'
-                            }</span>
-                          </span>
-                        </td>
-                        <td className="py-2 px-3 text-right">
-                          {s.status === 'ACTIVE' ? (
+                          <td className="py-2.5 px-3">
+                            <span className="px-2 py-0.5 rounded-full text-[10px]  font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
+                              Trong Kho Trống
+                            </span>
+                          </td>
+                          <td className="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
                             <button
                               type="button"
-                              onClick={() => openStoreActionModal(String(sId), 'SUSPEND')}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300 cursor-pointer"
+                              onClick={() => {
+                                setResettingDevice(dev);
+                                setResetDeviceIdInput(dev.deviceId);
+                                setShowFactoryResetModal(true);
+                              }}
+                              className="px-2 py-1 rounded text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 border border-rose-200/60 dark:border-rose-900/50 transition-colors inline-flex items-center gap-1 cursor-pointer"
+                              title="Khôi phục xuất xưởng"
                             >
-                              <ShieldAlert className="h-3.5 w-3.5" /> Ngừng hoạt động
+                              <RotateCcw className="w-3 h-3" />
+                              <span>Khôi phục cài đặt gốc</span>
                             </button>
-                          ) : (
-                            <button
-                              type="button"
-                              onClick={() => handleApprove(String(sId))}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 cursor-pointer"
-                            >
-                              <CheckCircle2 className="h-3.5 w-3.5" /> Kích hoạt lại
-                            </button>
-                          )}
-                        </td>
-                      </motion.tr>
-                    );
-                  })}
+                          </td>
+                        </motion.tr>
+                      );
+                    })}
                   </motion.tbody>
                 </table>
               </div>
             )}
           </div>
-        </div>
-      )}
+        )}
 
-      {/* ========================================================================= */}
-      {/* MODULE 3: DEVICES BATCH INVENTORY & ALLOCATION (3. KHO NÚT BẤM)           */}
-      {/* ========================================================================= */}
-      {activeTab === 'DEVICES' && (
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xs p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 flex items-center justify-center border border-zinc-200 dark:border-zinc-700">
-                <Cpu className="w-4 h-4" />
-              </div>
-              <div>
-                <h2 className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-                  <span>Kho Nút Bấm Trống & Bàn Giao Đại Lý</span>
-                  <span className="px-2 py-0.5 rounded text-[10px]  font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-                    {unassignedDevices.length} nút chưa phân bổ
-                  </span>
+        {/* ========================================================================= */}
+        {/* MODULE 2: 4.2.1 RBAC USER MANAGEMENT & PERMISSIONS                        */}
+        {/* ========================================================================= */}
+        {activeTab === 'RBAC' && (
+          <div className="space-y-4">
+            <p className="admin-data-note">Danh sách có thể bao gồm tài khoản minh họa khi chưa tải được dữ liệu thực.</p>
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Users className="w-4 h-4 text-zinc-700 dark:text-zinc-300" />
+                <h2 className="text-sm font-semibold text-zinc-900 dark:text-white   ">
+                  Tài khoản & phân quyền
                 </h2>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                  Tạo lô thiết bị mới và phân bổ cho các cửa hàng.
-                </p>
+                <span className="px-1.5 py-0.2 rounded text-[10px]  font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                  {filteredUsers.length} tài khoản
+                </span>
+              </div>
+
+              {/* Role Filter & Search */}
+              <div className="admin-search-toolbar flex items-center gap-2 flex-wrap">
+                <div className="relative">
+                  <Search className="w-3.5 h-3.5 text-zinc-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                  <input aria-label="Tìm tài khoản theo tên, email hoặc số điện thoại"
+                    type="text"
+                    value={userSearch}
+                    onChange={(e) => setUserSearch(e.target.value)}
+                    placeholder="Tìm tên, email, SĐT..."
+                    className="pl-8 pr-3 py-1 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white placeholder:text-zinc-400"
+                  />
+                </div>
+
+                <select aria-label="Lọc tài khoản theo vai trò"
+                  value={userRoleFilter}
+                  onChange={(e) => setUserRoleFilter(e.target.value)}
+                  className="px-2.5 py-1 text-xs font-medium rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 cursor-pointer"
+                >
+                  <option value="ALL">Tất cả vai trò</option>
+                  <option value="SUPER_ADMIN">Quản trị viên</option>
+                  <option value="STORE_OWNER">Chủ cửa hàng</option>
+                  <option value="DELIVERY_STAFF">Delivery Staff (Giao hàng)</option>
+                  <option value="CUSTOMER">Customer (Cư dân)</option>
+                </select>
               </div>
             </div>
 
-            <div className="admin-actions flex items-center gap-2">
-              <button
-                onClick={() => setShowBatchModal(true)}
-                className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-medium shadow-sm flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>Tạo Lô Nút Bấm Mới</span>
-              </button>
-              <button
-                disabled={selectedDeviceIds.length === 0}
-                onClick={() => setShowAllocateModal(true)}
-                className={`px-3.5 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
-                  selectedDeviceIds.length > 0
-                    ? 'bg-[#0E6BA8] hover:bg-[#0B5586] text-white shadow-sm active:scale-[0.97] cursor-pointer'
-                    : 'bg-slate-100 border border-slate-200 text-slate-600 cursor-not-allowed dark:bg-zinc-800/40 dark:border-zinc-800 dark:text-zinc-600'
-                }`}
-              >
-                <Send className="w-4 h-4" />
-                <span>Cấp Phát Cho Cửa Hàng ({selectedDeviceIds.length})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setResettingDevice(null);
-                  setResetDeviceIdInput('');
-                  setShowFactoryResetModal(true);
-                }}
-                className="px-3.5 py-2 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-medium flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer shadow-xs"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Khôi phục cài đặt gốc</span>
-              </button>
-            </div>
-          </div>
-
-          <p className="text-xs text-zinc-600 dark:text-zinc-400">Danh sách hiển thị tối đa 50 thiết bị. Tổng trong kho: {unassignedDevices.length}.</p>
-          {unassignedDevices.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, ease: 'easeOut' }}
-              className="p-12 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl text-center space-y-2 bg-zinc-50/50 dark:bg-zinc-900/50"
-            >
-              <Boxes className="w-8 h-8 text-zinc-600 mx-auto" />
-              <p className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">Kho nút tổng đang trống</p>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                Nhấn nút <strong className="text-zinc-700 dark:text-zinc-300">"Tạo Lô Nút Bấm Mới"</strong> để nạp mã thiết bị vào hệ thống.
-              </p>
-            </motion.div>
-          ) : (
-            <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg">
+            {/* Users Table */}
+            <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900">
               <table className="w-full text-left text-xs">
-                <thead className="bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 font-semibold    text-[10px]">
+                <thead className="bg-zinc-50 dark:bg-zinc-850 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500  text-[10px]  ">
                   <tr>
-                    <th scope="col" className="py-2.5 px-3 w-10">
-                      <button aria-label="Chọn tất cả thiết bị" onClick={toggleSelectAll} className="flex items-center cursor-pointer">
-                        {selectedDeviceIds.length === unassignedDevices.length && unassignedDevices.length > 0 ? (
-                          <CheckSquare className="w-4 h-4 text-[#0E6BA8]" />
-                        ) : (
-                          <Square className="w-4 h-4 text-zinc-600" />
-                        )}
-                      </button>
-                    </th>
-                    <th scope="col" className="py-2.5 px-3">Mã thiết bị</th>
-                    <th scope="col" className="py-2.5 px-3">Số sê-ri</th>
-                    <th scope="col" className="py-2.5 px-3">Mã ghép nối</th>
-                    <th scope="col" className="py-2.5 px-3">Tên kết nối</th>
-                    <th scope="col" className="py-2.5 px-3">Trạng thái</th>
-                    <th scope="col" className="py-2.5 px-3 text-right">Thao tác</th>
+                    <th scope="col" className="py-2 px-3">Họ & Tên</th>
+                    <th scope="col" className="py-2 px-3">Email / SĐT</th>
+                    <th scope="col" className="py-2 px-3">Căn Hộ / Cửa Hàng</th>
+                    <th scope="col" className="py-2 px-3">Vai trò</th>
+                    <th scope="col" className="py-2 px-3">Trạng thái</th>
+                    <th scope="col" className="py-2 px-3 text-right">Hoạt động</th>
                   </tr>
                 </thead>
                 <motion.tbody
                   variants={tableBodyVariants}
                   initial="hidden"
                   animate="visible"
-                  className="divide-y divide-zinc-100 dark:divide-zinc-800/60 "
+                  className="divide-y divide-zinc-200 dark:divide-zinc-800"
                 >
-                  {unassignedDevices.slice(0, 50).map((dev) => {
-                    const isSelected = selectedDeviceIds.includes(dev.deviceId);
-                    return (
-                      <motion.tr
-                        variants={tableRowVariants}
-                        key={dev.id}
-                        onClick={() => toggleDeviceSelect(dev.deviceId)}
-                        className={`cursor-pointer transition-colors ${
-                          isSelected
-                            ? 'bg-zinc-100/70 dark:bg-zinc-800/60'
-                            : 'hover:bg-zinc-50 dark:hover:bg-zinc-850/40'
-                        }`}
-                      >
-                        <td className="py-2.5 px-3" onClick={(e) => e.stopPropagation()}>
-                          <button aria-label={`Chọn thiết bị ${dev.deviceId}`} aria-pressed={isSelected} onClick={() => toggleDeviceSelect(dev.deviceId)} className="cursor-pointer">
-                            {isSelected ? (
-                              <CheckSquare className="w-4 h-4 text-[#0E6BA8]" />
-                            ) : (
-                              <Square className="w-4 h-4 text-zinc-600" />
-                            )}
-                          </button>
-                        </td>
-                        <td className="py-2.5 px-3 font-semibold text-zinc-900 dark:text-white">
-                          <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-xs">
-                            {dev.deviceId}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-zinc-500 dark:text-zinc-400 text-[11px]">{dev.serialNumber}</td>
-                        <td className="py-2.5 px-3 text-zinc-800 dark:text-zinc-200 font-bold">{dev.pairingCode || '-'}</td>
-                        <td className="py-2.5 px-3 text-zinc-700 dark:text-zinc-300">
-                          <span className="text-[11px] font-sans text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded">
-                            SOB-{dev.deviceId}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <span className="px-2 py-0.5 rounded-full text-[10px]  font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
-                            Trong Kho Trống
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setResettingDevice(dev);
-                              setResetDeviceIdInput(dev.deviceId);
-                              setShowFactoryResetModal(true);
-                            }}
-                            className="px-2 py-1 rounded text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 border border-rose-200/60 dark:border-rose-900/50 transition-colors inline-flex items-center gap-1 cursor-pointer"
-                            title="Khôi phục xuất xưởng"
-                          >
-                            <RotateCcw className="w-3 h-3" />
-                            <span>Khôi phục cài đặt gốc</span>
-                          </button>
-                        </td>
-                      </motion.tr>
-                    );
-                  })}
+                  {filteredUsers.map((u) => (
+                    <motion.tr
+                      variants={tableRowVariants}
+                      key={u.id}
+                      className="hover:bg-zinc-50 dark:hover:bg-zinc-850/60 transition-colors"
+                    >
+                      <td className="py-2 px-3 font-semibold text-zinc-900 dark:text-white">
+                        {u.fullName}
+                      </td>
+                      <td className="py-2 px-3 text-zinc-500 dark:text-zinc-400  text-[11px]">
+                        <div>{u.email}</div>
+                        <div className="text-[10px] text-zinc-600">{u.phone}</div>
+                      </td>
+                      <td className="py-2 px-3 text-zinc-600 dark:text-zinc-300">
+                        {u.storeName || u.store?.name || 'Mặc định'}
+                      </td>
+                      <td className="py-2 px-3">
+                        <select aria-label={`Vai trò của ${u.fullName || u.email}`}
+                          value={u.role}
+                          onChange={(e) => handleChangeUserRole(u.id, e.target.value)}
+                          className="px-2 py-0.5 rounded text-[11px]  font-medium bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer text-zinc-800 dark:text-zinc-200"
+                        >
+                          <option value="SUPER_ADMIN">Quản trị viên</option>
+                          <option value="STORE_OWNER">Chủ cửa hàng</option>
+                          <option value="DELIVERY_STAFF">Nhân viên giao hàng</option>
+                          <option value="CUSTOMER">Khách hàng</option>
+                        </select>
+                      </td>
+                      <td className="py-2 px-3">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                          <span className={`w-1.5 h-1.5 rounded-full ${(u.isActive ?? (u.status === 'ACTIVE')) ? 'bg-emerald-500' : 'bg-rose-500'}`} />
+                          <span className="text-zinc-700 dark:text-zinc-300">{(u.isActive ?? (u.status === 'ACTIVE')) ? 'Hoạt động' : 'Đã khóa'}</span>
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-right">
+                        <button
+                          onClick={() => handleToggleUserStatus(u.id)}
+                          className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-all cursor-pointer active:scale-[0.97] ${(u.isActive ?? (u.status === 'ACTIVE'))
+                            ? 'border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-rose-950/40'
+                            : 'border-[#0E6BA8] bg-[#0E6BA8] text-white hover:bg-[#0B5586] shadow-sm'
+                            }`}
+                        >
+                          {(u.isActive ?? (u.status === 'ACTIVE')) ? 'Khóa TK' : 'Mở Khóa'}
+                        </button>
+                      </td>
+                    </motion.tr>
+                  ))}
                 </motion.tbody>
               </table>
             </div>
@@ -1707,12 +1830,13 @@ export const AdminDashboard: React.FC = () => {
 
             {(() => {
               const allocatedList = allDevices
-                .filter((d) => Boolean(d?.storeId))
-                .filter((d) => deviceStoreFilter === 'ALL' || String(d.storeId) === deviceStoreFilter)
+                .filter((d) => Boolean(d?.custodyStoreId || (d?.inventoryState && d.inventoryState !== 'IN_PLATFORM_WAREHOUSE') || (!d?.inventoryState && d?.storeId)))
+                .filter((d) => deviceStoreFilter === 'ALL' || String(d.custodyStoreId || d.storeId) === deviceStoreFilter)
                 .filter((d) => {
                   const q = deviceSearchQuery.trim().toLowerCase();
                   if (!q) return true;
-                  const matchedStore = allStores.find((s) => String(s.id || s.storeId) === String(d.storeId));
+                  const targetStoreId = d.custodyStoreId || d.storeId;
+                  const matchedStore = allStores.find((s) => String(s.id || s.storeId) === String(targetStoreId));
                   const storeLabel = `${d.store?.storeName || d.store?.name || matchedStore?.name || ''} ${matchedStore?.code || ''}`.toLowerCase();
                   return (
                     String(d.deviceId || '').toLowerCase().includes(q) ||
@@ -1800,877 +1924,741 @@ export const AdminDashboard: React.FC = () => {
               );
             })()}
           </div>
-        </div>
-      )}
+        )}
 
-      {activeTab === 'WARRANTY' && (
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-2xs">
-          <WarrantyPanel
-            mode="admin"
-            devices={allDevices}
-            stores={allStores}
-            onRefreshDevices={fetchAdminData}
-          />
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODULE 2: 4.2.1 RBAC USER MANAGEMENT & PERMISSIONS                        */}
-      {/* ========================================================================= */}
-      {activeTab === 'RBAC' && (
-        <div className="space-y-4">
-          <p className="admin-data-note">Danh sách có thể bao gồm tài khoản minh họa khi chưa tải được dữ liệu thực.</p>
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-            <div className="flex items-center gap-2">
-              <Users className="w-4 h-4 text-zinc-700 dark:text-zinc-300" />
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-white   ">
-                Tài khoản & phân quyền
-              </h2>
-              <span className="px-1.5 py-0.2 rounded text-[10px]  font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-                {filteredUsers.length} tài khoản
-              </span>
-            </div>
-
-            {/* Role Filter & Search */}
-            <div className="admin-search-toolbar flex items-center gap-2 flex-wrap">
-              <div className="relative">
-                <Search className="w-3.5 h-3.5 text-zinc-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
-                <input aria-label="Tìm tài khoản theo tên, email hoặc số điện thoại"
-                  type="text"
-                  value={userSearch}
-                  onChange={(e) => setUserSearch(e.target.value)}
-                  placeholder="Tìm tên, email, SĐT..."
-                  className="pl-8 pr-3 py-1 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white placeholder:text-zinc-400"
-                />
-              </div>
-
-              <select aria-label="Lọc tài khoản theo vai trò"
-                value={userRoleFilter}
-                onChange={(e) => setUserRoleFilter(e.target.value)}
-                className="px-2.5 py-1 text-xs font-medium rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 cursor-pointer"
-              >
-                <option value="ALL">Tất cả vai trò</option>
-                <option value="SUPER_ADMIN">Quản trị viên</option>
-                <option value="STORE_OWNER">Chủ cửa hàng</option>
-                <option value="DELIVERY_STAFF">Delivery Staff (Giao hàng)</option>
-                <option value="CUSTOMER">Customer (Cư dân)</option>
-              </select>
-            </div>
-          </div>
-
-          {/* Users Table */}
-          <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-zinc-50 dark:bg-zinc-850 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500  text-[10px]  ">
-                <tr>
-                  <th scope="col" className="py-2 px-3">Họ & Tên</th>
-                  <th scope="col" className="py-2 px-3">Email / SĐT</th>
-                  <th scope="col" className="py-2 px-3">Căn Hộ / Cửa Hàng</th>
-                  <th scope="col" className="py-2 px-3">Vai trò</th>
-                  <th scope="col" className="py-2 px-3">Trạng thái</th>
-                  <th scope="col" className="py-2 px-3 text-right">Hoạt động</th>
-                </tr>
-              </thead>
-              <motion.tbody
-                variants={tableBodyVariants}
-                initial="hidden"
-                animate="visible"
-                className="divide-y divide-zinc-200 dark:divide-zinc-800"
-              >
-                {filteredUsers.map((u) => (
-                  <motion.tr
-                    variants={tableRowVariants}
-                    key={u.id}
-                    className="hover:bg-zinc-50 dark:hover:bg-zinc-850/60 transition-colors"
-                  >
-                    <td className="py-2 px-3 font-semibold text-zinc-900 dark:text-white">
-                      {u.fullName}
-                    </td>
-                    <td className="py-2 px-3 text-zinc-500 dark:text-zinc-400  text-[11px]">
-                      <div>{u.email}</div>
-                      <div className="text-[10px] text-zinc-600">{u.phone}</div>
-                    </td>
-                    <td className="py-2 px-3 text-zinc-600 dark:text-zinc-300">
-                      {u.storeName || u.store?.name || 'Mặc định'}
-                    </td>
-                    <td className="py-2 px-3">
-                      <select aria-label={`Vai trò của ${u.fullName || u.email}`}
-                        value={u.role}
-                        onChange={(e) => handleChangeUserRole(u.id, e.target.value)}
-                        className="px-2 py-0.5 rounded text-[11px]  font-medium bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer text-zinc-800 dark:text-zinc-200"
-                      >
-                        <option value="SUPER_ADMIN">Quản trị viên</option>
-                        <option value="STORE_OWNER">Chủ cửa hàng</option>
-                        <option value="DELIVERY_STAFF">Nhân viên giao hàng</option>
-                        <option value="CUSTOMER">Khách hàng</option>
-                      </select>
-                    </td>
-                    <td className="py-2 px-3">
-                      <span className="inline-flex items-center gap-1.5 text-xs font-medium">
-                        <span className={`w-1.5 h-1.5 rounded-full ${(u.isActive ?? (u.status === 'ACTIVE')) ? 'bg-emerald-500' : 'bg-rose-500'}`} />
-                        <span className="text-zinc-700 dark:text-zinc-300">{(u.isActive ?? (u.status === 'ACTIVE')) ? 'Hoạt động' : 'Đã khóa'}</span>
-                      </span>
-                    </td>
-                    <td className="py-2 px-3 text-right">
-                      <button
-                        onClick={() => handleToggleUserStatus(u.id)}
-                        className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-all cursor-pointer active:scale-[0.97] ${
-                          (u.isActive ?? (u.status === 'ACTIVE'))
-                            ? 'border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-rose-950/40'
-                            : 'border-[#0E6BA8] bg-[#0E6BA8] text-white hover:bg-[#0B5586] shadow-sm'
-                        }`}
-                      >
-                        {(u.isActive ?? (u.status === 'ACTIVE')) ? 'Khóa TK' : 'Mở Khóa'}
-                      </button>
-                    </td>
-                  </motion.tr>
-                ))}
-              </motion.tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODULE 3: 4.2.2 MASTER PRODUCT CATALOG (CRUD & BUTTON BINDING)            */}
-      {/* ========================================================================= */}
-      {(activeTab === 'PLANS' || activeTab === 'RENTALS') && (
-        <div className="space-y-5">
-          {/* Sub-tab Navigation Switcher */}
-          <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-3">
-            <button
-              type="button"
-              onClick={() => {
-                setPlansSubTab('STORE_PLANS');
-                selectTab('PLANS');
-              }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-                plansSubTab === 'STORE_PLANS' && activeTab === 'PLANS'
+        {/* ========================================================================= */}
+        {/* MODULE 3: 4.2.2 MASTER PRODUCT CATALOG (CRUD & BUTTON BINDING)            */}
+        {/* ========================================================================= */}
+        {(activeTab === 'PLANS' || activeTab === 'RENTALS') && (
+          <div className="space-y-5">
+            {/* Sub-tab Navigation Switcher */}
+            <div className="flex flex-wrap items-center gap-2 border-b border-zinc-200 dark:border-zinc-800 pb-3">
+              <button
+                type="button"
+                onClick={() => {
+                  setPlansSubTab('STORE_PLANS');
+                  selectTab('PLANS');
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${plansSubTab === 'STORE_PLANS' && activeTab === 'PLANS'
                   ? 'bg-[#0E6BA8] text-white shadow-xs'
                   : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>1. Gói Dịch Vụ Cửa Hàng (Store Plans)</span>
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setPlansSubTab('RENTAL_PACKAGES');
-                selectTab('RENTALS');
-                loadRentalPackages();
-              }}
-              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${
-                plansSubTab === 'RENTAL_PACKAGES' || activeTab === 'RENTALS'
+                  }`}
+              >
+                <Layers className="w-3.5 h-3.5" />
+                <span>1. Gói Dịch Vụ Cửa Hàng (Store Plans)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setPlansSubTab('RENTAL_PACKAGES');
+                  selectTab('RENTALS');
+                  loadRentalPackages();
+                }}
+                className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${plansSubTab === 'RENTAL_PACKAGES' || activeTab === 'RENTALS'
                   ? 'bg-[#0E6BA8] text-white shadow-xs'
                   : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'
-              }`}
-            >
-              <Cpu className="w-3.5 h-3.5" />
-              <span>Gói thuê nút bấm</span>
-            </button>
-          </div>
+                  }`}
+              >
+                <Cpu className="w-3.5 h-3.5" />
+                <span>Gói thuê nút bấm</span>
+              </button>
+            </div>
 
-          {(plansSubTab === 'STORE_PLANS' && activeTab !== 'RENTALS') ? (
-            <div className="space-y-5">
-              <div className="flex flex-col gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-5 dark:border-sky-900/50 dark:from-sky-950/30 dark:to-zinc-900 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Layers className="h-5 w-5 text-[#0E6BA8]" />
-                    <h2 className="text-base font-bold text-zinc-900 dark:text-white">Gói dịch vụ cửa hàng</h2>
+            {(plansSubTab === 'STORE_PLANS' && activeTab !== 'RENTALS') ? (
+              <div className="space-y-5">
+                <div className="flex flex-col gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-5 dark:border-sky-900/50 dark:from-sky-950/30 dark:to-zinc-900 sm:flex-row sm:items-start sm:justify-between">
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <Layers className="h-5 w-5 text-[#0E6BA8]" />
+                      <h2 className="text-base font-bold text-zinc-900 dark:text-white">Gói dịch vụ cửa hàng</h2>
+                    </div>
+                    <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                      Tạo ít nhất một gói đang hoạt động. Khi chủ cửa hàng thêm sản phẩm lần đầu, hệ thống sẽ tự tạo gói dùng thử 30 ngày từ gói hoạt động đầu tiên.
+                    </p>
                   </div>
-                  <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-                    Tạo ít nhất một gói đang hoạt động. Khi chủ cửa hàng thêm sản phẩm lần đầu, hệ thống sẽ tự tạo gói dùng thử 30 ngày từ gói hoạt động đầu tiên.
-                  </p>
+                  <button onClick={loadSubscriptionPlans} disabled={plansLoading} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer">
+                    <RefreshCw className={`h-3.5 w-3.5 ${plansLoading ? 'animate-spin' : ''}`} /> Làm mới
+                  </button>
                 </div>
-                <button onClick={loadSubscriptionPlans} disabled={plansLoading} className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer">
-                  <RefreshCw className={`h-3.5 w-3.5 ${plansLoading ? 'animate-spin' : ''}`} /> Làm mới
-                </button>
-              </div>
 
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                  <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+                    <div className="admin-section-heading border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+                      <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Danh sách gói</h3><p className="mt-0.5 text-xs text-zinc-500">Danh sách các gói dịch vụ hiện có.</p></div>
+                      <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{subscriptionPlans.length} gói</span>
+                    </div>
+                    {plansLoading ? <div className="p-8 text-center text-sm text-zinc-500">Đang tải gói dịch vụ…</div> : subscriptionPlans.length === 0 ? <div className="p-8 text-center text-sm text-zinc-500">Chưa có gói nào. Tạo gói đầu tiên ở biểu mẫu bên phải.</div> : <div className="divide-y divide-zinc-100 dark:divide-zinc-800">{subscriptionPlans.map((plan) => {
+                      const planId = String(plan.planId || plan.id || '');
+                      return <div key={planId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                        <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{plan.planName}</p><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${plan.isActive ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>{plan.isActive ? 'ĐANG HOẠT ĐỘNG' : 'TẠM DỪNG'}</span></div><p className="mt-1 text-xs text-zinc-500">{plan.planCode} · {Number(plan.price || 0).toLocaleString('vi-VN')} ₫ · {plan.durationDays} ngày · tối đa {plan.maxProducts} sản phẩm</p>{plan.description && <p className="mt-1 text-xs text-zinc-500">{plan.description}</p>}</div>
+                        <button type="button" onClick={() => handlePlanActiveChange(plan)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${plan.isActive ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{plan.isActive ? 'Tạm dừng' : 'Kích hoạt'}</button>
+                      </div>;
+                    })}</div>}
+                  </section>
+
+                  <form onSubmit={handleCreatePlan} className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+                    <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo gói mới</h3><p className="mt-0.5 text-xs text-zinc-500">Gói mới sẽ ở trạng thái hoạt động sau khi tạo.</p></div>
+                    <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mã gói</label><input required value={newPlan.planCode} onChange={(e) => setNewPlan({ ...newPlan, planCode: e.target.value.toUpperCase() })} placeholder="VD: TRIAL-30" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs  outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+                    <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tên gói</label><input required value={newPlan.planName} onChange={(e) => setNewPlan({ ...newPlan, planName: e.target.value })} placeholder="VD: Dùng thử 30 ngày" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giá (₫)</label><input required min="0" type="number" value={newPlan.price} onChange={(e) => setNewPlan({ ...newPlan, price: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Thời hạn</label><input required min="1" type="number" value={newPlan.durationDays} onChange={(e) => setNewPlan({ ...newPlan, durationDays: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div></div>
+                    <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giới hạn sản phẩm</label><input required min="1" type="number" value={newPlan.maxProducts} onChange={(e) => setNewPlan({ ...newPlan, maxProducts: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+                    <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mô tả</label><textarea rows={2} value={newPlan.description} onChange={(e) => setNewPlan({ ...newPlan, description: e.target.value })} className="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
+                    <button disabled={planSaving} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50 cursor-pointer"><Plus className="h-3.5 w-3.5" /> {planSaving ? 'Đang tạo…' : 'Tạo gói đang hoạt động'}</button>
+                  </form>
+                </div>
+                {/* Theo dõi cửa hàng đã mua gói dịch vụ */}
                 <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
-                  <div className="admin-section-heading border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
-                    <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Danh sách gói</h3><p className="mt-0.5 text-xs text-zinc-500">Danh sách các gói dịch vụ hiện có.</p></div>
-                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">{subscriptionPlans.length} gói</span>
-                  </div>
-                  {plansLoading ? <div className="p-8 text-center text-sm text-zinc-500">Đang tải gói dịch vụ…</div> : subscriptionPlans.length === 0 ? <div className="p-8 text-center text-sm text-zinc-500">Chưa có gói nào. Tạo gói đầu tiên ở biểu mẫu bên phải.</div> : <div className="divide-y divide-zinc-100 dark:divide-zinc-800">{subscriptionPlans.map((plan) => {
-                    const planId = String(plan.planId || plan.id || '');
-                    return <div key={planId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                      <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{plan.planName}</p><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${plan.isActive ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>{plan.isActive ? 'ĐANG HOẠT ĐỘNG' : 'TẠM DỪNG'}</span></div><p className="mt-1 text-xs text-zinc-500">{plan.planCode} · {Number(plan.price || 0).toLocaleString('vi-VN')} ₫ · {plan.durationDays} ngày · tối đa {plan.maxProducts} sản phẩm</p>{plan.description && <p className="mt-1 text-xs text-zinc-500">{plan.description}</p>}</div>
-                      <button type="button" onClick={() => handlePlanActiveChange(plan)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${plan.isActive ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{plan.isActive ? 'Tạm dừng' : 'Kích hoạt'}</button>
-                    </div>;
-                  })}</div>}
-                </section>
-
-                <form onSubmit={handleCreatePlan} className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
-                  <div><h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo gói mới</h3><p className="mt-0.5 text-xs text-zinc-500">Gói mới sẽ ở trạng thái hoạt động sau khi tạo.</p></div>
-                  <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mã gói</label><input required value={newPlan.planCode} onChange={(e) => setNewPlan({ ...newPlan, planCode: e.target.value.toUpperCase() })} placeholder="VD: TRIAL-30" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs  outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
-                  <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tên gói</label><input required value={newPlan.planName} onChange={(e) => setNewPlan({ ...newPlan, planName: e.target.value })} placeholder="VD: Dùng thử 30 ngày" className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3"><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giá (₫)</label><input required min="0" type="number" value={newPlan.price} onChange={(e) => setNewPlan({ ...newPlan, price: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div><div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Thời hạn</label><input required min="1" type="number" value={newPlan.durationDays} onChange={(e) => setNewPlan({ ...newPlan, durationDays: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div></div>
-                  <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giới hạn sản phẩm</label><input required min="1" type="number" value={newPlan.maxProducts} onChange={(e) => setNewPlan({ ...newPlan, maxProducts: e.target.value })} className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
-                  <div><label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mô tả</label><textarea rows={2} value={newPlan.description} onChange={(e) => setNewPlan({ ...newPlan, description: e.target.value })} className="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950" /></div>
-                  <button disabled={planSaving} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50 cursor-pointer"><Plus className="h-3.5 w-3.5" /> {planSaving ? 'Đang tạo…' : 'Tạo gói đang hoạt động'}</button>
-                </form>
-              </div>
-              {/* Theo dõi cửa hàng đã mua gói dịch vụ */}
-              <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
-                <div className="border-b border-zinc-100 p-5 dark:border-zinc-800">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <StoreIcon className="h-4 w-4 text-[#0E6BA8]" />
-                        <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
-                          Cửa hàng đã mua & sử dụng gói dịch vụ
-                        </h3>
-                        <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
-                          {storeSubsMetrics.total} cửa hàng
-                        </span>
+                  <div className="border-b border-zinc-100 p-5 dark:border-zinc-800">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <div className="flex items-center gap-2">
+                          <StoreIcon className="h-4 w-4 text-[#0E6BA8]" />
+                          <h3 className="text-sm font-bold text-zinc-900 dark:text-white">
+                            Cửa hàng đã mua & sử dụng gói dịch vụ
+                          </h3>
+                          <span className="rounded-full bg-sky-50 px-2 py-0.5 text-[10px] font-bold text-sky-700 dark:bg-sky-950/40 dark:text-sky-300">
+                            {storeSubsMetrics.total} cửa hàng
+                          </span>
+                        </div>
+                        <p className="mt-1 text-xs text-zinc-500">
+                          Theo dõi trạng thái mua gói của các gian hàng. Cửa hàng hiện hữu được miễn trừ; các cửa hàng mới bắt buộc phải mua gói dịch vụ để đăng sản phẩm bán.
+                        </p>
                       </div>
-                      <p className="mt-1 text-xs text-zinc-500">
-                        Theo dõi trạng thái mua gói của các gian hàng. Cửa hàng hiện hữu được miễn trừ; các cửa hàng mới bắt buộc phải mua gói dịch vụ để đăng sản phẩm bán.
-                      </p>
+                      <button
+                        type="button"
+                        onClick={() => void loadStoreSubscriptions()}
+                        disabled={storeSubsLoading}
+                        className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 cursor-pointer"
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 ${storeSubsLoading ? 'animate-spin' : ''}`} />
+                        Cập nhật danh sách
+                      </button>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => void loadStoreSubscriptions()}
-                      disabled={storeSubsLoading}
-                      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-1.5 text-xs font-semibold text-zinc-700 shadow-xs hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 cursor-pointer"
-                    >
-                      <RefreshCw className={`h-3.5 w-3.5 ${storeSubsLoading ? 'animate-spin' : ''}`} />
-                      Cập nhật danh sách
-                    </button>
-                  </div>
 
-                  {/* 4 Summary Stat Cards */}
-                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
-                    <div className="rounded-lg border border-zinc-100 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/40">
-                      <p className="text-[11px] font-medium text-zinc-500">Tổng cửa hàng</p>
-                      <p className="mt-1 text-lg font-bold text-zinc-900 dark:text-white">{storeSubsMetrics.total}</p>
-                      <p className="text-[10px] text-zinc-400">Trên toàn hệ thống</p>
+                    {/* 4 Summary Stat Cards */}
+                    <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+                      <div className="rounded-lg border border-zinc-100 bg-zinc-50/70 p-3 dark:border-zinc-800 dark:bg-zinc-950/40">
+                        <p className="text-[11px] font-medium text-zinc-500">Tổng cửa hàng</p>
+                        <p className="mt-1 text-lg font-bold text-zinc-900 dark:text-white">{storeSubsMetrics.total}</p>
+                        <p className="text-[10px] text-zinc-400">Trên toàn hệ thống</p>
+                      </div>
+                      <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-3 dark:border-emerald-950/40 dark:bg-emerald-950/20">
+                        <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">Đã mua gói trả phí</p>
+                        <p className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-200">{storeSubsMetrics.subscribed}</p>
+                        <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80">Gói đang còn hạn</p>
+                      </div>
+                      <div className="rounded-lg border border-sky-100 bg-sky-50/50 p-3 dark:border-sky-950/40 dark:bg-sky-950/20">
+                        <p className="text-[11px] font-medium text-sky-800 dark:text-sky-300">Cửa hàng hiện hữu</p>
+                        <p className="mt-1 text-lg font-bold text-sky-700 dark:text-sky-200">{storeSubsMetrics.exempt}</p>
+                        <p className="text-[10px] text-sky-600/80 dark:text-sky-400/80">Miễn trừ gói dịch vụ</p>
+                      </div>
+                      <div className="rounded-lg border border-amber-100 bg-amber-50/50 p-3 dark:border-amber-950/40 dark:bg-amber-950/20">
+                        <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">Chưa mua gói</p>
+                        <p className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-200">{storeSubsMetrics.unsubscribed}</p>
+                        <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80">Bị khóa quyền đăng SP</p>
+                      </div>
                     </div>
-                    <div className="rounded-lg border border-emerald-100 bg-emerald-50/50 p-3 dark:border-emerald-950/40 dark:bg-emerald-950/20">
-                      <p className="text-[11px] font-medium text-emerald-800 dark:text-emerald-300">Đã mua gói trả phí</p>
-                      <p className="mt-1 text-lg font-bold text-emerald-700 dark:text-emerald-200">{storeSubsMetrics.subscribed}</p>
-                      <p className="text-[10px] text-emerald-600/80 dark:text-emerald-400/80">Gói đang còn hạn</p>
-                    </div>
-                    <div className="rounded-lg border border-sky-100 bg-sky-50/50 p-3 dark:border-sky-950/40 dark:bg-sky-950/20">
-                      <p className="text-[11px] font-medium text-sky-800 dark:text-sky-300">Cửa hàng hiện hữu</p>
-                      <p className="mt-1 text-lg font-bold text-sky-700 dark:text-sky-200">{storeSubsMetrics.exempt}</p>
-                      <p className="text-[10px] text-sky-600/80 dark:text-sky-400/80">Miễn trừ gói dịch vụ</p>
-                    </div>
-                    <div className="rounded-lg border border-amber-100 bg-amber-50/50 p-3 dark:border-amber-950/40 dark:bg-amber-950/20">
-                      <p className="text-[11px] font-medium text-amber-800 dark:text-amber-300">Chưa mua gói</p>
-                      <p className="mt-1 text-lg font-bold text-amber-700 dark:text-amber-200">{storeSubsMetrics.unsubscribed}</p>
-                      <p className="text-[10px] text-amber-600/80 dark:text-amber-400/80">Bị khóa quyền đăng SP</p>
-                    </div>
-                  </div>
 
-                  {/* Filter tabs & Search */}
-                  <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      {[
-                        { key: 'ALL', label: `Tất cả (${storeSubs.length})` },
-                        { key: 'SUBSCRIBED', label: `Đã mua gói (${storeSubsMetrics.subscribed})` },
-                        { key: 'UNSUBSCRIBED', label: `Chưa mua gói (${storeSubsMetrics.unsubscribed})` },
-                        { key: 'EXEMPT', label: `Miễn trừ (${storeSubsMetrics.exempt})` },
-                      ].map((tab) => (
-                        <button
-                          key={tab.key}
-                          type="button"
-                          onClick={() => setStoreSubsFilter(tab.key as any)}
-                          className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
-                            storeSubsFilter === tab.key
+                    {/* Filter tabs & Search */}
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {[
+                          { key: 'ALL', label: `Tất cả (${storeSubs.length})` },
+                          { key: 'SUBSCRIBED', label: `Đã mua gói (${storeSubsMetrics.subscribed})` },
+                          { key: 'UNSUBSCRIBED', label: `Chưa mua gói (${storeSubsMetrics.unsubscribed})` },
+                          { key: 'EXEMPT', label: `Miễn trừ (${storeSubsMetrics.exempt})` },
+                        ].map((tab) => (
+                          <button
+                            key={tab.key}
+                            type="button"
+                            onClick={() => setStoreSubsFilter(tab.key as any)}
+                            className={`rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${storeSubsFilter === tab.key
                               ? 'bg-[#0E6BA8] text-white shadow-2xs'
                               : 'bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-300'
-                          }`}
-                        >
-                          {tab.label}
-                        </button>
-                      ))}
-                    </div>
-
-                    <div className="relative min-w-0 sm:w-64">
-                      <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
-                      <input
-                        value={storeSubsSearch}
-                        onChange={(e) => setStoreSubsSearch(e.target.value)}
-                        placeholder="Tìm theo tên, mã, SĐT…"
-                        className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-1.5 pl-8 pr-3 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950 text-zinc-900 dark:text-white"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                {/* Table */}
-                <div className="overflow-x-auto">
-                  {storeSubsLoading && storeSubs.length === 0 ? (
-                    <div className="py-12 text-center text-sm text-zinc-500">
-                      Đang tải dữ liệu gói dịch vụ của các cửa hàng…
-                    </div>
-                  ) : filteredStoreSubs.length === 0 ? (
-                    <div className="py-12 text-center text-sm text-zinc-500">
-                      Không tìm thấy cửa hàng phù hợp với bộ lọc.
-                    </div>
-                  ) : (
-                    <table className="w-full text-left text-xs text-zinc-600 dark:text-zinc-300">
-                      <thead className="border-b border-zinc-200 bg-zinc-50/75 text-[11px] font-semibold text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
-                        <tr>
-                          <th className="px-4 py-3">Cửa hàng</th>
-                          <th className="px-4 py-3">Phân loại</th>
-                          <th className="px-4 py-3">Gói dịch vụ</th>
-                          <th className="px-4 py-3">Thời hạn & Số ngày</th>
-                          <th className="px-4 py-3">Quyền đăng sản phẩm</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                        {filteredStoreSubs.map((item) => (
-                          <tr key={item.storeId} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/40">
-                            <td className="px-4 py-3">
-                              <p className="font-semibold text-zinc-900 dark:text-white">{item.storeName}</p>
-                              <p className="text-[11px] text-zinc-400">
-                                Mã: {item.storeCode} · Chủ shop: {item.ownerName}
-                              </p>
-                              {item.phone && item.phone !== '—' && (
-                                <p className="text-[10px] text-zinc-400">{item.phone}</p>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap">
-                              {item.isGrandfathered ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-                                  🛡️ Cửa hàng hiện hữu
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                                  Cửa hàng mới
-                                </span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3">
-                              <p className="font-medium text-zinc-900 dark:text-white">{item.planName}</p>
-                              {item.planPrice > 0 && (
-                                <p className="text-[11px] text-zinc-400">
-                                  {item.planPrice.toLocaleString('vi-VN')} ₫ · Tối đa {item.maxProducts} sản phẩm
-                                </p>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap">
-                              {item.isGrandfathered ? (
-                                <span className="text-emerald-600 dark:text-emerald-400 font-medium">
-                                  Vô thời hạn (Miễn trừ)
-                                </span>
-                              ) : item.subscription ? (
-                                <div>
-                                  <p className="font-medium text-zinc-900 dark:text-white">
-                                    {item.daysRemaining !== null ? `Còn ${item.daysRemaining} ngày` : '—'}
-                                  </p>
-                                  {item.endDate && (
-                                    <p className="text-[10px] text-zinc-400">
-                                      Hết hạn: {new Date(item.endDate).toLocaleDateString('vi-VN')}
-                                    </p>
-                                  )}
-                                </div>
-                              ) : (
-                                <span className="text-zinc-400 italic">Chưa đăng ký</span>
-                              )}
-                            </td>
-                            <td className="px-4 py-3 whitespace-nowrap">
-                              {item.canListProducts ? (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
-                                  <CheckCircle2 className="h-3 w-3" />
-                                  Được phép đăng bán
-                                </span>
-                              ) : (
-                                <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-[11px] font-semibold text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
-                                  <AlertCircle className="h-3 w-3" />
-                                  Bị khóa - Cần mua gói
-                                </span>
-                              )}
-                            </td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
-                  )}
-                </div>
-              </section>
-
-            </div>
-          ) : (
-            <div className="space-y-5">
-              <div className="flex flex-col gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-5 dark:border-sky-900/50 dark:from-sky-950/30 dark:to-zinc-900 sm:flex-row sm:items-start sm:justify-between">
-                <div>
-                  <div className="flex items-center gap-2">
-                    <Cpu className="h-5 w-5 text-[#0E6BA8]" />
-                    <h2 className="text-base font-bold text-zinc-900 dark:text-white">Gói thuê nút bấm</h2>
-                  </div>
-                  <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-600 dark:text-zinc-300">
-                    Quản lý danh mục gói thuê nút thông minh. Các gói đang hoạt động được lưu trực tiếp vào cơ sở dữ liệu và hiển thị ngay lập tức trên trang Thuê Nút Bấm của cư dân.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={loadRentalPackages}
-                  disabled={rentalPackagesLoading}
-                  className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer"
-                >
-                  <RefreshCw className={`h-3.5 w-3.5 ${rentalPackagesLoading ? 'animate-spin' : ''}`} /> Làm mới
-                </button>
-              </div>
-
-              <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
-                {/* List of rental packages */}
-                <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
-                  <div className="admin-section-heading border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
-                    <div>
-                      <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Danh sách gói thuê nút</h3>
-                      <p className="mt-0.5 text-xs text-zinc-500">Danh sách các gói thuê nút bấm hiện có.</p>
-                    </div>
-                    <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
-                      {rentalPackages.length} gói
-                    </span>
-                  </div>
-
-                  {rentalPackagesLoading ? (
-                    <div className="p-8 text-center text-sm text-zinc-500">Đang tải gói thuê nút…</div>
-                  ) : rentalPackages.length === 0 ? (
-                    <div className="p-8 text-center text-sm text-zinc-500">
-                      Chưa có gói thuê nút nào. Hãy tạo gói đầu tiên ở biểu mẫu bên phải!
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-                      {rentalPackages.map((pkg) => {
-                        const pkgId = String(pkg.packageId || pkg.id || '');
-                        const mPrice = Number(pkg.monthlyPrice || pkg.monthlyFee || 0);
-                        const dFee = Number(pkg.depositFee || 0);
-                        return (
-                          <div key={pkgId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0">
-                              <div className="flex flex-wrap items-center gap-2">
-                                <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">
-                                  {pkg.packageName || pkg.name}
-                                </p>
-                                <span
-                                  className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${
-                                    pkg.isActive
-                                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
-                                      : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
-                                  }`}
-                                >
-                                  {pkg.isActive ? 'ĐANG HOẠT ĐỘNG' : 'TẠM DỪNG'}
-                                </span>
-                              </div>
-                              <p className="mt-1 text-xs text-zinc-500 ">
-                                {pkg.packageCode} · {pkg.buttonQuantity} nút bấm · {mPrice.toLocaleString('vi-VN')} ₫/tháng · Cọc: {dFee.toLocaleString('vi-VN')} ₫
-                              </p>
-                              {pkg.description && <p className="mt-1 text-xs text-zinc-500 break-words">{pkg.description}</p>}
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() => handleRentalPackageActiveChange(pkg)}
-                              className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer shrink-0 ${
-                                pkg.isActive
-                                  ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300'
-                                  : 'bg-emerald-600 text-white hover:bg-emerald-700'
                               }`}
-                            >
-                              {pkg.isActive ? 'Tạm dừng' : 'Kích hoạt'}
-                            </button>
-                          </div>
-                        );
-                      })}
+                          >
+                            {tab.label}
+                          </button>
+                        ))}
+                      </div>
+
+                      <div className="relative min-w-0 sm:w-64">
+                        <Search className="pointer-events-none absolute left-3 top-2.5 h-3.5 w-3.5 text-zinc-400" />
+                        <input
+                          value={storeSubsSearch}
+                          onChange={(e) => setStoreSubsSearch(e.target.value)}
+                          placeholder="Tìm theo tên, mã, SĐT…"
+                          className="w-full rounded-lg border border-zinc-200 bg-zinc-50 py-1.5 pl-8 pr-3 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950 text-zinc-900 dark:text-white"
+                        />
+                      </div>
                     </div>
-                  )}
+                  </div>
+
+                  {/* Table */}
+                  <div className="overflow-x-auto">
+                    {storeSubsLoading && storeSubs.length === 0 ? (
+                      <div className="py-12 text-center text-sm text-zinc-500">
+                        Đang tải dữ liệu gói dịch vụ của các cửa hàng…
+                      </div>
+                    ) : filteredStoreSubs.length === 0 ? (
+                      <div className="py-12 text-center text-sm text-zinc-500">
+                        Không tìm thấy cửa hàng phù hợp với bộ lọc.
+                      </div>
+                    ) : (
+                      <table className="w-full text-left text-xs text-zinc-600 dark:text-zinc-300">
+                        <thead className="border-b border-zinc-200 bg-zinc-50/75 text-[11px] font-semibold text-zinc-700 dark:border-zinc-800 dark:bg-zinc-950 dark:text-zinc-400">
+                          <tr>
+                            <th className="px-4 py-3">Cửa hàng</th>
+                            <th className="px-4 py-3">Phân loại</th>
+                            <th className="px-4 py-3">Gói dịch vụ</th>
+                            <th className="px-4 py-3">Thời hạn & Số ngày</th>
+                            <th className="px-4 py-3">Quyền đăng sản phẩm</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                          {filteredStoreSubs.map((item) => (
+                            <tr key={item.storeId} className="hover:bg-zinc-50/50 dark:hover:bg-zinc-800/40">
+                              <td className="px-4 py-3">
+                                <p className="font-semibold text-zinc-900 dark:text-white">{item.storeName}</p>
+                                <p className="text-[11px] text-zinc-400">
+                                  Mã: {item.storeCode} · Chủ shop: {item.ownerName}
+                                </p>
+                                {item.phone && item.phone !== '—' && (
+                                  <p className="text-[10px] text-zinc-400">{item.phone}</p>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                {item.isGrandfathered ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                                    🛡️ Cửa hàng hiện hữu
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-zinc-100 px-2 py-0.5 text-[10px] font-bold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                                    Cửa hàng mới
+                                  </span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3">
+                                <p className="font-medium text-zinc-900 dark:text-white">{item.planName}</p>
+                                {item.planPrice > 0 && (
+                                  <p className="text-[11px] text-zinc-400">
+                                    {item.planPrice.toLocaleString('vi-VN')} ₫ · Tối đa {item.maxProducts} sản phẩm
+                                  </p>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                {item.isGrandfathered ? (
+                                  <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                                    Vô thời hạn (Miễn trừ)
+                                  </span>
+                                ) : item.subscription ? (
+                                  <div>
+                                    <p className="font-medium text-zinc-900 dark:text-white">
+                                      {item.daysRemaining !== null ? `Còn ${item.daysRemaining} ngày` : '—'}
+                                    </p>
+                                    {item.endDate && (
+                                      <p className="text-[10px] text-zinc-400">
+                                        Hết hạn: {new Date(item.endDate).toLocaleDateString('vi-VN')}
+                                      </p>
+                                    )}
+                                  </div>
+                                ) : (
+                                  <span className="text-zinc-400 italic">Chưa đăng ký</span>
+                                )}
+                              </td>
+                              <td className="px-4 py-3 whitespace-nowrap">
+                                {item.canListProducts ? (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300">
+                                    <CheckCircle2 className="h-3 w-3" />
+                                    Được phép đăng bán
+                                  </span>
+                                ) : (
+                                  <span className="inline-flex items-center gap-1 rounded-full bg-rose-50 px-2.5 py-0.5 text-[11px] font-semibold text-rose-700 dark:bg-rose-950/40 dark:text-rose-300">
+                                    <AlertCircle className="h-3 w-3" />
+                                    Bị khóa - Cần mua gói
+                                  </span>
+                                )}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    )}
+                  </div>
                 </section>
 
-                {/* Create rental package form */}
-                <form
-                  onSubmit={handleCreateRentalPackage}
-                  className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900"
-                >
+              </div>
+            ) : (
+              <div className="space-y-5">
+                <div className="flex flex-col gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-5 dark:border-sky-900/50 dark:from-sky-950/30 dark:to-zinc-900 sm:flex-row sm:items-start sm:justify-between">
                   <div>
-                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo gói thuê nút mới</h3>
-                    <p className="mt-0.5 text-xs text-zinc-500">Gói mới sẽ được hiển thị cho khách hàng sau khi tạo.</p>
+                    <div className="flex items-center gap-2">
+                      <Cpu className="h-5 w-5 text-[#0E6BA8]" />
+                      <h2 className="text-base font-bold text-zinc-900 dark:text-white">Gói thuê nút bấm</h2>
+                    </div>
+                    <p className="mt-1 max-w-2xl text-xs leading-5 text-zinc-600 dark:text-zinc-300">
+                      Quản lý danh mục gói thuê nút thông minh. Các gói đang hoạt động được lưu trực tiếp vào cơ sở dữ liệu và hiển thị ngay lập tức trên trang Thuê Nút Bấm của cư dân.
+                    </p>
                   </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mã gói *</label>
-                    <input
-                      required
-                      value={newRentalPackage.packageCode}
-                      onChange={(e) => setNewRentalPackage({ ...newRentalPackage, packageCode: e.target.value.toUpperCase() })}
-                      placeholder="VD: PKG-KIT3, PKG-BASIC"
-                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs  outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tên gói thuê *</label>
-                    <input
-                      required
-                      value={newRentalPackage.packageName}
-                      onChange={(e) => setNewRentalPackage({ ...newRentalPackage, packageName: e.target.value })}
-                      placeholder="VD: Bộ Kit 3 Nút Bấm Thông Minh"
-                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
-                    />
-                  </div>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <button
+                    type="button"
+                    onClick={loadRentalPackages}
+                    disabled={rentalPackagesLoading}
+                    className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs font-semibold text-zinc-700 shadow-sm transition-colors hover:bg-zinc-50 disabled:opacity-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 dark:hover:bg-zinc-700 cursor-pointer"
+                  >
+                    <RefreshCw className={`h-3.5 w-3.5 ${rentalPackagesLoading ? 'animate-spin' : ''}`} /> Làm mới
+                  </button>
+                </div>
+
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_380px]">
+                  {/* List of rental packages */}
+                  <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
+                    <div className="admin-section-heading border-b border-zinc-100 px-5 py-4 dark:border-zinc-800">
+                      <div>
+                        <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Danh sách gói thuê nút</h3>
+                        <p className="mt-0.5 text-xs text-zinc-500">Danh sách các gói thuê nút bấm hiện có.</p>
+                      </div>
+                      <span className="rounded-full bg-zinc-100 px-2 py-0.5 text-[11px] font-semibold text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                        {rentalPackages.length} gói
+                      </span>
+                    </div>
+
+                    {rentalPackagesLoading ? (
+                      <div className="p-8 text-center text-sm text-zinc-500">Đang tải gói thuê nút…</div>
+                    ) : rentalPackages.length === 0 ? (
+                      <div className="p-8 text-center text-sm text-zinc-500">
+                        Chưa có gói thuê nút nào. Hãy tạo gói đầu tiên ở biểu mẫu bên phải!
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
+                        {rentalPackages.map((pkg) => {
+                          const pkgId = String(pkg.packageId || pkg.id || '');
+                          const mPrice = Number(pkg.monthlyPrice || pkg.monthlyFee || 0);
+                          const dFee = Number(pkg.depositFee || 0);
+                          return (
+                            <div key={pkgId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
+                              <div className="min-w-0">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">
+                                    {pkg.packageName || pkg.name}
+                                  </p>
+                                  <span
+                                    className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${pkg.isActive
+                                      ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300'
+                                      : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'
+                                      }`}
+                                  >
+                                    {pkg.isActive ? 'ĐANG HOẠT ĐỘNG' : 'TẠM DỪNG'}
+                                  </span>
+                                </div>
+                                <p className="mt-1 text-xs text-zinc-500 ">
+                                  {pkg.packageCode} · {pkg.buttonQuantity} nút bấm · {mPrice.toLocaleString('vi-VN')} ₫/tháng · Cọc: {dFee.toLocaleString('vi-VN')} ₫
+                                </p>
+                                {pkg.description && <p className="mt-1 text-xs text-zinc-500 break-words">{pkg.description}</p>}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={() => handleRentalPackageActiveChange(pkg)}
+                                className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer shrink-0 ${pkg.isActive
+                                  ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300'
+                                  : 'bg-emerald-600 text-white hover:bg-emerald-700'
+                                  }`}
+                              >
+                                {pkg.isActive ? 'Tạm dừng' : 'Kích hoạt'}
+                              </button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </section>
+
+                  {/* Create rental package form */}
+                  <form
+                    onSubmit={handleCreateRentalPackage}
+                    className="space-y-3 rounded-xl border border-zinc-200 bg-white p-5 shadow-2xs dark:border-zinc-800 dark:bg-zinc-900"
+                  >
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Số lượng nút *</label>
+                      <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo gói thuê nút mới</h3>
+                      <p className="mt-0.5 text-xs text-zinc-500">Gói mới sẽ được hiển thị cho khách hàng sau khi tạo.</p>
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mã gói *</label>
                       <input
                         required
-                        min="1"
-                        type="number"
-                        value={newRentalPackage.buttonQuantity}
-                        onChange={(e) => setNewRentalPackage({ ...newRentalPackage, buttonQuantity: e.target.value })}
+                        value={newRentalPackage.packageCode}
+                        onChange={(e) => setNewRentalPackage({ ...newRentalPackage, packageCode: e.target.value.toUpperCase() })}
+                        placeholder="VD: PKG-KIT3, PKG-BASIC"
+                        className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs  outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </div>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tên gói thuê *</label>
+                      <input
+                        required
+                        value={newRentalPackage.packageName}
+                        onChange={(e) => setNewRentalPackage({ ...newRentalPackage, packageName: e.target.value })}
+                        placeholder="VD: Bộ Kit 3 Nút Bấm Thông Minh"
                         className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
                       />
                     </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Số lượng nút *</label>
+                        <input
+                          required
+                          min="1"
+                          type="number"
+                          value={newRentalPackage.buttonQuantity}
+                          onChange={(e) => setNewRentalPackage({ ...newRentalPackage, buttonQuantity: e.target.value })}
+                          className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giá thuê / tháng (₫) *</label>
+                        <input
+                          required
+                          min="0"
+                          type="number"
+                          value={newRentalPackage.monthlyPrice}
+                          onChange={(e) => setNewRentalPackage({ ...newRentalPackage, monthlyPrice: e.target.value })}
+                          className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                        />
+                      </div>
+                    </div>
                     <div>
-                      <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Giá thuê / tháng (₫) *</label>
+                      <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tiền cọc thiết bị (₫) *</label>
                       <input
                         required
                         min="0"
                         type="number"
-                        value={newRentalPackage.monthlyPrice}
-                        onChange={(e) => setNewRentalPackage({ ...newRentalPackage, monthlyPrice: e.target.value })}
+                        value={newRentalPackage.depositFee}
+                        onChange={(e) => setNewRentalPackage({ ...newRentalPackage, depositFee: e.target.value })}
+                        placeholder="VD: 300000 (Hoàn lại khi trả nút)"
                         className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
                       />
                     </div>
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Tiền cọc thiết bị (₫) *</label>
-                    <input
-                      required
-                      min="0"
-                      type="number"
-                      value={newRentalPackage.depositFee}
-                      onChange={(e) => setNewRentalPackage({ ...newRentalPackage, depositFee: e.target.value })}
-                      placeholder="VD: 300000 (Hoàn lại khi trả nút)"
-                      className="w-full rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mô tả gói thuê</label>
-                    <textarea
-                      rows={2}
-                      value={newRentalPackage.description}
-                      onChange={(e) => setNewRentalPackage({ ...newRentalPackage, description: e.target.value })}
-                      placeholder="VD: Trọn bộ 3 nút bấm thông minh dành cho căn hộ..."
-                      className="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    disabled={rentalPackageSaving}
-                    className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50 cursor-pointer"
-                  >
-                    <Plus className="h-3.5 w-3.5" />
-                    {rentalPackageSaving ? 'Đang tạo…' : 'Tạo gói thuê hoạt động ngay'}
-                  </button>
-                </form>
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-zinc-700 dark:text-zinc-300">Mô tả gói thuê</label>
+                      <textarea
+                        rows={2}
+                        value={newRentalPackage.description}
+                        onChange={(e) => setNewRentalPackage({ ...newRentalPackage, description: e.target.value })}
+                        placeholder="VD: Trọn bộ 3 nút bấm thông minh dành cho căn hộ..."
+                        className="w-full resize-none rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-xs outline-none focus:border-[#0E6BA8] dark:border-zinc-700 dark:bg-zinc-950"
+                      />
+                    </div>
+                    <button
+                      type="submit"
+                      disabled={rentalPackageSaving}
+                      className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50 cursor-pointer"
+                    >
+                      <Plus className="h-3.5 w-3.5" />
+                      {rentalPackageSaving ? 'Đang tạo…' : 'Tạo gói thuê hoạt động ngay'}
+                    </button>
+                  </form>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {activeTab === 'CATALOG' && (
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xs p-5 space-y-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+              <div>
+                <h2 className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-2">
+                  <Layers className="w-4 h-4 text-zinc-900 dark:text-white" />
+                  <span>Danh Mục Sản Phẩm Gốc (Master Product Catalog)</span>
+                </h2>
+                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                  Quản lý danh mục sản phẩm để khách hàng đặt qua nút bấm.
+                </p>
+              </div>
+
+              <div className="admin-search-toolbar flex items-center gap-2 flex-wrap">
+                <button
+                  onClick={() => setShowAddProductModal(true)}
+                  className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm active:scale-[0.97] transition-all cursor-pointer"
+                >
+                  <Plus className="w-4 h-4" />
+                  <span>Thêm Mặt Hàng Gốc Mới</span>
+                </button>
               </div>
             </div>
-          )}
-        </div>
-      )}
 
-      {activeTab === 'CATALOG' && (
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xs p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+            {/* Search & Category Filter */}
+            <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-850 rounded-lg border border-zinc-200 dark:border-zinc-800">
+              <div className="relative flex-1 max-w-md">
+                <Search className="w-3.5 h-3.5 text-zinc-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
+                <input aria-label="Tìm sản phẩm trong danh mục"
+                  type="text"
+                  value={catalogSearch}
+                  onChange={(e) => setCatalogSearch(e.target.value)}
+                  placeholder="Tìm tên, thương hiệu, đơn vị sản phẩm..."
+                  className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white placeholder:text-zinc-400"
+                />
+              </div>
+
+              <div tabIndex={0} role="region" aria-label="Lọc theo nhóm sản phẩm" className="flex items-center gap-1 overflow-x-auto scrollbar-none text-xs">
+                {['ALL', 'Nước mắm', 'Nước uống', 'Gas', 'Gạo', 'Dầu ăn & Gia vị'].map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setCatalogCategoryFilter(cat)}
+                    className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${catalogCategoryFilter === cat
+                      ? 'bg-[#0E6BA8] text-white shadow-xs'
+                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#0E6BA8] dark:hover:text-[#38a5da] hover:bg-[#0E6BA8]/10 dark:hover:bg-zinc-800'
+                      }`}
+                  >
+                    {cat === 'ALL' ? 'Tất Cả' : cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* PART 2: High-Density Admin Data Table */}
+            <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900">
+              <table className="w-full text-left text-xs">
+                <thead className="bg-zinc-50 dark:bg-zinc-850 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500  text-[10px]  ">
+                  <tr>
+                    <th scope="col" className="py-2 px-3 w-12 text-center">Ảnh</th>
+                    <th scope="col" className="py-2 px-3">Mã sản phẩm</th>
+                    <th scope="col" className="py-2 px-3">Tên Sản Phẩm</th>
+                    <th scope="col" className="py-2 px-3">Danh Mục</th>
+                    <th scope="col" className="py-2 px-3">Giá Niêm Yết</th>
+                    <th scope="col" className="py-2 px-3">Trạng Thái / Tồn Kho</th>
+                    <th scope="col" className="py-2 px-3 text-right">Thao tác</th>
+                  </tr>
+                </thead>
+                <motion.tbody
+                  variants={tableBodyVariants}
+                  initial="hidden"
+                  animate="visible"
+                  className="divide-y divide-zinc-200 dark:divide-zinc-800"
+                >
+                  {filteredCatalog.map((prod) => (
+                    <motion.tr
+                      variants={tableRowVariants}
+                      key={prod.id}
+                      className="hover:bg-zinc-50 dark:hover:bg-zinc-850/60 transition-colors"
+                    >
+                      <td className="py-2 px-3 text-center">
+                        <img loading="lazy" decoding="async"
+                          src={prod.imageUrl}
+                          alt={prod.name}
+                          className="w-8 h-8 rounded object-cover border border-zinc-200 dark:border-zinc-700 inline-block shrink-0 bg-white"
+                          onError={(e) => {
+                            (e.target as HTMLElement).style.display = 'none';
+                          }}
+                        />
+                      </td>
+                      <td className="py-2 px-3  text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                        {prod.sku || prod.id}
+                      </td>
+                      <td className="py-2 px-3">
+                        <div className="font-semibold text-zinc-900 dark:text-white break-words max-w-xs sm:max-w-md">
+                          {prod.name}
+                        </div>
+                        <div className="text-[10px] text-zinc-600 break-words">
+                          {prod.brand} • {prod.unit}
+                        </div>
+                      </td>
+                      <td className="py-2 px-3">
+                        <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
+                          {prod.category}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3  font-semibold text-xs text-zinc-900 dark:text-white whitespace-nowrap">
+                        {prod.price.toLocaleString('vi-VN')} ₫
+                      </td>
+                      <td className="py-2 px-3 whitespace-nowrap">
+                        <span className="inline-flex items-center gap-1.5 text-xs font-medium">
+                          <span
+                            className={`w-1.5 h-1.5 rounded-full ${prod.stock > prod.minStockAlert
+                              ? 'bg-emerald-500'
+                              : prod.stock > 0
+                                ? 'bg-amber-500'
+                                : 'bg-rose-500'
+                              }`}
+                          />
+                          <span className="text-zinc-700 dark:text-zinc-300">
+                            {prod.stock > prod.minStockAlert ? 'Sẵn hàng' : prod.stock > 0 ? 'Sắp hết' : 'Hết hàng'}
+                          </span>
+                          <span className="text-[10px]  text-zinc-600">
+                            ({prod.stock})
+                          </span>
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-right whitespace-nowrap">
+                        <div className="flex items-center justify-end gap-1">
+                          <button
+                            onClick={() => toast.info(`Chức năng chỉnh sửa "${prod.name}" đang được chuẩn bị.`)}
+                            className="p-1 rounded text-zinc-600 hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer"
+                            title="Chỉnh sửa sản phẩm"
+                          >
+                            <Edit3 className="w-3.5 h-3.5" />
+                          </button>
+                          <button
+                            onClick={() => handleDeleteProduct(prod.id)}
+                            className="p-1 rounded text-zinc-600 hover:text-rose-600 transition-colors cursor-pointer"
+                            title="Xóa sản phẩm"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </td>
+                    </motion.tr>
+                  ))}
+                </motion.tbody>
+              </table>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* MODULE 4: 4.2.3 IOT TELEMETRY & BATTERY MONITORING                        */}
+        {/* ========================================================================= */}
+        {activeTab === 'TELEMETRY' && <React.Suspense fallback={<div role="status" className="py-12 text-center text-sm text-zinc-500">Đang tải dữ liệu...</div>}><AdminLiveDevices /></React.Suspense>}
+
+        {/* ========================================================================= */}
+        {/* MODULE 5: 4.2.4 ANALYTICS & EXPORT REPORTS (CSV / PDF)                   */}
+        {/* ========================================================================= */}
+        {activeTab === 'ANALYTICS' && <React.Suspense fallback={<div role="status" className="space-y-2 py-12 text-center text-sm text-zinc-500"><h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">{ADMIN_SECTIONS.ANALYTICS.title}</h2><p>Đang tải dữ liệu...</p></div>}><AdminLiveAnalytics /></React.Suspense>}
+
+        {/* ========================================================================= */}
+        {/* MODULE 6: 4.2.5 FCM NOTIFICATIONS & MESSAGE TEMPLATES                     */}
+        {/* ========================================================================= */}
+        {activeTab === 'NOTIFICATIONS' && (
+          <div className="space-y-4">
             <div>
-              <h2 className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-                <Layers className="w-4 h-4 text-zinc-900 dark:text-white" />
-                <span>Danh Mục Sản Phẩm Gốc (Master Product Catalog)</span>
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
+                <Bell className="w-4 h-4 text-zinc-900 dark:text-white" />
+                <span>Cài đặt thông báo</span>
               </h2>
               <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                Quản lý danh mục sản phẩm để khách hàng đặt qua nút bấm.
+                Quản lý nội dung và thời điểm gửi thông báo tự động đến khách hàng.
               </p>
             </div>
 
-            <div className="admin-search-toolbar flex items-center gap-2 flex-wrap">
-              <button
-                onClick={() => setShowAddProductModal(true)}
-                className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm active:scale-[0.97] transition-all cursor-pointer"
-              >
-                <Plus className="w-4 h-4" />
-                <span>Thêm Mặt Hàng Gốc Mới</span>
-              </button>
-            </div>
-          </div>
-
-          {/* Search & Category Filter */}
-          <div className="flex flex-col sm:flex-row gap-2.5 items-stretch sm:items-center justify-between p-2.5 bg-zinc-50 dark:bg-zinc-850 rounded-lg border border-zinc-200 dark:border-zinc-800">
-            <div className="relative flex-1 max-w-md">
-              <Search className="w-3.5 h-3.5 text-zinc-600 absolute left-2.5 top-1/2 -translate-y-1/2" />
-              <input aria-label="Tìm sản phẩm trong danh mục"
-                type="text"
-                value={catalogSearch}
-                onChange={(e) => setCatalogSearch(e.target.value)}
-                placeholder="Tìm tên, thương hiệu, đơn vị sản phẩm..."
-                className="w-full pl-8 pr-3 py-1.5 text-xs rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-900 dark:text-white placeholder:text-zinc-400"
-              />
-            </div>
-
-            <div tabIndex={0} role="region" aria-label="Lọc theo nhóm sản phẩm" className="flex items-center gap-1 overflow-x-auto scrollbar-none text-xs">
-              {['ALL', 'Nước mắm', 'Nước uống', 'Gas', 'Gạo', 'Dầu ăn & Gia vị'].map((cat) => (
-                <button
-                  key={cat}
-                  onClick={() => setCatalogCategoryFilter(cat)}
-                  className={`px-2.5 py-1 rounded-md text-xs font-medium whitespace-nowrap transition-colors cursor-pointer ${
-                    catalogCategoryFilter === cat
-                      ? 'bg-[#0E6BA8] text-white shadow-xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-[#0E6BA8] dark:hover:text-[#38a5da] hover:bg-[#0E6BA8]/10 dark:hover:bg-zinc-800'
-                  }`}
-                >
-                  {cat === 'ALL' ? 'Tất Cả' : cat}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* PART 2: High-Density Admin Data Table */}
-          <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900">
-            <table className="w-full text-left text-xs">
-              <thead className="bg-zinc-50 dark:bg-zinc-850 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500  text-[10px]  ">
-                <tr>
-                  <th scope="col" className="py-2 px-3 w-12 text-center">Ảnh</th>
-                  <th scope="col" className="py-2 px-3">Mã sản phẩm</th>
-                  <th scope="col" className="py-2 px-3">Tên Sản Phẩm</th>
-                  <th scope="col" className="py-2 px-3">Danh Mục</th>
-                  <th scope="col" className="py-2 px-3">Giá Niêm Yết</th>
-                  <th scope="col" className="py-2 px-3">Trạng Thái / Tồn Kho</th>
-                  <th scope="col" className="py-2 px-3 text-right">Thao tác</th>
-                </tr>
-              </thead>
-              <motion.tbody
-                variants={tableBodyVariants}
-                initial="hidden"
-                animate="visible"
-                className="divide-y divide-zinc-200 dark:divide-zinc-800"
-              >
-                {filteredCatalog.map((prod) => (
-                  <motion.tr
-                    variants={tableRowVariants}
-                    key={prod.id}
-                    className="hover:bg-zinc-50 dark:hover:bg-zinc-850/60 transition-colors"
-                  >
-                    <td className="py-2 px-3 text-center">
-                      <img loading="lazy" decoding="async"
-                        src={prod.imageUrl}
-                        alt={prod.name}
-                        className="w-8 h-8 rounded object-cover border border-zinc-200 dark:border-zinc-700 inline-block shrink-0 bg-white"
-                        onError={(e) => {
-                          (e.target as HTMLElement).style.display = 'none';
-                        }}
-                      />
-                    </td>
-                    <td className="py-2 px-3  text-xs font-semibold text-zinc-700 dark:text-zinc-300">
-                      {prod.sku || prod.id}
-                    </td>
-                    <td className="py-2 px-3">
-                      <div className="font-semibold text-zinc-900 dark:text-white break-words max-w-xs sm:max-w-md">
-                        {prod.name}
-                      </div>
-                      <div className="text-[10px] text-zinc-600 break-words">
-                        {prod.brand} • {prod.unit}
-                      </div>
-                    </td>
-                    <td className="py-2 px-3">
-                      <span className="px-1.5 py-0.2 rounded text-[10px] font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-                        {prod.category}
-                      </span>
-                    </td>
-                    <td className="py-2 px-3  font-semibold text-xs text-zinc-900 dark:text-white whitespace-nowrap">
-                      {prod.price.toLocaleString('vi-VN')} ₫
-                    </td>
-                    <td className="py-2 px-3 whitespace-nowrap">
-                      <span className="inline-flex items-center gap-1.5 text-xs font-medium">
-                        <span
-                          className={`w-1.5 h-1.5 rounded-full ${
-                            prod.stock > prod.minStockAlert
-                              ? 'bg-emerald-500'
-                              : prod.stock > 0
-                              ? 'bg-amber-500'
-                              : 'bg-rose-500'
-                          }`}
-                        />
-                        <span className="text-zinc-700 dark:text-zinc-300">
-                          {prod.stock > prod.minStockAlert ? 'Sẵn hàng' : prod.stock > 0 ? 'Sắp hết' : 'Hết hàng'}
-                        </span>
-                        <span className="text-[10px]  text-zinc-600">
-                          ({prod.stock})
-                        </span>
-                      </span>
-                    </td>
-                    <td className="py-2 px-3 text-right whitespace-nowrap">
-                      <div className="flex items-center justify-end gap-1">
-                        <button
-                          onClick={() => toast.info(`Chức năng chỉnh sửa "${prod.name}" đang được chuẩn bị.`)}
-                          className="p-1 rounded text-zinc-600 hover:text-zinc-900 dark:hover:text-white transition-colors cursor-pointer"
-                          title="Chỉnh sửa sản phẩm"
-                        >
-                          <Edit3 className="w-3.5 h-3.5" />
-                        </button>
-                        <button
-                          onClick={() => handleDeleteProduct(prod.id)}
-                          className="p-1 rounded text-zinc-600 hover:text-rose-600 transition-colors cursor-pointer"
-                          title="Xóa sản phẩm"
-                        >
-                          <Trash2 className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </td>
-                  </motion.tr>
-                ))}
-              </motion.tbody>
-            </table>
-          </div>
-        </div>
-      )}
-
-      {/* ========================================================================= */}
-      {/* MODULE 4: 4.2.3 IOT TELEMETRY & BATTERY MONITORING                        */}
-      {/* ========================================================================= */}
-      {activeTab === 'TELEMETRY' && <React.Suspense fallback={<div role="status" className="py-12 text-center text-sm text-zinc-500">Đang tải dữ liệu...</div>}><AdminLiveDevices /></React.Suspense>}
-
-      {/* ========================================================================= */}
-      {/* MODULE 5: 4.2.4 ANALYTICS & EXPORT REPORTS (CSV / PDF)                   */}
-      {/* ========================================================================= */}
-      {activeTab === 'ANALYTICS' && <React.Suspense fallback={<div role="status" className="space-y-2 py-12 text-center text-sm text-zinc-500"><h2 className="text-lg font-bold text-zinc-900 dark:text-zinc-100">{ADMIN_SECTIONS.ANALYTICS.title}</h2><p>Đang tải dữ liệu...</p></div>}><AdminLiveAnalytics /></React.Suspense>}
-
-      {/* ========================================================================= */}
-      {/* MODULE 6: 4.2.5 FCM NOTIFICATIONS & MESSAGE TEMPLATES                     */}
-      {/* ========================================================================= */}
-      {activeTab === 'NOTIFICATIONS' && (
-        <div className="space-y-4">
-          <div>
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
-              <Bell className="w-4 h-4 text-zinc-900 dark:text-white" />
-              <span>Cài đặt thông báo</span>
-            </h2>
-            <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-              Quản lý nội dung và thời điểm gửi thông báo tự động đến khách hàng.
-            </p>
-          </div>
-
-          <details className="admin-advanced">
-            <summary>Cấu hình kết nối nâng cao</summary>
-          {/* FCM Configuration Form */}
-          <div className="p-4 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 space-y-3">
-            <h3 className="text-xs font-semibold  text-zinc-900 dark:text-white  ">
-              Kết nối dịch vụ thông báo
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                  Khóa kết nối thông báo
-                </label>
-                <input
-                  type="password"
-                  value={fcmConfig.serverKey}
-                  onChange={(e) => setFcmConfig({ ...fcmConfig, serverKey: e.target.value })}
-                  className="w-full px-3 py-1.5 text-xs rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-100 "
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                  Mã dự án thông báo
-                </label>
-                <input
-                  type="text"
-                  value={fcmConfig.projectId}
-                  onChange={(e) => setFcmConfig({ ...fcmConfig, projectId: e.target.value })}
-                  className="w-full px-3 py-1.5 text-xs rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-100 "
-                />
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 pt-1">
-              <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-zinc-800 dark:text-zinc-200">
-                <input
-                  type="checkbox"
-                  checked={fcmConfig.enablePush}
-                  onChange={(e) => setFcmConfig({ ...fcmConfig, enablePush: e.target.checked })}
-                  className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 text-zinc-900 focus:ring-zinc-900 accent-zinc-900 cursor-pointer"
-                />
-                <span>Gửi thông báo đến ứng dụng di động</span>
-              </label>
-            </div>
-          </div>
-
-          </details>
-
-          {/* Message Templates List */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-semibold  text-zinc-900 dark:text-white  ">
-              Mẫu thông báo tự động
-            </h3>
-
-            <div className="space-y-2">
-              {messageTemplates.map((tpl) => (
-                <div
-                  key={tpl.id}
-                  className="p-3.5 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 space-y-2.5"
-                >
-                  <div className="admin-section-heading">
-                    <span className="text-[10px]  font-medium px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
-                      Gửi khi: {adminTriggerLabel(tpl.trigger)}
-                    </span>
-                    <label className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={tpl.enabled}
-                        onChange={(e) => {
-                          const checked = e.target.checked;
-                          setMessageTemplates((prev) =>
-                            prev.map((t) => (t.id === tpl.id ? { ...t, enabled: checked } : t))
-                          );
-                        }}
-                        className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 text-zinc-900 focus:ring-zinc-900 accent-zinc-900 cursor-pointer"
-                      />
-                      <span className="font-medium">Bật gửi</span>
+            <details className="admin-advanced">
+              <summary>Cấu hình kết nối nâng cao</summary>
+              {/* FCM Configuration Form */}
+              <div className="p-4 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 space-y-3">
+                <h3 className="text-xs font-semibold  text-zinc-900 dark:text-white  ">
+                  Kết nối dịch vụ thông báo
+                </h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                      Khóa kết nối thông báo
                     </label>
+                    <input
+                      type="password"
+                      value={fcmConfig.serverKey}
+                      onChange={(e) => setFcmConfig({ ...fcmConfig, serverKey: e.target.value })}
+                      className="w-full px-3 py-1.5 text-xs rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-100 "
+                    />
                   </div>
 
                   <div>
-                    <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
-                      Tiêu đề thông báo:
+                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                      Mã dự án thông báo
                     </label>
                     <input
                       type="text"
-                      value={tpl.title}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setMessageTemplates((prev) =>
-                          prev.map((t) => (t.id === tpl.id ? { ...t, title: val } : t))
-                        );
-                      }}
-                      className="w-full px-3 py-1.5 text-xs rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-white font-medium focus:outline-none focus:border-zinc-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
-                      Nội dung thông báo (Biến: {"{{apartment}}, {{productName}}, {{quantity}}"}):
-                    </label>
-                    <textarea
-                      rows={2}
-                      value={tpl.body}
-                      onChange={(e) => {
-                        const val = e.target.value;
-                        setMessageTemplates((prev) =>
-                          prev.map((t) => (t.id === tpl.id ? { ...t, body: val } : t))
-                        );
-                      }}
-                      className="w-full px-3 py-1.5 text-xs rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-zinc-900"
+                      value={fcmConfig.projectId}
+                      onChange={(e) => setFcmConfig({ ...fcmConfig, projectId: e.target.value })}
+                      className="w-full px-3 py-1.5 text-xs rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 focus:outline-none focus:border-zinc-900 dark:focus:border-zinc-100 "
                     />
                   </div>
                 </div>
-              ))}
+
+                <div className="flex items-center gap-2 pt-1">
+                  <label className="flex items-center gap-2 cursor-pointer text-xs font-medium text-zinc-800 dark:text-zinc-200">
+                    <input
+                      type="checkbox"
+                      checked={fcmConfig.enablePush}
+                      onChange={(e) => setFcmConfig({ ...fcmConfig, enablePush: e.target.checked })}
+                      className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 text-zinc-900 focus:ring-zinc-900 accent-zinc-900 cursor-pointer"
+                    />
+                    <span>Gửi thông báo đến ứng dụng di động</span>
+                  </label>
+                </div>
+              </div>
+
+            </details>
+
+            {/* Message Templates List */}
+            <div className="space-y-3">
+              <h3 className="text-xs font-semibold  text-zinc-900 dark:text-white  ">
+                Mẫu thông báo tự động
+              </h3>
+
+              <div className="space-y-2">
+                {messageTemplates.map((tpl) => (
+                  <div
+                    key={tpl.id}
+                    className="p-3.5 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 space-y-2.5"
+                  >
+                    <div className="admin-section-heading">
+                      <span className="text-[10px]  font-medium px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-700">
+                        Gửi khi: {adminTriggerLabel(tpl.trigger)}
+                      </span>
+                      <label className="flex items-center gap-1.5 text-xs text-zinc-600 dark:text-zinc-400 cursor-pointer">
+                        <input
+                          type="checkbox"
+                          checked={tpl.enabled}
+                          onChange={(e) => {
+                            const checked = e.target.checked;
+                            setMessageTemplates((prev) =>
+                              prev.map((t) => (t.id === tpl.id ? { ...t, enabled: checked } : t))
+                            );
+                          }}
+                          className="w-4 h-4 rounded border-zinc-300 dark:border-zinc-700 text-zinc-900 focus:ring-zinc-900 accent-zinc-900 cursor-pointer"
+                        />
+                        <span className="font-medium">Bật gửi</span>
+                      </label>
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
+                        Tiêu đề thông báo:
+                      </label>
+                      <input
+                        type="text"
+                        value={tpl.title}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setMessageTemplates((prev) =>
+                            prev.map((t) => (t.id === tpl.id ? { ...t, title: val } : t))
+                          );
+                        }}
+                        className="w-full px-3 py-1.5 text-xs rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-900 dark:text-white font-medium focus:outline-none focus:border-zinc-900"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">
+                        Nội dung thông báo (Biến: {"{{apartment}}, {{productName}}, {{quantity}}"}):
+                      </label>
+                      <textarea
+                        rows={2}
+                        value={tpl.body}
+                        onChange={(e) => {
+                          const val = e.target.value;
+                          setMessageTemplates((prev) =>
+                            prev.map((t) => (t.id === tpl.id ? { ...t, body: val } : t))
+                          );
+                        }}
+                        className="w-full px-3 py-1.5 text-xs rounded-md bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:border-zinc-900"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        )}
 
       </main>
 
