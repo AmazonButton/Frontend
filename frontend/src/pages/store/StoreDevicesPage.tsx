@@ -233,6 +233,14 @@ const GESTURE_ITEMS = [
   },
 ];
 
+interface FleetStats {
+  total: number;
+  online: number;
+  offline: number;
+  lowBattery: number;
+  unconfigured: number;
+}
+
 export const StoreDevicesPage: React.FC = () => {
   const { user } = useAuth();
   return <StoreDevicesWorkspace key={`${user?.id}:${user?.storeId}`} />;
@@ -255,6 +263,17 @@ const StoreDevicesWorkspace: React.FC = () => {
   const [products, setProducts] = useState<Product[]>([]);
   const hasSeenBleDevice = (device: Device) => { try { return hasBleReceipt(localStorage, user, device); } catch { return false; } };
   const [devicesReady, setDevicesReady] = useState(devices.length > 0);
+  const [devicePage, setDevicePage] = useState(1);
+  const [devicePageSize] = useState(20);
+  const [deviceTotalItems, setDeviceTotalItems] = useState(0);
+  const [deviceTotalPages, setDeviceTotalPages] = useState(1);
+  const [fleetStats, setFleetStats] = useState<FleetStats>({
+    total: 0,
+    online: 0,
+    offline: 0,
+    lowBattery: 0,
+    unconfigured: 0,
+  });
   const [loading, setLoading] = useState(devices.length === 0);
   const [loadError, setLoadError] = useState<string | null>(null);
 
@@ -296,6 +315,42 @@ const StoreDevicesWorkspace: React.FC = () => {
   const [selectedProductId, setSelectedProductId] = useState('');
   const [assignCustomName, setAssignCustomName] = useState('');
   const [assignLoading, setAssignLoading] = useState(false);
+  const [modalProductSearch, setModalProductSearch] = useState('');
+  const [modalProductList, setModalProductList] = useState<Product[]>([]);
+  const [modalProductPage, setModalProductPage] = useState(1);
+  const [modalProductHasNext, setModalProductHasNext] = useState(false);
+  const [modalProductLoading, setModalProductLoading] = useState(false);
+
+  const fetchModalProducts = async (search = '', page = 1, append = false) => {
+    setModalProductLoading(true);
+    try {
+      const res = await api.get('/products', {
+        params: {
+          page,
+          pageSize: 20,
+          search: search.trim() || undefined,
+        },
+      });
+      if (res.data?.success) {
+        const items = res.data.data || [];
+        const pagination = res.data.pagination;
+        setModalProductList((prev) => (append ? [...prev, ...items] : items));
+        setModalProductPage(page);
+        setModalProductHasNext(pagination ? pagination.hasNextPage : items.length === 20);
+      }
+    } catch (err) {
+      console.warn('Failed to load products for assign modal:', err);
+    } finally {
+      setModalProductLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (assigningDevice) {
+      setModalProductSearch('');
+      fetchModalProducts('', 1, false);
+    }
+  }, [assigningDevice]);
 
   // QR Code Modal
   const [qrModalDevice, setQrModalDevice] = useState<Device | null>(null);
@@ -546,18 +601,56 @@ const StoreDevicesWorkspace: React.FC = () => {
   useEffect(() => { const timer = window.setInterval(() => setDeviceNow(Date.now()), 5000); return () => window.clearInterval(timer); }, []);
   const dataFailures = useRef(new Set<string>());
   useEffect(() => { deviceLoader.current = createDevicePageLoader(); return () => deviceLoader.current.dispose(); }, []);
-  const fetchData = async () => {
-    const loader = deviceLoader.current; const scope = apiSessionMarker(); const revision = deviceRevision.current;
-    const valid = () => loader.valid() && apiSessionMarker() === scope;
-    const report = (key: string, failed: boolean) => { if (!valid()) return; if (failed) dataFailures.current.add(key); else dataFailures.current.delete(key); setLoadError(dataFailures.current.size ? 'Một phần dữ liệu chưa tải được. Dữ liệu đã tải vẫn được giữ lại; bạn có thể tải lại.' : null); };
-    return loader.run([async () => {
-      try { const res = await api.get('/devices'); if (!res.data?.success || !Array.isArray(res.data.data)) throw new Error('Invalid devices'); if (!valid() || revision !== deviceRevision.current) return; const rows = deviceTelemetry.current.merge<Device>(res.data.data.map((raw: any) => assertDeviceScope(raw, user))); setDevices(rows); setDevicesReady(true); try { saveDeviceCache(sessionStorage, user, rows); } catch {} report('devices', false); }
-      catch { report('devices', true); } finally { if (valid()) setLoading(false); }
-    }, async () => {
-      try { const res = await api.get('/products'); if (!res.data?.success || !Array.isArray(res.data.data)) throw new Error('Invalid products'); if (valid()) { setProducts(res.data.data); report('products', false); } }
-      catch { report('products', true); }
-    }]);
+
+  const fetchData = async (attempt = 0, targetPage = devicePage) => {
+    const devParams: any = {
+      page: targetPage,
+      pageSize: devicePageSize,
+    };
+    if (searchQuery.trim()) devParams.search = searchQuery.trim();
+    if (statusFilter !== 'ALL') devParams.status = statusFilter;
+
+    const results = await Promise.allSettled([
+        api.get('/devices', { params: devParams }),
+        api.get('/products', { params: { page: 1, pageSize: 20 } }),
+        api.get('/devices/fleet/stats'),
+    ]);
+    const [deviceResult, productResult, statsResult] = results;
+    const failedRequests = results.filter((result) => result.status === 'rejected');
+
+    if (deviceResult.status === 'fulfilled' && deviceResult.value.data?.success) {
+      const rawRows = Array.isArray(deviceResult.value.data.data) ? deviceResult.value.data.data : [];
+      const rows = deviceTelemetry.current.merge<Device>(rawRows.map((raw: any) => assertDeviceScope(raw, user)));
+      setDevices(rows);
+      setDevicesReady(true);
+      try { saveDeviceCache(sessionStorage, user, rows); } catch {}
+      if (deviceResult.value.data.pagination) {
+        setDeviceTotalItems(deviceResult.value.data.pagination.totalItems || 0);
+        setDeviceTotalPages(deviceResult.value.data.pagination.totalPages || 1);
+        setDevicePage(deviceResult.value.data.pagination.page || targetPage);
+      }
+    }
+    if (productResult.status === 'fulfilled' && productResult.value.data?.success) {
+      setProducts(productResult.value.data.data);
+    }
+    if (statsResult.status === 'fulfilled' && statsResult.value.data?.success) {
+      setFleetStats(statsResult.value.data.data);
+    }
+
+    if (failedRequests.length > 0) {
+      setLoadError('Một phần dữ liệu hạm đội chưa tải được. Hệ thống sẽ tự thử lại.');
+      if (attempt < 2) {
+        window.setTimeout(() => void fetchData(attempt + 1, targetPage), 1000 * (attempt + 1));
+      }
+    } else {
+      setLoadError(null);
+    }
+    setLoading(false);
   };
+
+  useEffect(() => {
+    fetchData(0, devicePage);
+  }, [devicePage, statusFilter, searchQuery]);
 
   useEffect(() => {
     fetchData();
@@ -1235,7 +1328,8 @@ const StoreDevicesWorkspace: React.FC = () => {
             </p>
           </div>
         ) : (
-          <table className="w-full text-left border-collapse">
+          <>
+            <table className="w-full text-left border-collapse">
             <thead>
               <tr className="border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50/80 dark:bg-zinc-800/40 text-[10px] font-semibold text-zinc-400 dark:text-zinc-500 uppercase tracking-wider">
                 <th className="py-2 px-3.5 font-semibold">Thiết Bị (Hardware ID)</th>
@@ -1464,7 +1558,36 @@ const StoreDevicesWorkspace: React.FC = () => {
             })}
           </motion.tbody>
           </table>
-        )}
+          {deviceTotalPages > 1 && (
+            <div className="flex items-center justify-between px-4 py-3 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500">
+              <div>
+                Hiển thị {(devicePage - 1) * devicePageSize + 1} - {Math.min(devicePage * devicePageSize, deviceTotalItems)} trên tổng số {deviceTotalItems} thiết bị
+              </div>
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={() => setDevicePage((prev) => Math.max(1, prev - 1))}
+                  disabled={devicePage <= 1}
+                  className="px-2.5 py-1 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                >
+                  Trước
+                </button>
+                <span className="px-2 py-1 font-medium text-zinc-700 dark:text-zinc-300">
+                  Trang {devicePage} / {deviceTotalPages}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setDevicePage((prev) => Math.min(deviceTotalPages, prev + 1))}
+                  disabled={devicePage >= deviceTotalPages}
+                  className="px-2.5 py-1 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                >
+                  Sau
+                </button>
+              </div>
+            </div>
+          )}
+        </>
+      )}
       </div>
 
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-2xs">
@@ -2039,6 +2162,24 @@ const StoreDevicesWorkspace: React.FC = () => {
                 <label className="block text-xs font-bold text-slate-700 dark:text-slate-300 mb-1">
                   Chọn Sản Phẩm Mới Trong Kho *
                 </label>
+                <div className="relative mb-2">
+                  <input
+                    type="text"
+                    placeholder="Tìm kiếm sản phẩm theo tên, SKU trên toàn kho..."
+                    value={modalProductSearch}
+                    onChange={(e) => {
+                      const query = e.target.value;
+                      setModalProductSearch(query);
+                      fetchModalProducts(query, 1, false);
+                    }}
+                    className="w-full px-3 py-2 text-xs rounded-lg bg-slate-50 dark:bg-black/50 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] transition-all"
+                  />
+                  {modalProductLoading && (
+                    <span className="absolute right-3 top-2 text-[11px] text-[#287DA8] font-medium animate-pulse">
+                      Đang tìm...
+                    </span>
+                  )}
+                </div>
                 <select
                   required
                   value={selectedProductId}
@@ -2046,12 +2187,22 @@ const StoreDevicesWorkspace: React.FC = () => {
                   className="w-full px-3.5 py-2.5 text-xs rounded-lg bg-slate-50 dark:bg-black/50 border border-slate-200 dark:border-white/10 text-slate-900 dark:text-white focus:outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-[#287DA8]/20 transition-all"
                 >
                   <option value="">-- Chọn sản phẩm --</option>
-                  {products.map((p) => (
+                  {(modalProductList.length > 0 ? modalProductList : products).map((p) => (
                     <option key={p.id} value={p.id}>
                       {p.name} — {p.price.toLocaleString()} ₫ ({p.sku})
                     </option>
                   ))}
                 </select>
+                {modalProductHasNext && (
+                  <button
+                    type="button"
+                    disabled={modalProductLoading}
+                    onClick={() => fetchModalProducts(modalProductSearch, modalProductPage + 1, true)}
+                    className="mt-1.5 text-xs text-[#287DA8] hover:underline flex items-center gap-1 font-semibold cursor-pointer"
+                  >
+                    {modalProductLoading ? 'Đang tải thêm...' : '+ Tải thêm sản phẩm (Trang tiếp theo)'}
+                  </button>
+                )}
               </div>
 
               <div>

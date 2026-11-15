@@ -158,66 +158,87 @@ export const NotificationBellPopover: React.FC = () => {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [isOpen]);
 
-  const isFetchingRef = useRef(false);
+  const lastFetchedMapRef = useRef<Map<string, number>>(new Map());
+  const inFlightKeyRef = useRef<string | null>(null);
 
-  // Load role-specific historical notifications on initial mount
+  // Identity-scoped historical notifications fetcher with per-source 60s cooldown
   useEffect(() => {
     if (!user || !token || isLoading) return;
+
+    const identityKey = getNotificationStorageKey(user);
+    const isSourceEligible = (source: string) => {
+      const last = lastFetchedMapRef.current.get(`${identityKey}:${source}`) || 0;
+      return Date.now() - last >= 60000;
+    };
+
     let isMounted = true;
+    inFlightKeyRef.current = identityKey;
 
     const fetchRoleNotifications = async () => {
-      if (isFetchingRef.current) return;
-      isFetchingRef.current = true;
       try {
         const realNotifs: AppNotification[] = [];
 
         // ========================================================
         // 1. ADMIN SCOPE: Stores pending & Withdrawals pending ONLY
-        // (Never load store order details for Admin)
         // ========================================================
         if (isAdmin) {
-          const [storesRes, withdrawalsRes] = await Promise.all([
-            api.get('/admin/stores/pending').catch(() => ({ data: { data: [] } })),
-            api.get('/admin/withdrawals').catch(() => ({ data: { data: [] } })),
-          ]);
-
-          const pendingStores = storesRes.data?.data || storesRes.data || [];
-          if (Array.isArray(pendingStores)) {
-            pendingStores.forEach((st: any) => {
-              realNotifs.push({
-                id: `notif_store_pending_${st.storeId || st.id}`,
-                type: 'STORE_PENDING',
-                roleScope: 'ADMIN',
-                title: `Cửa hàng chờ duyệt: ${st.name}`,
-                storeName: st.name,
-                productName: `Chủ đại lý: ${st.ownerName || st.phone || 'Điểm bán'} • ${st.address || 'Đang cập nhật'}`,
-                status: 'PENDING_APPROVAL',
-                isRead: false,
-                timestamp: st.createdAt || new Date().toISOString(),
-              });
-            });
+          const tasks: Promise<{ source: string; res: any }>[] = [];
+          if (isSourceEligible('stores')) {
+            tasks.push(api.get('/admin/stores/pending', { params: { pageSize: 10, page: 1 } }).then(res => ({ source: 'stores', res })));
+          }
+          if (isSourceEligible('withdrawals')) {
+            tasks.push(api.get('/admin/withdrawals', { params: { pageSize: 10, page: 1 } }).then(res => ({ source: 'withdrawals', res })));
           }
 
-          const allWithdrawals = withdrawalsRes.data?.data || withdrawalsRes.data || [];
-          if (Array.isArray(allWithdrawals)) {
-            allWithdrawals
-              .filter((w: any) => w.status === 'PENDING')
-              .slice(0, 10)
-              .forEach((w: any) => {
-                const amount = Number(w.amount || 0);
-                realNotifs.push({
-                  id: `notif_withd_pending_${w.id}`,
-                  type: 'WITHDRAWAL_PENDING',
-                  roleScope: 'ADMIN',
-                  title: `Yêu cầu rút tiền #${String(w.id).slice(-4)}`,
-                  storeName: w.store?.name || 'Cửa hàng',
-                  productName: `${w.store?.name || 'Cửa hàng'} yêu cầu rút ${amount.toLocaleString('vi-VN')}₫`,
-                  totalAmount: amount,
-                  status: 'PENDING',
-                  isRead: false,
-                  timestamp: w.createdAt || new Date().toISOString(),
-                });
-              });
+          if (tasks.length > 0) {
+            const results = await Promise.allSettled(tasks);
+            for (const item of results) {
+              if (item.status === 'fulfilled') {
+                const { source, res } = item.value;
+                lastFetchedMapRef.current.set(`${identityKey}:${source}`, Date.now());
+
+                if (source === 'stores') {
+                  const pendingStores = res.data?.data || res.data || [];
+                  if (Array.isArray(pendingStores)) {
+                    pendingStores.forEach((st: any) => {
+                      realNotifs.push({
+                        id: `notif_store_pending_${st.storeId || st.id}`,
+                        type: 'STORE_PENDING',
+                        roleScope: 'ADMIN',
+                        title: `Cửa hàng chờ duyệt: ${st.name}`,
+                        storeName: st.name,
+                        productName: `Chủ đại lý: ${st.ownerName || st.phone || 'Điểm bán'} • ${st.address || 'Đang cập nhật'}`,
+                        status: 'PENDING_APPROVAL',
+                        isRead: false,
+                        timestamp: st.createdAt || new Date().toISOString(),
+                      });
+                    });
+                  }
+                } else if (source === 'withdrawals') {
+                  const allWithdrawals = res.data?.data || res.data || [];
+                  if (Array.isArray(allWithdrawals)) {
+                    allWithdrawals
+                      .filter((w: any) => w.status === 'PENDING')
+                      .slice(0, 10)
+                      .forEach((w: any) => {
+                        const amount = Number(w.amount || 0);
+                        realNotifs.push({
+                          id: `notif_withd_pending_${w.id}`,
+                          type: 'WITHDRAWAL_PENDING',
+                          roleScope: 'ADMIN',
+                          title: `Yêu cầu rút tiền #${String(w.id).slice(-4)}`,
+                          storeName: w.store?.name || 'Cửa hàng',
+                          productName: `${w.store?.name || 'Cửa hàng'} yêu cầu rút ${amount.toLocaleString('vi-VN')}₫`,
+                          totalAmount: amount,
+                          status: 'PENDING',
+                          isRead: false,
+                          timestamp: w.createdAt || new Date().toISOString(),
+                        });
+                      });
+                  }
+                }
+              }
+            }
           }
         }
 
@@ -225,82 +246,96 @@ export const NotificationBellPopover: React.FC = () => {
         // 2. STORE OWNER SCOPE: Only orders of this store & devices
         // ========================================================
         else if (isStore) {
-          const [ordersRes, devicesRes] = await Promise.all([
-            api.get('/orders').catch(() => ({ data: { data: [] } })),
-            api.get('/devices').catch(() => ({ data: { data: [] } })),
-          ]);
-
-          const ordersData = ordersRes.data?.data || ordersRes.data || [];
-          const devicesData = devicesRes?.data?.data || devicesRes?.data || [];
-
-          if (Array.isArray(ordersData)) {
-            ordersData.slice(0, 25).map(normalizeOrder).forEach((ord: any) => {
-              const firstItem = ord.items?.[0];
-              const productName = firstItem?.product?.name || firstItem?.productName || 'Nhu yếu phẩm';
-              const qty = firstItem?.quantity || 1;
-              const isCancelled = ['CANCELLED', 'REJECTED'].includes(ord.status);
-              const orderNum = ord.orderNumber || (ord.id ? String(ord.id).slice(-6) : 'SOB');
-
-              if (isCancelled) {
-                realNotifs.push({
-                  id: orderEventKey('ORDER_CANCELLED', ord),
-                  type: 'ORDER_CANCELLED',
-                  roleScope: 'STORE',
-                  title: `Đã hủy #${orderNum}`,
-                  orderNumber: orderNum,
-                  orderId: ord.id,
-                  productName,
-                  quantity: qty,
-                  totalAmount: ord.totalAmount,
-                  reason: ord.cancellationReason || 'Khách hủy đơn',
-                  customerName: ord.customerName || ord.customer?.user?.fullName || 'Khách hàng',
-                  customerPhone: ord.customerPhone,
-                  deliveryAddress: ord.deliveryAddress,
-                  status: ord.status,
-                  isRead: true,
-                  timestamp: ord.cancelledAt || ord.updatedAt || ord.createdAt,
-                });
-              } else {
-                realNotifs.push({
-                  id: orderEventKey('ORDER_CREATED', ord),
-                  type: 'ORDER_CREATED',
-                  roleScope: 'STORE',
-                  title: `Đơn mới #${orderNum}`,
-                  orderNumber: orderNum,
-                  orderId: ord.id,
-                  productName,
-                  quantity: qty,
-                  totalAmount: ord.totalAmount,
-                  customerName: ord.customerName || ord.customer?.user?.fullName || 'Khách hàng',
-                  customerPhone: ord.customerPhone,
-                  deliveryAddress: ord.deliveryAddress,
-                  status: ord.status,
-                  isRead: true,
-                  timestamp: ord.createdAt,
-                });
-              }
-            });
+          const tasks: Promise<{ source: string; res: any }>[] = [];
+          if (isSourceEligible('orders')) {
+            tasks.push(api.get('/orders', { params: { pageSize: 15, page: 1 } }).then(res => ({ source: 'orders', res })));
+          }
+          if (isSourceEligible('devices')) {
+            tasks.push(api.get('/devices', { params: { pageSize: 15, page: 1 } }).then(res => ({ source: 'devices', res })));
           }
 
-          if (Array.isArray(devicesData) && devicesData.length > 0) {
-            const now = Date.now();
-            const recentAllocated = devicesData.filter((d: any) => {
-              const updatedTime = new Date(d.updatedAt || d.createdAt).getTime();
-              return now - updatedTime < 48 * 60 * 60 * 1000 && (!d.customerId || d.customerId === 'null');
-            });
+          if (tasks.length > 0) {
+            const results = await Promise.allSettled(tasks);
+            for (const item of results) {
+              if (item.status === 'fulfilled') {
+                const { source, res } = item.value;
+                lastFetchedMapRef.current.set(`${identityKey}:${source}`, Date.now());
 
-            if (recentAllocated.length > 0) {
-              const codes = recentAllocated.map((d: any) => d.buttonCode || d.deviceId).slice(0, 4).join(', ');
-              realNotifs.push({
-                id: `notif_alloc_init_${recentAllocated.length}`,
-                type: 'DEVICES_ALLOCATED',
-                roleScope: 'STORE',
-                title: `Bàn giao ${recentAllocated.length} nút bấm mới!`,
-                productName: `Mã nút: ${codes}${recentAllocated.length > 4 ? '...' : ''}`,
-                status: 'ACTIVE',
-                isRead: true,
-                timestamp: recentAllocated[0].updatedAt || recentAllocated[0].createdAt || new Date().toISOString(),
-              });
+                if (source === 'orders') {
+                  const ordersData = res.data?.data || res.data || [];
+                  if (Array.isArray(ordersData)) {
+                    ordersData.slice(0, 25).map(normalizeOrder).forEach((ord: any) => {
+                      const firstItem = ord.items?.[0];
+                      const productName = firstItem?.product?.name || firstItem?.productName || 'Nhu yếu phẩm';
+                      const qty = firstItem?.quantity || 1;
+                      const isCancelled = ['CANCELLED', 'REJECTED'].includes(ord.status);
+                      const orderNum = ord.orderNumber || (ord.id ? String(ord.id).slice(-6) : 'SOB');
+
+                      if (isCancelled) {
+                        realNotifs.push({
+                          id: orderEventKey('ORDER_CANCELLED', ord),
+                          type: 'ORDER_CANCELLED',
+                          roleScope: 'STORE',
+                          title: `Đã hủy #${orderNum}`,
+                          orderNumber: orderNum,
+                          orderId: ord.id,
+                          productName,
+                          quantity: qty,
+                          totalAmount: ord.totalAmount,
+                          reason: ord.cancellationReason || 'Khách hủy đơn',
+                          customerName: ord.customerName || ord.customer?.user?.fullName || 'Khách hàng',
+                          customerPhone: ord.customerPhone,
+                          deliveryAddress: ord.deliveryAddress,
+                          status: ord.status,
+                          isRead: true,
+                          timestamp: ord.cancelledAt || ord.updatedAt || ord.createdAt,
+                        });
+                      } else {
+                        realNotifs.push({
+                          id: orderEventKey('ORDER_CREATED', ord),
+                          type: 'ORDER_CREATED',
+                          roleScope: 'STORE',
+                          title: `Đơn mới #${orderNum}`,
+                          orderNumber: orderNum,
+                          orderId: ord.id,
+                          productName,
+                          quantity: qty,
+                          totalAmount: ord.totalAmount,
+                          customerName: ord.customerName || ord.customer?.user?.fullName || 'Khách hàng',
+                          customerPhone: ord.customerPhone,
+                          deliveryAddress: ord.deliveryAddress,
+                          status: ord.status,
+                          isRead: true,
+                          timestamp: ord.createdAt,
+                        });
+                      }
+                    });
+                  }
+                } else if (source === 'devices') {
+                  const devicesData = res.data?.data || res.data || [];
+                  if (Array.isArray(devicesData) && devicesData.length > 0) {
+                    const now = Date.now();
+                    const recentAllocated = devicesData.filter((d: any) => {
+                      const updatedTime = new Date(d.updatedAt || d.createdAt).getTime();
+                      return now - updatedTime < 48 * 60 * 60 * 1000 && (!d.customerId || d.customerId === 'null');
+                    });
+
+                    if (recentAllocated.length > 0) {
+                      const codes = recentAllocated.map((d: any) => d.buttonCode || d.deviceId).slice(0, 4).join(', ');
+                      realNotifs.push({
+                        id: `notif_alloc_init_${recentAllocated.length}`,
+                        type: 'DEVICES_ALLOCATED',
+                        roleScope: 'STORE',
+                        title: `Bàn giao ${recentAllocated.length} nút bấm mới!`,
+                        productName: `Mã nút: ${codes}${recentAllocated.length > 4 ? '...' : ''}`,
+                        status: 'ACTIVE',
+                        isRead: true,
+                        timestamp: recentAllocated[0].updatedAt || recentAllocated[0].createdAt || new Date().toISOString(),
+                      });
+                    }
+                  }
+                }
+              }
             }
           }
         }
@@ -309,64 +344,72 @@ export const NotificationBellPopover: React.FC = () => {
         // 3. CUSTOMER SCOPE: Only personal orders of this customer
         // ========================================================
         else if (isCustomer) {
-          const ordersRes = await api.get('/orders').catch(() => ({ data: { data: [] } }));
-          const ordersData = ordersRes.data?.data || ordersRes.data || [];
+          if (isSourceEligible('orders')) {
+            const results = await Promise.allSettled([
+              api.get('/orders', { params: { pageSize: 15, page: 1 } }).then(res => ({ source: 'orders', res }))
+            ]);
+            if (results[0].status === 'fulfilled') {
+              const { source, res } = results[0].value;
+              lastFetchedMapRef.current.set(`${identityKey}:${source}`, Date.now());
+              const ordersData = res.data?.data || res.data || [];
 
-          if (Array.isArray(ordersData)) {
-            ordersData.slice(0, 25).map(normalizeOrder).forEach((ord: any) => {
-              const firstItem = ord.items?.[0];
-              const productName = firstItem?.product?.name || firstItem?.productName || 'Sản phẩm';
-              const qty = firstItem?.quantity || 1;
-              const orderNum = ord.orderNumber || (ord.id ? String(ord.id).slice(-6) : 'SOB');
-              const awaitingPayOS = String(ord.paymentMethod || '').toUpperCase() === 'PAYOS'
-                && String(ord.paymentStatus || '').toUpperCase() !== 'PAID';
+              if (Array.isArray(ordersData)) {
+                ordersData.slice(0, 25).map(normalizeOrder).forEach((ord: any) => {
+                  const firstItem = ord.items?.[0];
+                  const productName = firstItem?.product?.name || firstItem?.productName || 'Sản phẩm';
+                  const qty = firstItem?.quantity || 1;
+                  const orderNum = ord.orderNumber || (ord.id ? String(ord.id).slice(-6) : 'SOB');
+                  const awaitingPayOS = String(ord.paymentMethod || '').toUpperCase() === 'PAYOS'
+                    && String(ord.paymentStatus || '').toUpperCase() !== 'PAID';
 
-              let title = awaitingPayOS
-                ? `Đơn hàng #${orderNum} đang chờ thanh toán PayOS`
-                : `Đặt hàng thành công #${orderNum}`;
-              let type: AppNotification['type'] = 'ORDER_CREATED';
+                  let title = awaitingPayOS
+                    ? `Đơn hàng #${orderNum} đang chờ thanh toán PayOS`
+                    : `Đặt hàng thành công #${orderNum}`;
+                  let type: AppNotification['type'] = 'ORDER_CREATED';
 
-              if (['CANCELLED', 'REJECTED'].includes(ord.status)) {
-                title = `Đơn hàng #${orderNum} đã hủy`;
-                type = 'ORDER_CANCELLED';
-              } else if (ord.status === 'DELIVERED') {
-                title = `Đơn hàng #${orderNum} đã giao thành công`;
-                type = 'ORDER_DELIVERED';
-              } else if (['SHIPPING', 'OUT_FOR_DELIVERY'].includes(ord.status)) {
-                title = `Đơn hàng #${orderNum} đang được giao`;
-                type = 'ORDER_STATUS_CHANGED';
-              } else if (ord.status === 'CONFIRMED') {
-                title = `Đơn hàng #${orderNum} đã được xác nhận`;
-                type = 'ORDER_STATUS_CHANGED';
+                  if (['CANCELLED', 'REJECTED'].includes(ord.status)) {
+                    title = `Đơn hàng #${orderNum} đã hủy`;
+                    type = 'ORDER_CANCELLED';
+                  } else if (ord.status === 'DELIVERED') {
+                    title = `Đơn hàng #${orderNum} đã giao thành công`;
+                    type = 'ORDER_DELIVERED';
+                  } else if (['SHIPPING', 'OUT_FOR_DELIVERY'].includes(ord.status)) {
+                    title = `Đơn hàng #${orderNum} đang được giao`;
+                    type = 'ORDER_STATUS_CHANGED';
+                  } else if (ord.status === 'CONFIRMED') {
+                    title = `Đơn hàng #${orderNum} đã được xác nhận`;
+                    type = 'ORDER_STATUS_CHANGED';
+                  }
+
+                  realNotifs.push({
+                    id: orderEventKey(type, ord),
+                    type,
+                    roleScope: 'CUSTOMER',
+                    title,
+                    orderNumber: orderNum,
+                    orderId: ord.id,
+                    productName,
+                    quantity: qty,
+                    totalAmount: ord.totalAmount,
+                    reason: ord.cancellationReason,
+                    customerName: ord.customerName,
+                    customerPhone: ord.customerPhone,
+                    deliveryAddress: ord.deliveryAddress,
+                    status: ord.status,
+                    isRead: true,
+                    timestamp: ord.updatedAt || ord.createdAt,
+                  });
+                });
               }
-
-              realNotifs.push({
-                id: orderEventKey(type, ord),
-                type,
-                roleScope: 'CUSTOMER',
-                title,
-                orderNumber: orderNum,
-                orderId: ord.id,
-                productName,
-                quantity: qty,
-                totalAmount: ord.totalAmount,
-                reason: ord.cancellationReason,
-                customerName: ord.customerName,
-                customerPhone: ord.customerPhone,
-                deliveryAddress: ord.deliveryAddress,
-                status: ord.status,
-                isRead: true,
-                timestamp: ord.updatedAt || ord.createdAt,
-              });
-            });
+            }
           }
         }
 
-        if (isMounted) {
+        if (isMounted && inFlightKeyRef.current === identityKey && realNotifs.length > 0) {
           setNotifications((prev) => {
             const existingIds = new Set(prev.map((n) => n.id));
             const newToAdd = realNotifs.filter((n) => !existingIds.has(n.id));
-            if (newToAdd.length === 0 && prev.length > 0) return prev;
+            if (newToAdd.length === 0) return prev;
             return [...newToAdd, ...prev].sort(
               (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
             );
@@ -377,15 +420,20 @@ export const NotificationBellPopover: React.FC = () => {
           void err; // Non-critical pre-fetch
         }
       } finally {
-        isFetchingRef.current = false;
+        if (inFlightKeyRef.current === identityKey) {
+          inFlightKeyRef.current = null;
+        }
       }
     };
 
     fetchRoleNotifications();
     return () => {
       isMounted = false;
+      if (inFlightKeyRef.current === identityKey) {
+        inFlightKeyRef.current = null;
+      }
     };
-  }, [user?.id, user?.role, token, isLoading, isAdmin, isStore, isCustomer]);
+  }, [user?.id, user?.role, (user as any)?.storeId, token, isLoading, isAdmin, isStore, isCustomer]);
 
   // Realtime Socket Listeners: Strict Role Scoping
   useEffect(() => {

@@ -132,6 +132,16 @@ export const StoreProductsPage: React.FC = () => {
   const listingAccess = useStoreListingAccess(user);
   const isSuspended = isStoreSuspended(user);
   const [products, setProducts] = useState<Product[]>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_store_products') : null; if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; } } catch {} return []; });
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize] = useState(20);
+  const [totalItems, setTotalItems] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [inventoryStats, setInventoryStats] = useState<{
+    totalSkus: number;
+    totalOnHand: number;
+    totalReserved: number;
+    lowStockSkus: number;
+  } | null>(null);
   const [loading, setLoading] = useState(() => { try { return !(typeof window !== 'undefined' && window.sessionStorage?.getItem('sob_cached_store_products')); } catch { return true; } });
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
@@ -180,32 +190,57 @@ export const StoreProductsPage: React.FC = () => {
   // Universal body scroll lock & header submerge
   useBodyScrollLock(showAddModal || !!editingProduct || !!statusConfirmation);
 
-  const fetchProducts = async () => {
+  const fetchProducts = async (targetPage = currentPage) => {
     const request = ++productRequest.current;
     try {
-      const res = await api.get('/products');
+      const params: any = {
+        page: targetPage,
+        pageSize,
+      };
+      if (searchQuery.trim()) params.search = searchQuery.trim();
+      if (categoryFilter !== 'ALL') params.category = categoryFilter;
+
+      const [res, statsRes] = await Promise.allSettled([
+        api.get('/products', { params }),
+        api.get('/analytics/inventory').catch(() => null),
+      ]);
+
       if (request !== productRequest.current) return;
-      if (res.data?.success && Array.isArray(res.data?.data)) {
+      if (res.status === 'fulfilled' && res.value.data?.success && Array.isArray(res.value.data?.data)) {
         setProductsReady(true); setProductsError('');
-        const mappedList =
-          res.data.data.map((p: any) => ({
-            ...p,
-            id: String(p.id || p.productId),
-            name: p.name || p.productName || 'Sản phẩm',
-            sku: p.sku || p.productCode || '—',
-            brand: p.brand || 'Khác',
-            category: p.category?.categoryName || (typeof p.category === 'string' ? p.category : 'Nhu yếu phẩm'),
-            unit: p.unit || 'Đơn vị',
-            price: Number(p.price || p.basePrice || 0),
-            stock: Number(p.stock !== undefined ? p.stock : (p.inventory?.quantityOnHand ?? 0)),
-            reservedStock: Number(p.reservedStock ?? p.inventory?.reservedQuantity ?? 0),
-            minStockAlert: Number(p.minStockAlert ?? p.inventory?.minStockAlert ?? 5),
-            imageUrl: p.imageUrl || p.thumbnailUrl || (p.images?.[0]?.imageUrl || ''),
-          }));
+        const mappedList = res.value.data.data.map((p: any) => ({
+          ...p,
+          id: String(p.id || p.productId),
+          name: p.name || p.productName || 'Sản phẩm',
+          sku: p.sku || p.productCode || '—',
+          brand: p.brand || 'Khác',
+          category: p.category?.categoryName || (typeof p.category === 'string' ? p.category : 'Nhu yếu phẩm'),
+          unit: p.unit || 'Đơn vị',
+          price: Number(p.price || p.basePrice || 0),
+          stock: Number(p.stock !== undefined ? p.stock : (p.inventory?.quantityOnHand ?? 0)),
+          reservedStock: Number(p.reservedStock ?? p.inventory?.reservedQuantity ?? 0),
+          minStockAlert: Number(p.minStockAlert ?? p.inventory?.minStockAlert ?? 5),
+          imageUrl: p.imageUrl || p.thumbnailUrl || (p.images?.[0]?.imageUrl || ''),
+        }));
         setProducts(mappedList);
         try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_store_products', JSON.stringify(mappedList)); } catch {}
+        if (res.value.data.pagination) {
+          setTotalItems(res.value.data.pagination.totalItems || 0);
+          setTotalPages(res.value.data.pagination.totalPages || 1);
+          setCurrentPage(res.value.data.pagination.page || targetPage);
+        }
       } else {
         throw new Error('Invalid product list');
+      }
+
+      if (statsRes.status === 'fulfilled' && statsRes.value?.data?.success && statsRes.value?.data?.data?.summary) {
+        const sum = statsRes.value.data.data.summary;
+        setInventoryStats({
+          totalSkus: Number(sum.totalSkus || sum.total_skus || 0),
+          totalOnHand: Number(sum.totalOnHand || sum.total_on_hand || 0),
+          totalReserved: Number(sum.totalReserved || sum.total_reserved || 0),
+          lowStockSkus: Number(sum.lowStockSkus || sum.low_stock_skus || 0),
+        });
       }
     } catch (e) {
       if (request !== productRequest.current) return;
@@ -219,8 +254,10 @@ export const StoreProductsPage: React.FC = () => {
 
   useEffect(() => {
     if (products.length === 0) { setProductsReady(false); } setProductsError('');
-    fetchProducts();
+    fetchProducts(currentPage);
+  }, [currentPage, categoryFilter, searchQuery]);
 
+  useEffect(() => {
     if (user?.storeId) {
       subscribeToStore(user.storeId);
     }
@@ -562,10 +599,10 @@ export const StoreProductsPage: React.FC = () => {
 
   useDashboardRefresh(() => { if (!submitLoading && !editLoading && !savingPrice && !statusUpdating) return fetchProducts(); }, 'products:' + user?.id + ':' + user?.storeId, true);
   // Metrics summary
-  const totalSkus = (products || []).length;
-  const totalStockCount = (products || []).reduce((acc, p) => acc + (Number(p.stock) || 0), 0);
-  const totalReserved = (products || []).reduce((acc, p) => acc + (Number(p.reservedStock) || 0), 0);
-  const lowStockProducts = (products || []).filter((p) => (Number(p.stock) || 0) <= (Number(p.minStockAlert ?? 5)));
+  const totalSkus = inventoryStats ? inventoryStats.totalSkus : (totalItems || (products || []).length);
+  const totalStockCount = inventoryStats ? inventoryStats.totalOnHand : (products || []).reduce((acc, p) => acc + (Number(p.stock) || 0), 0);
+  const totalReserved = inventoryStats ? inventoryStats.totalReserved : (products || []).reduce((acc, p) => acc + (Number(p.reservedStock) || 0), 0);
+  const lowStockCount = inventoryStats ? inventoryStats.lowStockSkus : (products || []).filter((p) => (Number(p.stock) || 0) <= (Number(p.minStockAlert ?? 5))).length;
 
   // Filtered products
   const filteredProducts = useMemo(() => {
@@ -757,22 +794,22 @@ export const StoreProductsPage: React.FC = () => {
             </span>
             <span
               className={`w-2 h-2 rounded-full ${
-                lowStockProducts.length > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
+                lowStockCount > 0 ? 'bg-amber-500 animate-pulse' : 'bg-emerald-500'
               }`}
             ></span>
           </div>
           <div className="mt-1 flex items-baseline gap-2">
             <span
               className={`text-2xl font-bold font-mono ${
-                lowStockProducts.length > 0
+                lowStockCount > 0
                   ? 'text-amber-600 dark:text-amber-400'
                   : 'text-zinc-900 dark:text-zinc-100'
               }`}
             >
-              {formatMetric(productsReady ? lowStockProducts.length : null)}
+              {formatMetric(productsReady ? lowStockCount : null)}
             </span>
             <span className="text-[11px] text-zinc-400">
-              {lowStockProducts.length > 0 ? 'cần nhập thêm' : 'ổn định'}
+              {lowStockCount > 0 ? 'cần nhập thêm' : 'ổn định'}
             </span>
           </div>
         </div>
@@ -1116,6 +1153,40 @@ export const StoreProductsPage: React.FC = () => {
                 })}
               </motion.tbody>
             </table>
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between px-4 py-3 border-t border-zinc-200 dark:border-zinc-800 text-xs text-zinc-500">
+                <div>
+                  Hiển thị {(currentPage - 1) * pageSize + 1} - {Math.min(currentPage * pageSize, totalItems)} trên tổng số {totalItems} sản phẩm
+                </div>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = Math.max(1, currentPage - 1);
+                      setCurrentPage(next);
+                    }}
+                    disabled={currentPage <= 1}
+                    className="px-2.5 py-1 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    Trước
+                  </button>
+                  <span className="px-2 py-1 font-medium text-zinc-700 dark:text-zinc-300">
+                    Trang {currentPage} / {totalPages}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const next = Math.min(totalPages, currentPage + 1);
+                      setCurrentPage(next);
+                    }}
+                    disabled={currentPage >= totalPages}
+                    className="px-2.5 py-1 rounded bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                  >
+                    Sau
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
