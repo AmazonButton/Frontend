@@ -1,6 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { ShieldCheck, AlertTriangle, RefreshCw, Lock, CheckCircle2, XCircle, Plus, Wrench, BellRing } from 'lucide-react';
+import React, { useEffect, useMemo, useState } from 'react';
+import { ShieldCheck, AlertTriangle, RefreshCw, Lock, CheckCircle2, XCircle, Plus, Wrench, BellRing, BatteryWarning } from 'lucide-react';
 import { api } from '../../services/api';
+import { getSocket } from '../../services/socket';
 import { toast } from '../../context/ToastContext';
 import {
   WARRANTY_GROUPS,
@@ -12,6 +13,18 @@ import {
   type WarrantyTicket,
   type WarrantyTicketStatus,
 } from '../../services/warranty';
+
+interface DeviceFaultAlert {
+  id: string;
+  deviceId: string;
+  buttonName?: string;
+  storeName?: string;
+  faultCode: string;
+  faultGroup: WarrantyFaultGroup;
+  batteryLevel?: number;
+  message: string;
+  createdAt?: string;
+}
 
 interface WarrantyPanelProps {
   mode: 'admin' | 'staff';
@@ -59,6 +72,84 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
   const [statusFilter, setStatusFilter] = useState<'ALL' | WarrantyTicketStatus>('ALL');
   const [groupFilter, setGroupFilter] = useState<'ALL' | WarrantyFaultGroup>('ALL');
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [realtimeAlerts, setRealtimeAlerts] = useState<DeviceFaultAlert[]>([]);
+  const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (mode !== 'admin') return;
+    const socket = getSocket();
+    if (!socket) return;
+
+    const handleFaultAlert = (payload: any) => {
+      if (!payload?.deviceId) return;
+      const alert: DeviceFaultAlert = {
+        id: payload.id || `rt-${payload.deviceId}-${payload.faultCode || 'FAULT'}`,
+        deviceId: String(payload.deviceId),
+        buttonName: payload.buttonName,
+        storeName: payload.storeName,
+        faultCode: payload.faultCode || 'HARDWARE_FAULT',
+        faultGroup: payload.faultGroup === 'GROUP_B' ? 'GROUP_B' : 'GROUP_A',
+        batteryLevel: payload.batteryLevel,
+        message: payload.message || `Nút ${payload.deviceId} vừa gửi cảnh báo lỗi (${payload.faultCode || 'FAULT'}).`,
+        createdAt: payload.createdAt || new Date().toISOString(),
+      };
+      setRealtimeAlerts((prev) => [alert, ...prev.filter((a) => a.deviceId !== alert.deviceId || a.faultCode !== alert.faultCode)]);
+      toast.warning(alert.message, { title: 'Cảnh báo từ nút bấm', duration: 6000 });
+    };
+
+    socket.on('DEVICE_FAULT_ALERT', handleFaultAlert);
+    return () => {
+      socket.off('DEVICE_FAULT_ALERT', handleFaultAlert);
+    };
+  }, [mode]);
+
+  const deviceFaultAlerts = useMemo<DeviceFaultAlert[]>(() => {
+    if (mode !== 'admin') return [];
+    const map = new Map<string, DeviceFaultAlert>();
+
+    for (const rt of realtimeAlerts) {
+      map.set(`${rt.deviceId}:${rt.faultCode}`, rt);
+    }
+
+    for (const d of devices) {
+      const id = String(d?.deviceId || '');
+      if (!id) continue;
+      const storeName = d?.store?.storeName || d?.store?.name;
+      const bat = d?.batteryLevel !== null && d?.batteryLevel !== undefined ? Number(d.batteryLevel) : null;
+      if (bat !== null && bat <= 20) {
+        const key = `${id}:LOW_BATTERY`;
+        if (!map.has(key)) {
+          map.set(key, {
+            id: `dev-bat-${id}`,
+            deviceId: id,
+            buttonName: d?.customName || d?.buttonName || id,
+            storeName,
+            faultCode: 'LOW_BATTERY',
+            faultGroup: 'GROUP_A',
+            batteryLevel: bat,
+            message: `Pin yếu (${bat}%) — Cần nhắc khách / đổi pin bảo hành`,
+          });
+        }
+      }
+      if (d?.status === 'ERROR' || d?.status === 'FAULT') {
+        const key = `${id}:HARDWARE_FAULT`;
+        if (!map.has(key)) {
+          map.set(key, {
+            id: `dev-err-${id}`,
+            deviceId: id,
+            buttonName: d?.customName || d?.buttonName || id,
+            storeName,
+            faultCode: 'HARDWARE_FAULT',
+            faultGroup: 'GROUP_A',
+            batteryLevel: bat ?? undefined,
+            message: `Thiết bị đang ở trạng thái lỗi (${d.status})`,
+          });
+        }
+      }
+    }
+
+    return Array.from(map.values()).filter((a) => !dismissedAlertIds.includes(a.id));
+  }, [mode, devices, realtimeAlerts, dismissedAlertIds]);
 
   // Form state
   const [deviceIdInput, setDeviceIdInput] = useState('');
@@ -80,6 +171,30 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
     const cfg = WARRANTY_GROUPS[nextGroup];
     setFaultCode(cfg.faults[0].code);
     setDeductionPercent(cfg.defaultDeduction);
+  };
+
+  const handleQuickTicketFromAlert = (alert: DeviceFaultAlert) => {
+    setDeviceIdInput(alert.deviceId);
+    handleGroupChange(alert.faultGroup);
+    setFaultCode(alert.faultCode);
+    setInspectionNote(alert.message);
+    setShowCreateForm(true);
+  };
+
+  const handleWarnFromAlert = async (alert: DeviceFaultAlert) => {
+    setBusyId(alert.id);
+    try {
+      const res = await api.post('/notifications/device-warning', {
+        deviceId: alert.deviceId,
+        faultGroup: alert.faultGroup,
+        faultCode: alert.faultCode,
+        title: `Cảnh báo thiết bị ${alert.deviceId}`,
+        message: alert.message,
+      }).catch(() => null);
+      toast.success(res?.data?.message || `Đã gửi cảnh báo tới tài khoản đang dùng nút ${alert.deviceId}.`);
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const handleCreateTicket = (e: React.FormEvent) => {
@@ -217,6 +332,64 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
           </button>
         </div>
       </div>
+
+      {mode === 'admin' && deviceFaultAlerts.length > 0 && (
+        <div className="rounded-xl border border-amber-200 dark:border-amber-800/70 bg-amber-50/70 dark:bg-amber-950/20 p-3.5 space-y-2.5">
+          <div className="flex items-center justify-between gap-2">
+            <h4 className="text-xs font-semibold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+              <BatteryWarning className="w-4 h-4" />
+              <span>Cảnh báo lỗi từ nút bấm ({deviceFaultAlerts.length})</span>
+            </h4>
+            <span className="text-[11px] text-amber-700/80 dark:text-amber-400">
+              Tự động nhận từ telemetry / pin ≤ 20% / trạng thái lỗi
+            </span>
+          </div>
+          <div className="space-y-2">
+            {deviceFaultAlerts.map((alert) => (
+              <div
+                key={alert.id}
+                className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 rounded-lg bg-white/90 dark:bg-zinc-900/80 border border-amber-200/80 dark:border-amber-900/60 px-3 py-2 text-xs"
+              >
+                <div className="space-y-0.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-semibold text-zinc-900 dark:text-white">{alert.deviceId}</span>
+                    <span className="px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800">
+                      {alert.faultCode}
+                    </span>
+                    {alert.storeName && <span className="text-[11px] text-zinc-500">· {alert.storeName}</span>}
+                  </div>
+                  <p className="text-zinc-600 dark:text-zinc-300">{alert.message}</p>
+                </div>
+                <div className="flex flex-wrap items-center gap-1.5 shrink-0">
+                  <button
+                    type="button"
+                    onClick={() => handleQuickTicketFromAlert(alert)}
+                    className="px-2.5 py-1 rounded text-[11px] font-medium bg-[#0E6BA8] text-white hover:bg-[#0B5585] cursor-pointer"
+                  >
+                    Lập phiếu
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busyId === alert.id}
+                    onClick={() => void handleWarnFromAlert(alert)}
+                    className="px-2.5 py-1 rounded text-[11px] font-medium bg-amber-100 text-amber-800 border border-amber-300 hover:bg-amber-200 cursor-pointer disabled:opacity-50 inline-flex items-center gap-1"
+                  >
+                    <BellRing className="w-3 h-3" />
+                    <span>Báo tài khoản</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setDismissedAlertIds((prev) => [...prev, alert.id])}
+                    className="px-2 py-1 rounded text-[11px] text-zinc-500 hover:bg-zinc-100 dark:hover:bg-zinc-800 cursor-pointer"
+                  >
+                    Ẩn
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {showPolicy && (
         <div className="grid gap-3 sm:grid-cols-2">

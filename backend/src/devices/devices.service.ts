@@ -585,6 +585,19 @@ export class DevicesService {
   async updateBattery(id: string, level: number, user: any) {
     const existing = await this.assertDeviceAccess(id, user);
     await this.devicesRepo.update(existing.buttonId, { batteryLevel: level });
+    if (Number(level) <= 20) {
+      this.eventsGateway?.emitToAdmin('DEVICE_FAULT_ALERT', {
+        id: `alert-${existing.deviceId}-${Date.now()}`,
+        deviceId: existing.deviceId,
+        buttonName: existing.buttonName || existing.deviceId,
+        storeId: existing.storeId ? existing.storeId.toString() : undefined,
+        faultCode: 'LOW_BATTERY',
+        faultGroup: 'GROUP_A',
+        batteryLevel: Number(level),
+        message: `Nút ${existing.deviceId} báo pin yếu (${level}%)`,
+        createdAt: new Date().toISOString(),
+      });
+    }
     return { success: true, buttonId: existing.buttonId.toString(), batteryLevel: level };
   }
 
