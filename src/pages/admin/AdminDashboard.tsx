@@ -1738,7 +1738,7 @@ export const AdminDashboard: React.FC = () => {
               const buckets = Array.from(storeBuckets.values());
               if (buckets.length === 0) return null;
               return (
-                <div className="grid gap-2.5 sm:grid-cols-2 lg:grid-cols-3">
+                <div className="flex flex-wrap gap-1.5">
                   {buckets.map((b) => {
                     const isActive = deviceStoreFilter === b.storeId;
                     const availableCount = b.devices.filter((d) => !d.customerId).length;
@@ -1747,39 +1747,18 @@ export const AdminDashboard: React.FC = () => {
                         key={b.storeId}
                         type="button"
                         onClick={() => setDeviceStoreFilter(isActive ? 'ALL' : b.storeId)}
-                        className={`text-left rounded-xl border p-3 transition-all cursor-pointer ${
+                        title={`${b.storeName} (${b.storeCode || `#${b.storeId}`}): ${b.devices.map((d) => d.deviceId).join(', ')}`}
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] transition-all cursor-pointer ${
                           isActive
-                            ? 'border-[#0E6BA8] bg-sky-50/70 dark:bg-sky-950/30 ring-1 ring-[#0E6BA8]/30'
-                            : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50/60 dark:bg-zinc-900/50 hover:border-zinc-300 dark:hover:border-zinc-700'
+                            ? 'border-[#0E6BA8] bg-sky-50 text-[#0E6BA8] dark:bg-sky-950/40 dark:text-sky-300 font-semibold'
+                            : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/50 text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
                         }`}
                       >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-xs font-semibold text-zinc-900 dark:text-white truncate">
-                            {b.storeName}
-                          </span>
-                          <span className="shrink-0 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-sky-100 dark:bg-sky-950/60 text-[#0E6BA8] dark:text-sky-300">
-                            {b.devices.length} nút
-                          </span>
-                        </div>
-                        <div className="mt-1 flex items-center justify-between gap-2 text-[11px] text-zinc-500 dark:text-zinc-400">
-                          <span className="font-mono truncate">{b.storeCode || `#${b.storeId}`}</span>
-                          <span>{availableCount} chưa gắn khách</span>
-                        </div>
-                        <div className="mt-2 flex flex-wrap gap-1">
-                          {b.devices.slice(0, 6).map((dev) => (
-                            <span
-                              key={dev.id || dev.deviceId}
-                              className="px-1.5 py-0.5 rounded bg-white dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-[10px] font-mono text-zinc-700 dark:text-zinc-300"
-                            >
-                              {dev.deviceId}
-                            </span>
-                          ))}
-                          {b.devices.length > 6 && (
-                            <span className="px-1.5 py-0.5 text-[10px] text-zinc-500">
-                              +{b.devices.length - 6} mã khác
-                            </span>
-                          )}
-                        </div>
+                        <span className="max-w-[180px] truncate font-medium">{b.storeName}</span>
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold bg-sky-100 dark:bg-sky-950/60 text-[#0E6BA8] dark:text-sky-300">
+                          {b.devices.length} nút
+                        </span>
+                        <span className="text-[10px] text-zinc-400">({availableCount} trống)</span>
                       </button>
                     );
                   })}
