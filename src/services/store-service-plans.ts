@@ -9,10 +9,8 @@ export interface StorePlanSubscription {
 }
 export interface PlanTransport { get(path: string, config?: any): Promise<any>; post(path: string, body: any, config?: any): Promise<any> }
 export function eligibleStorePayosPlan(catalog: StoreServicePlan[], planId: string) {
-  // The deployed renew-charge endpoint and settlement select the single active
-  // 60,000 VND plan and grant 30 days. Never use it for an arbitrary planId.
-  const candidates = catalog.filter(plan => plan.isActive && plan.price === 60000);
-  return candidates.length === 1 && candidates[0].durationDays === 30 && candidates[0].planId === planId;
+  const plan = catalog.find(p => p.planId === planId);
+  return Boolean(plan && plan.isActive && plan.price >= 2000);
 }
 export function storePlanCheckoutUrl(value: unknown) {
   try { const url = new URL(String(value)); return url.protocol === 'https:' && !url.username && !url.password && !url.port
@@ -139,16 +137,24 @@ export function createStorePlanFlow(api: PlanTransport) {
       if (!Array.isArray(rows) || !response.data.pagination) throw new Error('Chưa nhận được lịch sử gói dịch vụ.');
       return { rows, pagination: response.data.pagination };
     },
-    async createPayosCharge(returnUrl: string, cancelUrl: string) {
-      const result = planData(await api.post('/store/subscriptions/renew-charge', { returnUrl, cancelUrl }));
-      if (!/^[1-9]\d*$/.test(String(result?.paymentTransactionId)) || result?.amount !== 60000 || result.currency !== 'VND' || !storePlanCheckoutUrl(result.checkoutUrl)) throw new Error('Hướng dẫn thanh toán gói từ server chưa hợp lệ. Vui lòng kiểm tra yêu cầu trước khi tạo lại.');
+    async createPayosCharge(returnUrl: string, cancelUrl: string, planId?: string) {
+      const payload: any = { returnUrl, cancelUrl };
+      if (planId) {
+        payload.planId = Number(planId);
+      }
+      const result = planData(await api.post('/store/subscriptions/renew-charge', payload));
+      if (!/^[1-9]\d*$/.test(String(result?.paymentTransactionId)) || typeof result?.amount !== 'number' || result.amount < 2000 || result.currency !== 'VND' || !storePlanCheckoutUrl(result.checkoutUrl)) {
+        throw new Error('Hướng dẫn thanh toán gói từ server chưa hợp lệ. Vui lòng kiểm tra yêu cầu trước khi tạo lại.');
+      }
       return { chargeId: String(result.paymentTransactionId), checkoutUrl: storePlanCheckoutUrl(result.checkoutUrl)!, amount: result.amount as number };
     },
     async charge(storeId: string, chargeId: string) {
       if (!/^[1-9]\d*$/.test(chargeId)) throw new Error('Mã khoản thu không hợp lệ.');
       const result = planData(await api.get(`/billing-charges/${chargeId}`));
       if (String(result?.chargeId) !== chargeId || result?.purpose !== 'STORE_SUBSCRIPTION' || result?.targetType !== 'STORE'
-        || String(result?.storeId ?? result?.targetId) !== storeId || Number(result.totalAmount) !== 60000) throw new Error('Khoản thu không khớp với gói dịch vụ của cửa hàng này.');
+        || String(result?.storeId ?? result?.targetId) !== storeId || !Number.isFinite(Number(result.totalAmount)) || Number(result.totalAmount) <= 0) {
+        throw new Error('Khoản thu không khớp với gói dịch vụ của cửa hàng này.');
+      }
       return result;
     },
   };
