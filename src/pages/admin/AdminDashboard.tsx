@@ -738,7 +738,7 @@ export const AdminDashboard: React.FC = () => {
         api.get('/admin/stores'),
         api.get('/admin/users').catch(() => ({ data: { success: false, data: [] } })),
         api.get('/admin/plans').catch(() => ({ data: { success: false, data: [] } })),
-        api.get('/devices').catch(() => ({ data: { success: false, data: [] } })),
+        api.get('/devices?pageSize=100&limit=100').catch(() => ({ data: { success: false, data: [] } })),
       ]);
 
       if (adminRead.current !== request || (marker && typeof apiSessionMarker === 'function' && apiSessionMarker() !== marker)) return;
@@ -1702,14 +1702,22 @@ export const AdminDashboard: React.FC = () => {
                   value={deviceStoreFilter}
                   onChange={(e) => setDeviceStoreFilter(e.target.value)}
                   aria-label="Lọc nút theo cửa hàng"
-                  className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#0E6BA8]"
+                  className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#0E6BA8] max-w-md"
                 >
-                  <option value="ALL">Tất cả cửa hàng</option>
-                  {allStores.map((store) => (
-                    <option key={String(store.id || store.storeId)} value={String(store.id || store.storeId)}>
-                      {store.name || store.storeName} ({store.code || store.storeCode || `#${store.id || store.storeId}`})
-                    </option>
-                  ))}
+                  <option value="ALL">Tất cả cửa hàng ({allDevices.filter((d) => Boolean(d?.storeId)).length} nút)</option>
+                  {allStores.map((store) => {
+                    const sid = String(store.id || store.storeId);
+                    const storeDevs = allDevices.filter((d) => String(d?.storeId || '') === sid);
+                    const codesPreview = storeDevs.slice(0, 3).map((d) => d.deviceId).join(', ');
+                    const suffix = storeDevs.length > 0
+                      ? ` — ${storeDevs.length} nút (${codesPreview}${storeDevs.length > 3 ? ', ...' : ''})`
+                      : ' — 0 nút';
+                    return (
+                      <option key={sid} value={sid}>
+                        {store.name || store.storeName} ({store.code || store.storeCode || `#${sid}`}){suffix}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             </div>
