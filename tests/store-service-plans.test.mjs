@@ -25,11 +25,15 @@ test('subscription fees aggregate posted ledger transactions across server pages
 });
 
 for (const service of [plans, frontendPlans]) {
-  test('PayOS is offered only for the unique plan supported by the deployed fixed-price renewal contract', async () => {
+  test('PayOS is offered for any active plan with valid price (>= 2000 VND)', async () => {
     assert.equal(service.eligibleStorePayosPlan([plan], '1'), true);
-    assert.equal(service.eligibleStorePayosPlan([plan, {...plan,planId:'2'}], '1'), false);
-    assert.equal(service.eligibleStorePayosPlan([{...plan,durationDays:60}], '1'), false);
-    assert.equal(service.eligibleStorePayosPlan([{...plan,price:120000}], '1'), false);
+    assert.equal(service.eligibleStorePayosPlan([plan, {...plan,planId:'2'}], '1'), true);
+    assert.equal(service.eligibleStorePayosPlan([{...plan,durationDays:60}], '1'), true);
+    assert.equal(service.eligibleStorePayosPlan([{...plan,price:120000}], '1'), true);
+    assert.equal(service.eligibleStorePayosPlan([{...plan,price:2000}], '1'), true);
+    assert.equal(service.eligibleStorePayosPlan([{...plan,price:1000}], '1'), false, 'below 2000 VND rejected');
+    assert.equal(service.eligibleStorePayosPlan([{...plan,price:0}], '1'), false, 'free 0 VND plan rejected');
+    assert.equal(service.eligibleStorePayosPlan([{...plan,isActive:false}], '1'), false, 'inactive plan rejected');
     assert.equal(service.storePlanCheckoutUrl('https://pay.payos.vn/web/pl_123'), null, 'known mock checkout URLs are rejected');
     assert.equal(service.storePlanCheckoutUrl('javascript:alert(1)'), null);
     const flow=service.createStorePlanFlow({get:async()=>ok({chargeId:'33',storeId:'99',purpose:'STORE_SUBSCRIPTION',targetType:'STORE',totalAmount:60000,status:'PAID'})});
@@ -142,7 +146,7 @@ for(const prefix of ['../src/','../frontend/src/']) {
   test(`${prefix}PayOS creation does not unlock publishing; only server-confirmed PAID refreshes the period`,async()=>{
     const app=screen(prefix,{component:'payos'});await app.flush();assert.equal(app.calls.some(c=>c.method==='post'),false);
     await app.click('Tạo thanh toán PayOS');assert.equal(app.calls.filter(c=>c.method==='post').length,1);
-    const post=app.calls.find(c=>c.method==='post');assert.equal(post.path,'/store/subscriptions/renew-charge');assert.equal(post.body.returnUrl,'https://frontend.example/store/service-plans');
+    const post=app.calls.find(c=>c.method==='post');assert.equal(post.path,'/store/subscriptions/renew-charge');assert.equal(post.body.returnUrl,'https://frontend.example/store/service-plans');assert.equal(post.body.planId,1);
     assert.equal(app.confirmations,0);assert.ok(app.nodes.some(n=>n.type==='a'&&n.props.href==='https://pay.payos.vn/web/real-link'));
     app.setChargeStatus('PAID');await app.click('Kiểm tra thanh toán');assert.equal(app.confirmations,1);assert.equal(app.storage.size,0);assert.equal(app.nodes.some(n=>n.type==='a'),false);
     assert.equal(app.calls.some(c=>c.path.endsWith('/settle')),false);app.unmount();

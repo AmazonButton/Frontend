@@ -66,6 +66,42 @@ export const mediaService = {
   },
 
   /**
+   * Xin URL ký sẵn (Presigned URL) để upload POD trực tiếp lên Cloudflare R2 / AWS S3
+   */
+  async getPodPresignedUpload(orderId: string | number, contentType: string = 'image/webp') {
+    const res = await api.post('/media/pod/presigned-upload', {
+      orderId: orderId.toString(),
+      contentType,
+    });
+    return res.data;
+  },
+
+  /**
+   * Tải trực tiếp tệp nhị phân lên Object Storage bằng Presigned PUT URL
+   */
+  async uploadDirectToStorage(uploadUrl: string, file: Blob | File, contentType: string = 'image/webp') {
+    const response = await fetch(uploadUrl, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': contentType,
+      },
+      body: file,
+    });
+    if (!response.ok) {
+      throw new Error(`Tải ảnh trực tiếp lên Cloud Storage thất bại (HTTP ${response.status})`);
+    }
+    return true;
+  },
+
+  /**
+   * Lấy URL xem ảnh bằng chứng giao hàng bảo mật (hết hạn sau 15 phút)
+   */
+  async getPodView(orderId: string | number) {
+    const res = await api.get(`/orders/${orderId}/pod-view`);
+    return res.data;
+  },
+
+  /**
    * Xóa ảnh trên Cloudinary khi hủy hoặc thay thế ảnh
    */
   async destroyAsset(publicId: string) {

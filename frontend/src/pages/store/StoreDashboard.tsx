@@ -18,6 +18,7 @@ import { orderDashboardMetrics, formatMetric } from '../../services/dashboard-me
 import { ShippingContact } from '../../components/orders/ShippingContact';
 import { subscribeRentalChannelEvents } from '../../services/rental-notifications';
 import { getUserStoreId } from '../../services/order-reconciliation';
+import { mediaService } from '../../services/media.service';
 import { useStoreListingAccess } from '../../hooks/useStoreListingAccess';
 import { getStoreSuspendedNotice } from '../../services/store-status';
 import {
@@ -167,6 +168,64 @@ export const StoreDashboard: React.FC = () => {
   const [newProdPrice, setNewProdPrice] = useState<number>(45000);
   const [newProdStock, setNewProdStock] = useState<number>(50);
   const [newProdImage, setNewProdImage] = useState<string>('');
+
+  // POD view modal state
+  const [showPodModal, setShowPodModal] = useState<boolean>(false);
+  const [podLoading, setPodLoading] = useState<boolean>(false);
+  const [podData, setPodData] = useState<{
+    orderId: string;
+    orderStatus: string;
+    viewUrl: string;
+    expiresAt?: string;
+    deliveredAt?: string;
+    driver?: { fullName?: string; phone?: string };
+    orderNote?: string;
+  } | null>(null);
+
+  const handleOpenPodModal = async (order: Order) => {
+    setShowPodModal(true);
+    setPodLoading(true);
+    setPodData(null);
+    try {
+      const res = await mediaService.getPodView(order.id);
+      if (res?.success && res?.data) {
+        setPodData({
+          ...res.data,
+          orderNote: (order as any).orderNote || (order as any).failureNote,
+        });
+      } else {
+        const fallbackUrl = (order as any).podImageUrl || (order as any).evidenceImageUrl;
+        if (fallbackUrl) {
+          setPodData({
+            orderId: String(order.id),
+            orderStatus: order.status,
+            viewUrl: fallbackUrl,
+            deliveredAt: (order as any).deliveredAt,
+            orderNote: (order as any).orderNote || (order as any).failureNote,
+          });
+        } else {
+          toast.error('Không tìm thấy ảnh bằng chứng cho đơn hàng này');
+          setShowPodModal(false);
+        }
+      }
+    } catch (err: any) {
+      const fallbackUrl = (order as any).podImageUrl || (order as any).evidenceImageUrl;
+      if (fallbackUrl) {
+        setPodData({
+          orderId: String(order.id),
+          orderStatus: order.status,
+          viewUrl: fallbackUrl,
+          deliveredAt: (order as any).deliveredAt,
+          orderNote: (order as any).orderNote || (order as any).failureNote,
+        });
+      } else {
+        toast.error(err?.response?.data?.message || err?.message || 'Chưa thể tải ảnh bằng chứng giao hàng');
+        setShowPodModal(false);
+      }
+    } finally {
+      setPodLoading(false);
+    }
+  };
 
   const [newOrderAlert, setNewOrderAlert] = useState<any | null>(null);
   const [chartData, setChartData] = useState<any[]>([]);
@@ -1424,6 +1483,16 @@ export const StoreDashboard: React.FC = () => {
                           {isCancelled && (
                             <span className="text-xs text-zinc-600 dark:text-zinc-400">Đã hủy</span>
                           )}
+                          {(orderStatus === 'DELIVERED' || orderStatus === 'COMPLETED' || orderStatus === 'DELIVERY_FAILED' || (order as any).podImageUrl) && (
+                            <button
+                              type="button"
+                              onClick={() => handleOpenPodModal(order)}
+                              className="mt-1.5 inline-flex items-center gap-1 text-[11px] font-semibold text-[#206588] dark:text-sky-400 hover:underline cursor-pointer"
+                            >
+                              <Camera className="w-3 h-3" />
+                              Xem ảnh POD
+                            </button>
+                          )}
                           </fieldset>
                           {pendingStatusUpdates[order.id] && <span role="status" className="mt-1 block text-xs text-zinc-600 dark:text-zinc-400">Đang xác nhận…</span>}
                         </td>
@@ -1912,6 +1981,106 @@ export const StoreDashboard: React.FC = () => {
     </AnimatePresence>,
     document.body
   )}
+
+      {/* ── POD View Modal (Proof of Delivery Photo Viewer) ── */}
+      {showPodModal && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center bg-black/70 backdrop-blur-xs p-4">
+          <div className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-6 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between border-b border-zinc-100 pb-3 dark:border-zinc-800">
+              <div className="flex items-center gap-2">
+                <Camera className="w-5 h-5 text-[#206588] dark:text-sky-400" />
+                <h3 className="text-base font-bold text-zinc-900 dark:text-zinc-100">
+                  Ảnh Bằng Chứng Giao Hàng (POD)
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPodModal(false)}
+                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800 cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <div className="mt-4">
+              {podLoading ? (
+                <div className="flex flex-col items-center justify-center py-12 text-zinc-500">
+                  <div className="w-8 h-8 border-2 border-[#206588] border-t-transparent rounded-full animate-spin mb-3" />
+                  <p className="text-sm">Đang tải ảnh bằng chứng...</p>
+                </div>
+              ) : podData?.viewUrl ? (
+                <div className="space-y-4">
+                  <div className="relative overflow-hidden rounded-xl border border-zinc-200 dark:border-zinc-700 bg-zinc-950 flex items-center justify-center max-h-[380px]">
+                    <img
+                      src={podData.viewUrl}
+                      alt="Proof of Delivery"
+                      className="max-h-[360px] w-auto object-contain rounded-lg"
+                    />
+                  </div>
+
+                  <div className="rounded-xl bg-zinc-50 dark:bg-zinc-800/60 p-3.5 text-xs space-y-1.5">
+                    <div className="flex items-center justify-between">
+                      <span className="text-zinc-500 dark:text-zinc-400">Đơn hàng:</span>
+                      <span className="font-semibold text-zinc-900 dark:text-zinc-100">#{podData.orderId}</span>
+                    </div>
+                    {podData.deliveredAt && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-500 dark:text-zinc-400">Thời gian giao:</span>
+                        <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                          {new Date(podData.deliveredAt).toLocaleString('vi-VN')}
+                        </span>
+                      </div>
+                    )}
+                    {podData.driver && (
+                      <div className="flex items-center justify-between">
+                        <span className="text-zinc-500 dark:text-zinc-400">Tài xế:</span>
+                        <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                          {podData.driver.fullName} {podData.driver.phone ? `(${podData.driver.phone})` : ''}
+                        </span>
+                      </div>
+                    )}
+                    {podData.orderNote && (
+                      <div className="pt-1.5 border-t border-zinc-200/60 dark:border-zinc-700/60 text-zinc-600 dark:text-zinc-300 whitespace-pre-line">
+                        {podData.orderNote}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="flex items-center justify-between pt-2 text-[11px] text-zinc-500 dark:text-zinc-400">
+                    <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400 font-medium">
+                      <Check className="w-3.5 h-3.5" />
+                      Link xem an toàn (Private Storage)
+                    </span>
+                    <a
+                      href={podData.viewUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1 text-[#206588] dark:text-sky-400 hover:underline font-medium"
+                    >
+                      <ExternalLink className="w-3.5 h-3.5" />
+                      Mở ảnh gốc
+                    </a>
+                  </div>
+                </div>
+              ) : (
+                <div className="py-8 text-center text-sm text-zinc-500">
+                  Không có hình ảnh bằng chứng nào được ghi nhận.
+                </div>
+              )}
+            </div>
+
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setShowPodModal(false)}
+                className="rounded-lg bg-zinc-100 dark:bg-zinc-800 px-4 py-2 text-xs font-semibold text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 transition-colors cursor-pointer"
+              >
+                Đóng
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
     </div>
   );

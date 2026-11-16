@@ -4,20 +4,27 @@ import { ArrowRight, Camera, Check, CheckCircle2, Clock3, Loader2, MapPin, Packa
 import { useAuth } from '../../context/AuthContext';
 import { driversService, DriverDutyStatus, DriverShift, DeliveryFailureCode } from '../../services/drivers.service';
 import { mediaService } from '../../services/media.service';
-import { buildDeliveryPayload, canClaimDelivery, canRecordDelivery, cloudinaryEvidenceUrl, deliveryPaymentMethod, driverError, evidenceFileError, failureReasons, money } from '../../services/driver-workflow';
+import {
+  buildDeliveryPayload,
+  canClaimDelivery,
+  canRecordDelivery,
+  cloudinaryEvidenceUrl,
+  isValidPodEvidence,
+  deliveryPaymentMethod,
+  driverError,
+  evidenceFileError,
+  failureReasons,
+  money,
+  compressImageToWebP,
+  getDriverCoordinates,
+} from '../../services/driver-workflow';
 import { driverCard, driverInput, driverPrimary, driverSecondary, DriverDialog, DriverEntrance, DriverLoading, DriverNotice, DriverStatus } from './DriverWorkflowUI';
-const WarrantyPanel = typeof React?.lazy === 'function'
-  ? React.lazy(() => import('../../components/devices/WarrantyPanel').then(m => ({ default: m.WarrantyPanel })))
-  : (() => null);
-const DriverSuspense: React.FC<{ children: React.ReactNode }> = ({ children }) =>
-  typeof React?.Suspense === 'function' || React?.Suspense
-    ? <React.Suspense fallback={null}>{children}</React.Suspense>
-    : <>{children}</>;
 
 const paymentLabel = (order: any) => deliveryPaymentMethod(order) === 'COD' ? 'Thu tiền mặt' : 'Chuyển khoản';
 
 export const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'failed'; userId: string; role: string; onClose: () => void; onDone: (message: string) => Promise<void> }> = ({ order, mode, userId, role, onClose, onDone }) => {
   const [imageUrl, setImageUrl] = useState('');
+  const [previewUrl, setPreviewUrl] = useState('');
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
@@ -33,15 +40,56 @@ export const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'f
     const invalid = evidenceFileError(file);
     if (invalid) { setError(invalid); return; }
     lock.current = true;
-    setUploading(true); setError(''); setImageUrl('');
+    setUploading(true); setError(''); setImageUrl(''); setPreviewUrl('');
     try {
-      const response = await mediaService.uploadPodImage(file, order.id);
-      if (response?.success === false) throw new Error(response.message || 'Chưa tải được ảnh.');
-      const url = response?.data?.secureUrl || response?.data?.url;
-      if (!cloudinaryEvidenceUrl(url, String(order.storeId))) throw new Error('Chưa nhận được ảnh giao hàng hợp lệ. Vui lòng tải lại ảnh.');
-      if (alive.current) setImageUrl(url);
-    } catch (issue) { if (alive.current) setError(driverError(issue)); }
-    finally { lock.current = false; if (alive.current) setUploading(false); }
+      // Lấy tọa độ GPS thiết bị thực tế trước để đóng dấu Watermark vào ảnh
+      let gps: { latitude: number; longitude: number } | null = null;
+      try {
+        gps = await getDriverCoordinates();
+      } catch {}
+
+      // 1. Nén ảnh WebP trên trình duyệt (< 300KB) kèm Watermark định danh (Mã đơn, Giờ, GPS)
+      const compressed = await compressImageToWebP(file, 1200, 0.82, {
+        orderNumber: order.orderNumber,
+        orderId: order.id,
+        coordinates: gps,
+      });
+      const localPreview = URL.createObjectURL(compressed.blob);
+      if (alive.current) setPreviewUrl(localPreview);
+
+      // 2. Thử xin Presigned URL để Direct Upload lên Cloudflare R2 / AWS S3
+      let finalKeyOrUrl = '';
+      try {
+        const presigned = await mediaService.getPodPresignedUpload(order.id, 'image/webp');
+        if (presigned?.success && presigned?.data?.uploadUrl) {
+          const { uploadUrl, objectKey } = presigned.data;
+          if (uploadUrl.startsWith('http')) {
+            await mediaService.uploadDirectToStorage(uploadUrl, compressed.blob, 'image/webp');
+            finalKeyOrUrl = objectKey;
+          }
+        }
+      } catch (presignedErr) {
+        // Fallback to server multipart upload if presigned is not configured
+      }
+
+      // 3. Fallback sang multipart server nếu Direct Upload chưa cấu hình S3
+      if (!finalKeyOrUrl) {
+        const compressedFile = new File([compressed.blob], compressed.fileName, { type: 'image/webp' });
+        const response = await mediaService.uploadPodImage(compressedFile, order.id);
+        if (response?.success === false) throw new Error(response.message || 'Chưa tải được ảnh.');
+        finalKeyOrUrl = response?.data?.secureUrl || response?.data?.url;
+      }
+
+      if (!isValidPodEvidence(finalKeyOrUrl, String(order.storeId))) {
+        throw new Error('Chưa nhận được ảnh giao hàng hợp lệ. Vui lòng tải lại ảnh.');
+      }
+      if (alive.current) setImageUrl(finalKeyOrUrl);
+    } catch (issue) {
+      if (alive.current) setError(driverError(issue));
+    } finally {
+      lock.current = false;
+      if (alive.current) setUploading(false);
+    }
   };
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -50,12 +98,15 @@ export const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'f
     if (!imageUrl) { setError('Vui lòng chọn ảnh bằng chứng và đợi tải ảnh hoàn tất.'); return; }
     lock.current = true; setSaving(true);
     try {
+      // Lấy tọa độ GPS thiết bị thực tế
+      const gps = await getDriverCoordinates();
+
       // Re-read the order: payment or assignment may have changed while the form was open.
       const latest = await driversService.getOrder(order.id);
       if (!alive.current) return;
       if (!canRecordDelivery(latest, userId, role)) throw new Error('Đơn này đã thay đổi trạng thái hoặc người giao. Đóng hộp thoại và tải lại danh sách.');
       if (mode === 'delivered') {
-        const payload = buildDeliveryPayload(latest, imageUrl, amount, confirmed);
+        const payload = buildDeliveryPayload(latest, imageUrl, amount, confirmed, gps);
         await driversService.completeDelivery(order.id, payload);
       } else {
         await driversService.failDelivery(order.id, { failureReasonCode: reason, failureNote: note.trim() || undefined, evidenceImageUrl: imageUrl });
@@ -75,7 +126,7 @@ export const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'f
       </> : <><label className="block text-sm font-medium">Lý do<select value={reason} onChange={event => setReason(event.target.value as DeliveryFailureCode)} disabled={saving} className={driverInput}>{failureReasons.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label className="block text-sm font-medium">Ghi chú thêm <span className="font-normal text-zinc-400">(không bắt buộc)</span><textarea rows={3} maxLength={1000} value={note} onChange={event => setNote(event.target.value)} disabled={saving} className={driverInput} placeholder="Thông tin giúp cửa hàng hỗ trợ khách..." /></label></>}
       <div><p className="text-sm font-medium">Ảnh bằng chứng <span className="text-rose-600">*</span></p><label className={`mt-2 flex min-h-24 cursor-pointer items-center justify-center gap-3 rounded-xl border border-dashed border-zinc-300 p-4 text-sm text-zinc-600 dark:border-zinc-600 dark:text-zinc-300 ${saving || uploading ? 'pointer-events-none opacity-60' : 'hover:border-[#287DA8] hover:bg-sky-50/40 dark:hover:bg-sky-950/20'}`}>
         {uploading ? <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /> : <Camera className="h-5 w-5" />}<span>{uploading ? 'Đang tải ảnh...' : imageUrl ? 'Đổi ảnh bằng chứng' : 'Chụp hoặc chọn ảnh'}<small className="mt-1 block text-xs text-zinc-400">JPG, PNG, WEBP, GIF · tối đa 1,5 MB</small></span><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" capture="environment" disabled={saving || uploading} onChange={event => { const file = event.target.files?.[0] || null; event.target.value = ''; void upload(file); }} className="sr-only" />
-      </label>{imageUrl && <div className="mt-3 flex items-center gap-3"><img src={imageUrl} alt="Ảnh bằng chứng của đơn hàng" className="h-20 w-20 rounded-xl object-cover" /><span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400"><Check className="h-4 w-4" />Đã tải ảnh</span></div>}</div>
+      </label>{(previewUrl || imageUrl) && <div className="mt-3 flex items-center gap-3">{previewUrl || imageUrl.startsWith('http') ? <img src={previewUrl || imageUrl} alt="Ảnh bằng chứng của đơn hàng" className="h-20 w-20 rounded-xl object-cover" /> : null}<span className="inline-flex items-center gap-1 text-xs font-medium text-emerald-700 dark:text-emerald-400"><Check className="h-4 w-4" />Đã tải ảnh (WebP nén &lt; 300KB)</span></div>}</div>
       <div className="flex flex-wrap justify-end gap-2 border-t border-zinc-100 pt-4 dark:border-zinc-800"><button type="button" onClick={onClose} disabled={saving || uploading} className={driverSecondary}>Quay lại</button><button type="submit" disabled={saving || uploading || !imageUrl} className={driverPrimary}>{saving && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />}{saving ? 'Đang lưu kết quả...' : 'Xác nhận kết quả'}</button></div>
     </form>
   </DriverDialog>;
@@ -172,16 +223,6 @@ export const DriverDeliveryPage: React.FC = () => {
         {(tab === 'ready' ? readyCount : pages) > 1 && <div className="mt-5 flex flex-wrap items-center justify-between gap-2 border-t border-zinc-100 pt-4 text-sm dark:border-zinc-800"><span className="text-zinc-500">Trang {tab === 'ready' ? readyPage : page} / {tab === 'ready' ? readyCount : pages}</span><div className="flex gap-2"><button className={driverSecondary} disabled={loading || (tab === 'ready' ? readyPage : page) <= 1} onClick={() => tab === 'ready' ? setReadyPage(value => value - 1) : setPage(value => value - 1)}>Trước</button><button className={driverSecondary} disabled={loading || (tab === 'ready' ? readyPage >= readyCount : page >= pages)} onClick={() => tab === 'ready' ? setReadyPage(value => value + 1) : setPage(value => value + 1)}>Sau</button></div></div>}
       </section>
       <details className={driverCard} onToggle={event => setOnlineOpen(event.currentTarget.open)}><summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-200"><Users className="h-4 w-4 text-[#287DA8]" />Nhân viên đang sẵn sàng nhận đơn</summary>{onlineOpen && <div className="mt-4">{errors.online ? <DriverNotice>{errors.online}</DriverNotice> : loading ? <DriverLoading /> : online.length ? <ul className="grid gap-3 sm:grid-cols-2">{online.map(driver => <li key={driver.driverId} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-zinc-50 p-3 dark:bg-zinc-800/60"><span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{driver.fullName || `Nhân viên #${driver.driverId}`}</span>{driver.phone && <a className="text-sm text-[#287DA8]" href={`tel:${driver.phone.replace(/[^\d+]/g, '')}`}>{driver.phone}</a>}</li>)}</ul> : <p className="text-sm text-zinc-500">Chưa có nhân viên bật sẵn sàng nhận đơn.</p>}</div>}</details>
-      <section className={driverCard}>
-        <DriverSuspense>
-          <WarrantyPanel
-            mode="staff"
-            currentStoreId={storeId ? String(storeId) : undefined}
-            currentUserName={user?.fullName}
-            currentUserRole={role}
-          />
-        </DriverSuspense>
-      </section>
     </>}
     {claim && <DriverDialog title="Nhận giao đơn hàng" onClose={() => setClaim(null)} busy={busy}><p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">Bạn sẽ nhận giao đơn <strong className="text-zinc-900 dark:text-white">{claim.orderNumber || `#${claim.id}`}</strong> cho {claim.customerName || 'khách hàng'}. Đơn sẽ chuyển sang đang giao khi hệ thống xác nhận.</p>{errors.action && <div className="mt-3"><DriverNotice>{errors.action}</DriverNotice></div>}<div className="mt-5 flex justify-end gap-2"><button className={driverSecondary} disabled={busy} onClick={() => setClaim(null)}>Quay lại</button><button className={driverPrimary} disabled={busy} onClick={() => void run(() => driversService.claimOrder(claim.id), 'Đã nhận đơn. Bạn có thể theo dõi trong Đơn của tôi.').then(success => { if (success) { setTab('mine'); setFilter('SHIPPING'); setPage(1); } })}>{busy && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />}Xác nhận nhận đơn</button></div></DriverDialog>}
     {result && <DeliveryResultDialog order={result.order} mode={result.mode} userId={userId} role={role} onClose={() => setResult(null)} onDone={async message => { setResult(null); setNotice(message); await load(); }} />}

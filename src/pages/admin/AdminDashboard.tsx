@@ -738,7 +738,7 @@ export const AdminDashboard: React.FC = () => {
         api.get('/admin/stores'),
         api.get('/admin/users').catch(() => ({ data: { success: false, data: [] } })),
         api.get('/admin/plans').catch(() => ({ data: { success: false, data: [] } })),
-        api.get('/devices').catch(() => ({ data: { success: false, data: [] } })),
+        api.get('/devices?pageSize=100&limit=100').catch(() => ({ data: { success: false, data: [] } })),
       ]);
 
       if (adminRead.current !== request || (marker && typeof apiSessionMarker === 'function' && apiSessionMarker() !== marker)) return;
@@ -759,7 +759,13 @@ export const AdminDashboard: React.FC = () => {
       }
       if (unassignedRes.data.success) {
         const rawUnassigned = Array.isArray(unassignedRes.data.data) ? unassignedRes.data.data : [];
-        setUnassignedDevices(rawUnassigned.filter((d: any) => !d?.storeId && !d?.customerId));
+        setUnassignedDevices(
+          rawUnassigned.filter(
+            (d: any) =>
+              !d?.customerId &&
+              (d?.inventoryState === 'IN_PLATFORM_WAREHOUSE' || (!d?.custodyStoreId && !d?.storeId))
+          )
+        );
       }
       if (allDevicesRes?.data?.success && Array.isArray(allDevicesRes.data.data)) {
         setAllDevices(allDevicesRes.data.data);
@@ -1005,6 +1011,9 @@ export const AdminDashboard: React.FC = () => {
         )
       );
       toast.success(`Đã cập nhật vai trò người dùng thành ${newRole}`);
+      if (newRole === 'STORE_OWNER') {
+        void fetchAdminData();
+      }
     } catch (_) {}
   };
 
@@ -1693,17 +1702,69 @@ export const AdminDashboard: React.FC = () => {
                   value={deviceStoreFilter}
                   onChange={(e) => setDeviceStoreFilter(e.target.value)}
                   aria-label="Lọc nút theo cửa hàng"
-                  className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#0E6BA8]"
+                  className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#0E6BA8] max-w-md"
                 >
-                  <option value="ALL">Tất cả cửa hàng</option>
-                  {allStores.map((store) => (
-                    <option key={String(store.id || store.storeId)} value={String(store.id || store.storeId)}>
-                      {store.name || store.storeName} ({store.code || store.storeCode || `#${store.id || store.storeId}`})
-                    </option>
-                  ))}
+                  <option value="ALL">Tất cả cửa hàng ({allDevices.filter((d) => Boolean(d?.storeId)).length} nút)</option>
+                  {allStores.map((store) => {
+                    const sid = String(store.id || store.storeId);
+                    const storeDevs = allDevices.filter((d) => String(d?.storeId || '') === sid);
+                    const codesPreview = storeDevs.slice(0, 3).map((d) => d.deviceId).join(', ');
+                    const suffix = storeDevs.length > 0
+                      ? ` — ${storeDevs.length} nút (${codesPreview}${storeDevs.length > 3 ? ', ...' : ''})`
+                      : ' — 0 nút';
+                    return (
+                      <option key={sid} value={sid}>
+                        {store.name || store.storeName} ({store.code || store.storeCode || `#${sid}`}){suffix}
+                      </option>
+                    );
+                  })}
                 </select>
               </div>
             </div>
+
+            {(() => {
+              const storeBuckets = new Map<string, { storeId: string; storeName: string; storeCode: string; devices: any[] }>();
+              for (const d of allDevices) {
+                if (!d?.storeId) continue;
+                const sid = String(d.storeId);
+                const matchedStore = allStores.find((s) => String(s.id || s.storeId) === sid);
+                const storeName = d.store?.storeName || d.store?.name || matchedStore?.name || `Cửa hàng #${sid}`;
+                const storeCode = matchedStore?.code || matchedStore?.storeCode || '';
+                if (!storeBuckets.has(sid)) {
+                  storeBuckets.set(sid, { storeId: sid, storeName, storeCode, devices: [] });
+                }
+                storeBuckets.get(sid)!.devices.push(d);
+              }
+              const buckets = Array.from(storeBuckets.values());
+              if (buckets.length === 0) return null;
+              return (
+                <div className="flex flex-wrap gap-1.5">
+                  {buckets.map((b) => {
+                    const isActive = deviceStoreFilter === b.storeId;
+                    const availableCount = b.devices.filter((d) => !d.customerId).length;
+                    return (
+                      <button
+                        key={b.storeId}
+                        type="button"
+                        onClick={() => setDeviceStoreFilter(isActive ? 'ALL' : b.storeId)}
+                        title={`${b.storeName} (${b.storeCode || `#${b.storeId}`}): ${b.devices.map((d) => d.deviceId).join(', ')}`}
+                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] transition-all cursor-pointer ${
+                          isActive
+                            ? 'border-[#0E6BA8] bg-sky-50 text-[#0E6BA8] dark:bg-sky-950/40 dark:text-sky-300 font-semibold'
+                            : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/50 text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
+                        }`}
+                      >
+                        <span className="max-w-[180px] truncate font-medium">{b.storeName}</span>
+                        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold bg-sky-100 dark:bg-sky-950/60 text-[#0E6BA8] dark:text-sky-300">
+                          {b.devices.length} nút
+                        </span>
+                        <span className="text-[10px] text-zinc-400">({availableCount} trống)</span>
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            })()}
 
             {(() => {
               const allocatedList = allDevices
@@ -1730,11 +1791,36 @@ export const AdminDashboard: React.FC = () => {
                 );
               }
 
+              const visibleAllocated = allocatedList.slice(0, 100);
+              const selectableIds = visibleAllocated.filter((d) => !d.customerId).map((d) => d.deviceId);
+              const allAllocatedSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedDeviceIds.includes(id));
+
               return (
                 <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
                   <table className="w-full text-left text-xs">
                     <thead className="bg-zinc-50 dark:bg-zinc-900/60 text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
                       <tr>
+                        <th scope="col" className="py-2.5 px-3 w-10">
+                          <button
+                            type="button"
+                            aria-label="Chọn tất cả nút chưa gắn khách"
+                            disabled={selectableIds.length === 0}
+                            onClick={() => {
+                              if (allAllocatedSelected) {
+                                setSelectedDeviceIds((prev) => prev.filter((id) => !selectableIds.includes(id)));
+                              } else {
+                                setSelectedDeviceIds((prev) => Array.from(new Set([...prev, ...selectableIds])));
+                              }
+                            }}
+                            className="flex items-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {allAllocatedSelected ? (
+                              <CheckSquare className="w-4 h-4 text-[#0E6BA8]" />
+                            ) : (
+                              <Square className="w-4 h-4 text-zinc-500" />
+                            )}
+                          </button>
+                        </th>
                         <th className="py-2.5 px-3 font-medium">Mã Thiết Bị</th>
                         <th className="py-2.5 px-3 font-medium">Cửa Hàng Đang Giữ</th>
                         <th className="py-2.5 px-3 font-medium">Khách Hàng</th>
@@ -1743,16 +1829,42 @@ export const AdminDashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
-                      {allocatedList.slice(0, 100).map((dev) => {
+                      {visibleAllocated.map((dev) => {
                         const matchedStore = allStores.find((s) => String(s.id || s.storeId) === String(dev.storeId));
                         const storeName = dev.store?.storeName || dev.store?.name || matchedStore?.name || `Cửa hàng #${dev.storeId}`;
                         const storeCode = matchedStore?.code || matchedStore?.storeCode || '';
+                        const canSelect = !dev.customerId;
+                        const isSelected = selectedDeviceIds.includes(dev.deviceId);
                         return (
-                          <tr key={dev.id || dev.deviceId} className="hover:bg-zinc-50 dark:hover:bg-zinc-850/40">
+                          <tr
+                            key={dev.id || dev.deviceId}
+                            className={`transition-colors ${isSelected ? 'bg-sky-50/60 dark:bg-sky-950/20' : 'hover:bg-zinc-50 dark:hover:bg-zinc-850/40'}`}
+                          >
+                            <td className="py-2.5 px-3">
+                              <button
+                                type="button"
+                                disabled={!canSelect}
+                                onClick={() => toggleDeviceSelect(dev.deviceId)}
+                                aria-label={`Chọn nút ${dev.deviceId}`}
+                                title={canSelect ? 'Tick chọn để giao cho cửa hàng' : 'Nút đã gắn khách hàng, không thể giao lại'}
+                                className="flex items-center cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                              >
+                                {isSelected ? (
+                                  <CheckSquare className="w-4 h-4 text-[#0E6BA8]" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-zinc-500" />
+                                )}
+                              </button>
+                            </td>
                             <td className="py-2.5 px-3 font-semibold text-zinc-900 dark:text-white">
                               <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-xs">
                                 {dev.deviceId}
                               </span>
+                              {dev.buttonCode && (
+                                <div className="mt-1 text-[10px] font-mono font-normal text-zinc-500 dark:text-zinc-400">
+                                  {dev.buttonCode}
+                                </div>
+                              )}
                             </td>
                             <td className="py-2.5 px-3 text-zinc-800 dark:text-zinc-200">
                               <span className="font-medium">{storeName}</span>

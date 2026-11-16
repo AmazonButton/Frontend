@@ -3,11 +3,14 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
-import { assertShiftCanClose, buildDeliveryPayload, canClaimDelivery, canConfirmHandover, canRecordDelivery, cloudinaryEvidenceUrl, evidenceFileError, failureReasons, validateFailurePayload } from '../src/services/driver-workflow.ts';
 
 const require = createRequire(import.meta.url);
 const ts = require('typescript');
-const helper = require('../src/services/driver-workflow.ts');
+const helperCode = ts.transpileModule(readFileSync(new URL('../src/services/driver-workflow.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }).outputText;
+const helperModule = { exports: {} };
+vm.runInNewContext(helperCode, { module: helperModule, exports: helperModule.exports, Object, Array, String, Number, Boolean, Date, Math, RegExp, Error, URL, document: { createElement: () => ({ getContext: () => null }) }, window: {}, navigator: {} });
+const helper = helperModule.exports;
+const { assertShiftCanClose, buildDeliveryPayload, canClaimDelivery, canConfirmHandover, canRecordDelivery, cloudinaryEvidenceUrl, evidenceFileError, failureReasons, validateFailurePayload } = helper;
 const code = ts.transpileModule(readFileSync(new URL('../src/services/drivers.service.ts', import.meta.url), 'utf8'), { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS } }).outputText;
 const image = 'https://res.cloudinary.com/test/image/upload/v123/stores/9/pod/delivery-test.jpg';
 const order = { id: '601', storeId: '9', status: 'READY_FOR_DELIVERY', assignedDriverId: null, totalAmount: 120000, paymentMethod: 'COD', paymentStatus: 'UNPAID', customerName: 'Test recipient', deliveryAddress: 'Test destination' };
@@ -96,7 +99,7 @@ test('the ready queue excludes already assigned and changed orders', async () =>
 
 test('COD completion requires an uploaded image and explicit exact cash confirmation', () => {
   const payload = buildDeliveryPayload(order, image, '120000', true);
-  assert.deepEqual(payload, { status: 'DELIVERED', paymentMethod: 'COD', podImageUrl: image, collectedAmount: 120000 });
+  assert.deepEqual(JSON.parse(JSON.stringify(payload)), { status: 'DELIVERED', paymentMethod: 'COD', podImageUrl: image, collectedAmount: 120000 });
   assert.throws(() => buildDeliveryPayload(order, image, '119000', true));
   assert.throws(() => buildDeliveryPayload(order, image, '120000', false));
   assert.throws(() => buildDeliveryPayload(order, '', '120000', true));
@@ -210,15 +213,18 @@ function resultDialogHarness(latestOrder = { ...order, status: 'SHIPPING', assig
   const module = { exports: {} };
   const source = readFileSync(new URL('../src/pages/operations/DriverDeliveryPage.tsx', import.meta.url), 'utf8');
   vm.runInNewContext(ts.transpileModule(source, { compilerOptions: { target: ts.ScriptTarget.ES2020, module: ts.ModuleKind.CommonJS, jsx: ts.JsxEmit.ReactJSX } }).outputText, {
-    exports: module.exports, require(name) {
+    exports: module.exports,
+    URL: { createObjectURL: () => 'blob:mock' },
+    File: class MockFile { constructor(parts, name, opts) { this.parts = parts; this.name = name; this.opts = opts; } },
+    require(name) {
       if (name === 'react') return react;
       if (name === 'react/jsx-runtime') return { jsx, jsxs: jsx };
       if (name === 'react-router-dom') return { Link: 'a' };
       if (name === 'lucide-react') return new Proxy({}, { get: (_, key) => `icon.${String(key)}` });
       if (name.endsWith('/AuthContext')) return {};
       if (name.endsWith('/drivers.service')) return { driversService: serviceApp.service };
-      if (name.endsWith('/driver-workflow')) return helper;
-      if (name.endsWith('/media.service')) return { mediaService: { uploadPodImage: async (file, id) => { uploads.push({ file, id }); return { success: true, data: { secureUrl: image } }; } } };
+      if (name.endsWith('/driver-workflow')) return { ...helper, compressImageToWebP: async (file) => ({ blob: file, fileName: 'mock.webp' }), getDriverCoordinates: async () => null };
+      if (name.endsWith('/media.service')) return { mediaService: { getPodPresignedUpload: async () => ({ success: false }), uploadPodImage: async (file, id) => { uploads.push({ file, id }); return { success: true, data: { secureUrl: image } }; } } };
       if (name.endsWith('/DriverWorkflowUI')) return { DriverDialog: 'dialog', DriverNotice: 'notice', driverInput: 'input', driverPrimary: 'primary', driverSecondary: 'secondary' };
       throw new Error(`Unexpected dialog import ${name}`);
     },

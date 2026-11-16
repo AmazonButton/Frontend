@@ -64,7 +64,7 @@ export const StorePlanPayosPayment: React.FC<{
       const returnUrl = `${window.location.origin}/store/service-plans`;
       save({ planId: selected.planId });
       dispatched = true;
-      const result = await flow.createPayosCharge(returnUrl, returnUrl);
+      const result = await flow.createPayosCharge(returnUrl, returnUrl, selected.planId);
       if (!alive.current) return;
       save({ ...result, planId: selected.planId }); setStatus(null);
     } catch (error) { if (alive.current) { if (!dispatched) { save(null); onOutstandingChange(null); } setError(financeError(error)); } }

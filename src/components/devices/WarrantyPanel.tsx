@@ -6,7 +6,12 @@ import { toast } from '../../context/ToastContext';
 import {
   WARRANTY_GROUPS,
   calculateWarrantyDeduction,
-  createWarrantyTicket,
+  fetchWarrantyTickets,
+  createWarrantyTicketAsync,
+  approveSwapTicketAsync,
+  lockDeviceTicketAsync,
+  resolveTicketAsync,
+  rejectTicketAsync,
   loadWarrantyTickets,
   updateWarrantyTicket,
   type WarrantyFaultGroup,
@@ -75,33 +80,62 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
   const [realtimeAlerts, setRealtimeAlerts] = useState<DeviceFaultAlert[]>([]);
   const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
 
+  // Tải danh sách phiếu bảo hành từ Backend API
+  const refreshTickets = async () => {
+    try {
+      const list = await fetchWarrantyTickets(
+        mode === 'staff' && currentStoreId ? { storeId: currentStoreId } : undefined
+      );
+      setTickets(list);
+    } catch {
+      // Fallback local handled inside fetchWarrantyTickets
+    }
+  };
+
   useEffect(() => {
-    if (mode !== 'admin') return;
+    refreshTickets();
+  }, [mode, currentStoreId]);
+
+  useEffect(() => {
     const socket = getSocket();
     if (!socket) return;
 
     const handleFaultAlert = (payload: any) => {
       if (!payload?.deviceId) return;
       const alert: DeviceFaultAlert = {
-        id: payload.id || `rt-${payload.deviceId}-${payload.faultCode || 'FAULT'}`,
+        id: payload.id || `rt-${payload.deviceId}-${payload.faultCode || payload.faultType || 'FAULT'}-${Date.now()}`,
         deviceId: String(payload.deviceId),
         buttonName: payload.buttonName,
         storeName: payload.storeName,
-        faultCode: payload.faultCode || 'HARDWARE_FAULT',
+        faultCode: payload.faultCode || payload.faultType || 'HARDWARE_FAULT',
         faultGroup: payload.faultGroup === 'GROUP_B' ? 'GROUP_B' : 'GROUP_A',
         batteryLevel: payload.batteryLevel,
-        message: payload.message || `Nút ${payload.deviceId} vừa gửi cảnh báo lỗi (${payload.faultCode || 'FAULT'}).`,
+        message: payload.message || `Nút ${payload.deviceId} vừa gửi cảnh báo lỗi (${payload.faultCode || payload.faultType || 'FAULT'}).`,
         createdAt: payload.createdAt || new Date().toISOString(),
       };
       setRealtimeAlerts((prev) => [alert, ...prev.filter((a) => a.deviceId !== alert.deviceId || a.faultCode !== alert.faultCode)]);
       toast.warning(alert.message, { title: 'Cảnh báo từ nút bấm', duration: 6000 });
     };
 
+    const handleTicketCreated = (payload: any) => {
+      refreshTickets();
+      toast.info(`Có phiếu bảo hành mới #${payload?.ticketCode || ''}.`);
+    };
+
+    const handleTicketUpdated = () => {
+      refreshTickets();
+    };
+
     socket.on('DEVICE_FAULT_ALERT', handleFaultAlert);
+    socket.on('WARRANTY_TICKET_CREATED', handleTicketCreated);
+    socket.on('WARRANTY_TICKET_UPDATED', handleTicketUpdated);
+
     return () => {
       socket.off('DEVICE_FAULT_ALERT', handleFaultAlert);
+      socket.off('WARRANTY_TICKET_CREATED', handleTicketCreated);
+      socket.off('WARRANTY_TICKET_UPDATED', handleTicketUpdated);
     };
-  }, [mode]);
+  }, [mode, currentStoreId]);
 
   const deviceFaultAlerts = useMemo<DeviceFaultAlert[]>(() => {
     if (mode !== 'admin') return [];
@@ -197,7 +231,7 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
     }
   };
 
-  const handleCreateTicket = (e: React.FormEvent) => {
+  const handleCreateTicket = async (e: React.FormEvent) => {
     e.preventDefault();
     const cleanId = deviceIdInput.trim().toUpperCase();
     if (!cleanId) {
@@ -214,23 +248,30 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
       matchedStore?.name ||
       matchedStore?.storeName;
 
-    createWarrantyTicket({
-      deviceId: cleanId,
-      storeId: resolvedStoreId,
-      storeName: resolvedStoreName,
-      faultGroup,
-      faultCode,
-      depositAmount,
-      deductionPercent,
-      inspectionNote,
-      reportedBy: currentUserName || (mode === 'admin' ? 'Admin' : 'Nhân viên cửa hàng'),
-      reportedRole: currentUserRole || (mode === 'admin' ? 'ADMIN' : 'STAFF'),
-    });
-    setTickets(loadWarrantyTickets());
-    setShowCreateForm(false);
-    setDeviceIdInput('');
-    setInspectionNote('');
-    toast.success(`Đã lập phiếu bảo hành cho nút ${cleanId} (${activeGroup.shortLabel}).`);
+    setBusyId('CREATE_NEW');
+    try {
+      const created = await createWarrantyTicketAsync({
+        deviceId: cleanId,
+        storeId: resolvedStoreId,
+        storeName: resolvedStoreName,
+        faultGroup,
+        faultCode,
+        depositAmount,
+        deductionPercent,
+        inspectionNote,
+        reportedBy: currentUserName || (mode === 'admin' ? 'Admin' : 'Nhân viên cửa hàng'),
+        reportedRole: currentUserRole || (mode === 'admin' ? 'ADMIN' : 'STAFF'),
+      });
+      setTickets((prev) => [created, ...prev.filter((t) => t.id !== created.id)]);
+      setShowCreateForm(false);
+      setDeviceIdInput('');
+      setInspectionNote('');
+      toast.success(`Đã lập phiếu bảo hành #${created.id} cho nút ${cleanId} (${activeGroup.shortLabel}).`);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Không thể tạo phiếu bảo hành.');
+    } finally {
+      setBusyId(null);
+    }
   };
 
   const handleAdminAction = async (
@@ -238,6 +279,7 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
     action: 'APPROVE_SWAP' | 'LOCK_DEVICE' | 'EXTEND_WARRANTY' | 'CHILD_LOCK_2S' | 'SEND_WARNING' | 'RESOLVE' | 'REJECT'
   ) => {
     setBusyId(ticket.id);
+    const targetId = ticket.ticketId || ticket.id;
     try {
       const encodedId = encodeURIComponent(ticket.deviceId);
       if (action === 'SEND_WARNING') {
@@ -252,30 +294,64 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
         setTickets(updateWarrantyTicket(ticket.id, { adminNote: msg }));
         toast.success(msg);
       } else if (action === 'APPROVE_SWAP') {
-        await api.post(`/devices/${encodedId}/factory-reset`).catch(() => null);
-        setTickets(updateWarrantyTicket(ticket.id, { status: 'APPROVED_SWAP', adminNote: 'Đã duyệt đổi mới 1-1 & thu hồi nút lỗi về kho.' }));
+        try {
+          const updated = await approveSwapTicketAsync(targetId, {
+            adminNote: 'Đã duyệt đổi mới 1-1 & thu hồi nút lỗi về kho.',
+          });
+          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
+        } catch {
+          await api.post(`/devices/${encodedId}/factory-reset`).catch(() => null);
+          setTickets(updateWarrantyTicket(ticket.id, { status: 'APPROVED_SWAP', adminNote: 'Đã duyệt đổi mới 1-1 & thu hồi nút lỗi về kho.' }));
+        }
         toast.success(`Đã duyệt đổi 1-1 cho nút ${ticket.deviceId}.`);
         onRefreshDevices?.();
       } else if (action === 'LOCK_DEVICE') {
-        await api.patch(`/devices/${encodedId}`, { status: 'DISABLED' }).catch(() => null);
-        setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED', adminNote: 'Đã khóa nút hỏng/mất (DISABLED).' }));
+        try {
+          const updated = await lockDeviceTicketAsync(targetId, {
+            adminNote: 'Đã khóa nút hỏng/mất (DISABLED).',
+          });
+          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
+        } catch {
+          await api.patch(`/devices/${encodedId}`, { status: 'DISABLED' }).catch(() => null);
+          setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED', adminNote: 'Đã khóa nút hỏng/mất (DISABLED).' }));
+        }
         toast.success(`Đã khóa nút ${ticket.deviceId} và chốt phiếu.`);
         onRefreshDevices?.();
       } else if (action === 'EXTEND_WARRANTY') {
         await api.patch(`/devices/${encodedId}/extend-warranty`, { months: 6 });
-        setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED', adminNote: 'Đã gia hạn bảo hành +6 tháng.' }));
+        try {
+          const updated = await resolveTicketAsync(targetId, { adminNote: 'Đã gia hạn bảo hành +6 tháng.' });
+          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
+        } catch {
+          setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED', adminNote: 'Đã gia hạn bảo hành +6 tháng.' }));
+        }
         toast.success(`Đã gia hạn bảo hành +6 tháng cho nút ${ticket.deviceId}.`);
         onRefreshDevices?.();
       } else if (action === 'CHILD_LOCK_2S') {
         await api.patch(`/devices/${encodedId}`, { holdDurationMs: 2000 }).catch(() => null);
-        setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED', adminNote: 'Đã bật chế độ chống bấm nhầm (nhấn giữ 2s).' }));
+        try {
+          const updated = await resolveTicketAsync(targetId, { adminNote: 'Đã bật chế độ chống bấm nhầm (nhấn giữ 2s).' });
+          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
+        } catch {
+          setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED', adminNote: 'Đã bật chế độ chống bấm nhầm (nhấn giữ 2s).' }));
+        }
         toast.success(`Đã bật giữ nút 2 giây chống trẻ em bấm phá cho ${ticket.deviceId}.`);
         onRefreshDevices?.();
       } else if (action === 'RESOLVE') {
-        setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED' }));
+        try {
+          const updated = await resolveTicketAsync(targetId, { adminNote: 'Đã hoàn tất phiếu.' });
+          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
+        } catch {
+          setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED' }));
+        }
         toast.success(`Đã hoàn tất phiếu ${ticket.id}.`);
       } else if (action === 'REJECT') {
-        setTickets(updateWarrantyTicket(ticket.id, { status: 'REJECTED' }));
+        try {
+          const updated = await rejectTicketAsync(targetId, { adminNote: 'Đã từ chối phiếu.' });
+          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
+        } catch {
+          setTickets(updateWarrantyTicket(ticket.id, { status: 'REJECTED' }));
+        }
         toast.info(`Đã từ chối phiếu ${ticket.id}.`);
       }
     } catch (err: any) {
