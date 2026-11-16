@@ -95,6 +95,7 @@ function screen(prefix,{post,get,storage=new Map(),component='page'}={}) {
     async flush(){for(let n=0;n<45;n++){if(dirty){cursor=0;dirty=false;tree=component==='page'?exports.StoreServicePlansWorkspace({scope:'7:12',storeId:'12'}):component==='history'?exports.StoreRegisteredPeriods({storeId:'12',refreshKey:0}):exports.StorePlanPayosPayment({scope:'7:12',storeId:'12',selected:plan,catalog:[plan],disabled:false,isWalletBusy:()=>false,onOutstandingChange:id=>outstanding.push(id),onConfirmed:()=>confirmations++});const jobs=effects;effects=[];jobs.forEach(fn=>fn());}await Promise.resolve();}},
     button(label){const node=walk(tree).find(n=>n.type==='button'&&text(n)===label);assert.ok(node,`Missing button ${label}`);return node;},
     async click(label){const node=this.button(label);assert.ok(!node.props.disabled);await node.props.onClick();await this.flush();},
+    async tick(){for(const fn of [...timers.values()])fn();await this.flush();},
     unmount(){slots.forEach(s=>s.cleanup?.());},
   };return app;
 }
@@ -105,6 +106,20 @@ for(const prefix of ['../src/','../frontend/src/']) {
     assert.match(app.text,/Chọn gói cho gian hàng/);assert.match(app.text,/Số dư ví cửa hàng/);
     assert.doesNotMatch(app.text,/Gói hiện tại|Các kỳ gói đã đăng ký|Lịch sử xác minh/);
     assert.equal(app.calls.some(call=>call.path==='/store/subscriptions'),false);app.unmount();
+  });
+  test(`${prefix}catalog updates while open and closes a paused selection`,async()=>{
+    let catalog=[plan];
+    const app=screen(prefix,{get:path=>path.endsWith('/plans')?ok(catalog):undefined});
+    await app.flush();
+    app.nodes.find(n=>n.type==='article').props.children.flat(Infinity).find(n=>n?.type==='button').props.onClick();
+    await app.flush();
+    assert.ok(app.nodes.some(n=>n.props?.id==='confirm-service-plan'));
+    catalog=[{...plan,planId:'2',planName:'New plan',price:2000}];
+    await app.tick();assert.match(app.text,/New plan/);
+    assert.equal(app.nodes.some(n=>n.props?.id==='confirm-service-plan'),false);
+    assert.equal(app.nodes.filter(n=>n.type==='article').length,1);
+    catalog=[];await app.tick();assert.equal(app.nodes.filter(n=>n.type==='article').length,0);
+    app.unmount();const reads=app.calls.length;await app.tick();assert.equal(app.calls.length,reads);
   });
   test(`${prefix}registered periods retain pagination and reject rows belonging to another store`,async()=>{
     let wrong=false;

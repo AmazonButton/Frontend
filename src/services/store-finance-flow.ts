@@ -27,6 +27,7 @@ export interface FinanceVerification {
   accountName: string;
   amount: number;
   referenceCode: string;
+  transferDescription?: string;
   expiresAt: string;
   instructions: string;
   recipientBankBin?: string;
@@ -110,12 +111,30 @@ export function financeVerificationKey(userId: string, storeId: string) {
   return `smart_order_bank_verification:${userId}:${storeId}`;
 }
 
+// Backend permits PayOS store-bank callbacks only at /store/wallet.
+export function storeBankReturnUrls(origin?: string) {
+  if (!origin) return {};
+  const url = new URL(origin);
+  if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.origin !== origin) {
+    throw new Error('Địa chỉ quay về sau thanh toán không hợp lệ.');
+  }
+  return { returnUrl: `${origin}/store/wallet?bank_verification=return`, cancelUrl: `${origin}/store/wallet?bank_verification=cancel` };
+}
+
+export function storeWalletRedirect(search: string) {
+  const result = new URLSearchParams(search).get('bank_verification');
+  return result === 'return' || result === 'cancel'
+    ? `/store/finance?bank_verification=${result}#store-bank-accounts`
+    : '/store/analytics?tab=WALLET';
+}
+
 export function readFinanceVerification(value: string | null): FinanceVerification | null {
   if (!value) return null;
   try {
     const request = JSON.parse(value);
     if (!request || !/^[1-9]\d*$/.test(request.verificationId) || !/^[1-9]\d*$/.test(request.bankAccountId)
       || !Number.isFinite(request.amount) || request.amount <= 0 || !Number.isFinite(Date.parse(request.expiresAt))
+      || (request.transferDescription != null && (typeof request.transferDescription !== 'string' || !request.transferDescription.trim()))
       || !['bankName', 'accountNumberMasked', 'accountName', 'referenceCode', 'instructions'].every(key => typeof request[key] === 'string')) return null;
     return request;
   } catch { return null; }
@@ -142,8 +161,10 @@ export function createStoreFinanceFlow(transport: FinanceTransport) {
       if (!result?.accountName || result.bankBin !== bankBin) throw new Error('Chưa xác nhận được tên chủ tài khoản. Vui lòng kiểm tra lại.');
       return result;
     },
-    async verify(storeId: string, bankBin: string, accountNumber: string, accountName?: string) {
-      const result = financeData<FinanceVerification>(await transport.post('/stores/bank-accounts/verification', bankVerificationPayload(storeId, bankBin, accountNumber, accountName)));
+    async verify(storeId: string, bankBin: string, accountNumber: string, accountName?: string, frontendOrigin?: string) {
+      const result = financeData<FinanceVerification>(await transport.post('/stores/bank-accounts/verification', {
+        ...bankVerificationPayload(storeId, bankBin, accountNumber, accountName), ...storeBankReturnUrls(frontendOrigin),
+      }));
       const validated = readFinanceVerification(JSON.stringify(result));
       if (!validated) throw new Error('Yêu cầu đã gửi nhưng thông tin hướng dẫn chưa đầy đủ. Hãy tải lại tài khoản trước khi thử lại.');
       return validated;

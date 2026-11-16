@@ -168,3 +168,4 @@ Phía Frontend ([buttontdash.vercel.app](https://buttontdash.vercel.app/)) hiệ
 1. **Đã tích hợp Modal Quét mã VietQR tại chỗ (`PayOSOrderQrModal`)**: Không còn bị chuyển hướng rời khỏi trang, hiển thị đúng mã QR, đếm ngược thời gian, và nhận diện tức thì khi có thanh toán.
 2. **Đã hỗ trợ hiển thị từng đơn nhiều sản phẩm**: Khi khách mua nhiều sản phẩm từ 1 cửa hàng, số tiền được gom chuẩn 100% lên mã QR.
 3. **Đã chuẩn bị sẵn giao diện thanh toán từng đơn trong giỏ hàng nhiều cửa hàng**: Nếu có nhiều cửa hàng, khách có thể ấn nút "Quét mã QR PayOS" trên từng đơn để thanh toán ngay trên màn hình. Ngay khi backend có API `create-batch-link`, Frontend sẽ chuyển sang hiển thị 1 mã QR gộp duy nhất.
+

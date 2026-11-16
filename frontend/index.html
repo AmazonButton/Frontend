@@ -18,20 +18,21 @@
     <div id="modal-root"></div>
     <script type="module" src="/src/main.tsx"></script>
     <script>
-      // Clean up any stale Service Workers and browser caches across all environments
+      // Retire only the old offline shell; preserve Firebase notification workers.
       if ('serviceWorker' in navigator) {
         navigator.serviceWorker.getRegistrations().then((registrations) => {
           for (const registration of registrations) {
-            registration.unregister();
+            const script = registration.active || registration.waiting || registration.installing;
+            if (script && new URL(script.scriptURL).pathname === '/sw.js') registration.unregister().catch(() => {});
           }
-        });
+        }).catch(() => {});
       }
       if ('caches' in window) {
         caches.keys().then((names) => {
           for (const name of names) {
-            caches.delete(name);
+            if (name.startsWith('smart-order-cache-')) caches.delete(name).catch(() => {});
           }
-        });
+        }).catch(() => {});
       }
     </script>
   </body>

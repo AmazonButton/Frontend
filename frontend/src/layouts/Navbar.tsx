@@ -212,6 +212,17 @@ export const Navbar: React.FC = () => {
         <div className="flex items-center gap-2 sm:gap-3">
           {user ? (
             <div ref={userMenuRef} className="flex items-center gap-1.5 sm:gap-2">
+              {isCustomer && location.pathname !== '/shop' && (
+                <Link
+                  to="/shop"
+                  aria-label="Không gian mua sắm"
+                  className="inline-flex min-h-10 shrink-0 items-center gap-1.5 rounded-lg bg-[#287DA8] px-2.5 text-xs font-semibold text-white transition-colors hover:bg-[#206588] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287DA8] focus-visible:ring-offset-2 dark:focus-visible:ring-offset-zinc-900"
+                >
+                  <ShoppingCart aria-hidden="true" className="h-4 w-4" />
+                  <span className="sm:hidden">Mua sắm</span>
+                  <span className="hidden sm:inline">Không gian mua sắm</span>
+                </Link>
+              )}
               {user.role === 'STORE_OWNER' && location.pathname !== '/store/dashboard' && (
                 <Link
                   to="/store/dashboard"
@@ -314,6 +325,15 @@ export const Navbar: React.FC = () => {
                           <UserIcon className="w-3.5 h-3.5" />
                           {isStoreUser ? 'Hồ sơ cửa hàng' : 'Hồ sơ của tôi'}
                         </Link>
+                        {isCustomer && <Link
+                          role="menuitem"
+                          to="/customer/become-store-owner"
+                          onClick={() => setUserMenuOpen(false)}
+                          className="flex min-h-10 items-center gap-2 rounded-lg px-3 text-xs font-semibold text-[#287DA8] hover:bg-sky-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287DA8] dark:text-sky-300 dark:hover:bg-sky-950/30"
+                        >
+                          <Store aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                          Trở thành chủ cửa hàng
+                        </Link>}
 
                       </div>
 

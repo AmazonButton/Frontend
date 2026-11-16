@@ -9,6 +9,7 @@ import { createStorePlanFlow, type StoreServicePlan, type StorePlanSubscription 
 import { subscriptionDateLabel, subscriptionMoney } from '../../services/store-subscription-overview';
 import { BankError, bankButton } from '../../components/common/BankingPrimitives';
 import { card, primaryButton } from '../operations/OperationPrimitives';
+import { getApiRetryUntil } from '../../services/request-backoff';
 import { StorePlanPayosPayment } from '../../components/store/StorePlanPayosPayment';
 
 const flow = createStorePlanFlow(api);
@@ -49,11 +50,15 @@ export const StoreServicePlansWorkspace: React.FC<{ scope: string; storeId: stri
     pendingRef.current = value; setPending(value);
     try { if (value) sessionStorage.setItem(storageKey, JSON.stringify(value)); else sessionStorage.removeItem(storageKey); } catch { /* In-memory duplicate protection still applies. */ }
   };
-  const loadPlans = useCallback(async () => {
-    setPlansLoading(true);
-    try { const list = await flow.plans(); if (alive.current) { setPlans(list); setPlansError(''); } }
+  const plansRequest = useRef(false);
+  const loadPlans = useCallback(async (background = false) => {
+    if (plansRequest.current) return;
+    plansRequest.current = true;
+    if (!background) setPlansLoading(true);
+    try { const list = await flow.plans(); if (alive.current) { setPlans(list); setPlansError('');
+      if (!busyRef.current && !pendingRef.current && !payosOutstandingRef.current) setSelected(previous => previous && !list.some(plan => plan.planId === previous.planId) ? null : previous); } }
     catch (error) { if (alive.current) setPlansError(financeError(error)); }
-    finally { if (alive.current) setPlansLoading(false); }
+    finally { plansRequest.current = false; if (alive.current && !background) setPlansLoading(false); }
   }, []);
   const loadCurrent = useCallback(async () => {
     if (!storeId) { setCurrentLoading(false); setCurrentError('Chưa xác định được cửa hàng liên kết.'); return; }
@@ -71,6 +76,19 @@ export const StoreServicePlansWorkspace: React.FC<{ scope: string; storeId: stri
     } catch (error) { if (alive.current) { setBalance(null); setWalletError(financeError(error)); } }
   }, [storeId]);
   useEffect(() => { void loadPlans(); void loadCurrent(); void loadWallet(); }, [loadPlans, loadCurrent, loadWallet]);
+  useEffect(() => {
+    const refresh = () => {
+      if (document.visibilityState === 'visible' && !getApiRetryUntil() && !busyRef.current) void loadPlans(true);
+    };
+    const timer = window.setInterval(refresh, 5000);
+    window.addEventListener('focus', refresh);
+    window.addEventListener('visibilitychange', refresh);
+    return () => {
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+      window.removeEventListener('visibilitychange', refresh);
+    };
+  }, [loadPlans]);
   useEffect(() => { if (selected) confirmationRef.current?.focus(); }, [selected]);
   useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 30000); return () => window.clearInterval(timer); }, []);
   const confirm = async () => {

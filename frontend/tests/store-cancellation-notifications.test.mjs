@@ -35,7 +35,7 @@ function harness(user = { id: '10', role: 'STORE_OWNER', storeId: '9' }) {
     seenOrderEvents: { current: new Set() },
     setNotifications: (update) => { state.notifications = update(state.notifications); },
     playCancelChime: () => { state.chimes++; }, playOrderChime() {}, announceStoreOrder() {},
-    toast: { info: (message) => state.toasts.push(message), success() {}, warning() {} },
+    toast: { info: (message) => state.toasts.push(message), success: (message) => state.toasts.push(message), warning() {} },
     window: { addEventListener: (name, callback) => local.on(name, callback), removeEventListener: (name, callback) => local.off(name, callback) },
   };
   context.acceptOrderEvent = evaluate(acceptBody, context);
@@ -43,6 +43,35 @@ function harness(user = { id: '10', role: 'STORE_OWNER', storeId: '9' }) {
   return { state, socket, local, cleanup };
 }
 const cancelledOrder = { id: '601', orderNumber: 'WEB-TEST-601', storeId: '9', status: 'CANCELLED', customerName: 'Test Recipient', customerPhone: '0900000000', deliveryAddress: 'Test destination', totalAmount: 2000 };
+
+test('One customer buying from two stores produces a separate new-order alert for each owner', () => {
+  const ownerA = harness({ id: '10', role: 'STORE_OWNER', storeId: '9' });
+  const ownerB = harness({ id: '20', role: 'STORE_OWNER', storeId: '19' });
+  const orders = [
+    { ...cancelledOrder, id: '701', orderNumber: 'WEB-701', status: 'PENDING', customerId: 'same-customer', storeId: '9' },
+    { ...cancelledOrder, id: '702', orderNumber: 'WEB-702', status: 'PENDING', customerId: 'same-customer', storeId: '19' },
+  ];
+  for (const order of orders) {
+    ownerA.socket.emit('ORDER_CREATED', { order });
+    ownerB.socket.emit('ORDER_CREATED', { order });
+  }
+  assert.deepEqual(Array.from(ownerA.state.notifications, ({ orderId }) => orderId), ['701']);
+  assert.deepEqual(Array.from(ownerB.state.notifications, ({ orderId }) => orderId), ['702']);
+  assert.equal(ownerA.state.toasts.length, 1);
+  assert.equal(ownerB.state.toasts.length, 1);
+  ownerA.cleanup(); ownerB.cleanup();
+});
+
+test('Socket and polling recovery deduplicate each store order independently', () => {
+  const owner = harness();
+  const order = { ...cancelledOrder, id: '703', orderNumber: 'WEB-703', status: 'PENDING' };
+  owner.socket.emit('ORDER_CREATED', { order });
+  const recovered = reconcileOrders(new Map(), [order]);
+  recovered.events.forEach((detail) => owner.local.emit(ORDER_EVENT, { detail }));
+  assert.equal(owner.state.notifications.length, 1);
+  assert.equal(owner.state.toasts.length, 1);
+  owner.cleanup();
+});
 
 test('A customer cancellation creates an unread store notification, toast and chime', () => {
   const app = harness();

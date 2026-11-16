@@ -6,6 +6,7 @@ import { Footer } from './layouts/Footer';
 import { PageBackButton } from './components/common/PageBackButton';
 import { CustomerPageMotion } from './components/common/CustomerPageMotion';
 import { useAuth } from './context/AuthContext';
+import { storeWalletRedirect } from './services/store-finance-flow';
 import { Atmosphere3DBackground, AtmosphereVariant } from './components/3d/Atmosphere3DBackground';
 import './pages/customer/customer-ui.css';
 
@@ -34,6 +35,7 @@ const QuickSetupPage = React.lazy(() => import('./pages/QuickSetupPage').then((m
 const ProfilePage = React.lazy(() => import('./pages/profile/ProfilePage').then((module) => ({ default: module.ProfilePage })));
 const CustomerVerificationPage = React.lazy(() => import('./components/customer/CustomerIdentityVerification').then(module => ({ default: module.CustomerIdentityVerification })));
 const CustomerBankingPage = React.lazy(() => import('./pages/customer/CustomerBankingPage').then(module => ({ default: module.CustomerBankingPage })));
+const BecomeStoreOwnerPage = React.lazy(() => import('./pages/customer/BecomeStoreOwnerPage').then(module => ({ default: module.BecomeStoreOwnerPage })));
 const StoreFinancePage = React.lazy(() => import('./pages/store/StoreFinancePage').then((module) => ({ default: module.StoreFinancePage })));
 const StoreServicePlansPage = React.lazy(() => import('./pages/store/StoreServicePlansPage').then(module => ({ default: module.StoreServicePlansPage })));
 const AdminPayoutsPage = React.lazy(() => import('./pages/admin/AdminPayoutsPage').then((module) => ({ default: module.AdminPayoutsPage })));
@@ -188,7 +190,7 @@ export const App: React.FC = () => {
             <Route path="/store/device-templates" element={<StoreDeviceTemplatesPage />} />
             <Route path="/store/products" element={<StoreProductsPage />} />
             <Route path="/store/analytics" element={<StoreRevenuePage />} />
-            <Route path="/store/wallet" element={<Navigate to="/store/analytics?tab=WALLET" replace />} />
+            <Route path="/store/wallet" element={<Navigate to={storeWalletRedirect(location.search)} replace />} />
             <Route path="/store/finance" element={<ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER']}><StoreFinancePage /></ProtectedRoute>} />
           </Route>
 
@@ -220,6 +222,7 @@ export const App: React.FC = () => {
             <Route path="/customer/verification" element={<CustomerVerificationPage />} />
             <Route path="/customer/banking" element={<CustomerBankingPage />} />
             <Route path="/customer/profile" element={<ProfilePage />} />
+            <Route path="/customer/become-store-owner" element={<BecomeStoreOwnerPage />} />
           </Route>
 
           <Route

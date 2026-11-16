@@ -9,7 +9,7 @@ const ts = require('typescript');
 const customer = { id: '81', role: 'CUSTOMER', fullName: 'Khách kiểm thử', phone: '0912345678', email: 'test@example.invalid', customerProfile: { deliveryAddress: 'Địa chỉ kiểm thử' } };
 
 function harness(prefix, { component = 'profile', user = customer, pathname = '/customer/profile', search = '', props = {}, patch } = {}) {
-  const file = component === 'profile' ? 'pages/profile/ProfilePage.tsx' : component === 'navbar' ? 'layouts/Navbar.tsx' : 'components/customer/CustomerAccountNavigation.tsx';
+  const file = component === 'profile' ? 'pages/profile/ProfilePage.tsx' : component === 'navbar' ? 'layouts/Navbar.tsx' : component === 'upgrade' ? 'pages/customer/BecomeStoreOwnerPage.tsx' : 'components/customer/CustomerAccountNavigation.tsx';
   const compiled = ts.transpileModule(readFileSync(new URL(`${prefix}${file}`, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true } }).outputText;
   let location = { pathname, search, hash: '' }, cursor = 0, dirty = true, effects = [], tree;
   const slots = [], calls = [], events = [], timeouts = [], storage = new Map(), navigation = [];
@@ -55,7 +55,7 @@ function harness(prefix, { component = 'profile', user = customer, pathname = '/
     return [value, ...[value.props?.children].flat(Infinity).flatMap(walk)];
   };
   const text = value => value == null || typeof value === 'boolean' ? '' : typeof value !== 'object' ? String(value) : [value.props?.children].flat(Infinity).map(text).join('');
-  const exported = component === 'profile' ? 'ProfilePage' : component === 'navbar' ? 'Navbar' : 'CustomerAccountNavigation';
+  const exported = component === 'profile' ? 'ProfilePage' : component === 'navbar' ? 'Navbar' : component === 'upgrade' ? 'BecomeStoreOwnerPage' : 'CustomerAccountNavigation';
   const app = {
     calls, counts, events, storage, timeouts, navigation,
     get nodes() { return walk(tree); }, get text() { return text(tree); },
@@ -71,6 +71,38 @@ function harness(prefix, { component = 'profile', user = customer, pathname = '/
 }
 
 for (const prefix of ['../src/', '../frontend/src/']) {
+  test(`${prefix}only customers see the store-owner entry in the avatar dropdown`, async () => {
+    for (const role of ['CUSTOMER', 'STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'STAFF_DELIVERY', 'TECHNICIAN', 'ADMIN', 'SYSTEM_ADMIN', 'SUPER_ADMIN']) {
+      const app = harness(prefix, { component: 'navbar', user: { ...customer, role } });
+      await app.flush();
+      app.nodes.find(node => node.props?.['aria-label'] === 'Mở menu tài khoản').props.onClick(); await app.flush();
+      const entry = app.nodes.find(node => node.type === 'a' && node.props.to === '/customer/become-store-owner');
+      assert.equal(Boolean(entry), role === 'CUSTOMER');
+      if (entry) {
+        assert.match(textOf(entry), /Trở thành chủ cửa hàng/);
+        entry.props.onClick(); await app.flush();
+        assert.equal(app.nodes.some(node => node.props?.role === 'menuitem'), false);
+      }
+      assert.equal(app.calls.length, 0); assert.equal(app.counts.logout, 0);
+      app.unmount();
+    }
+  });
+
+  test(`${prefix}upgrade entry highlights in account navigation and stays informational until supported`, async () => {
+    const app = harness(prefix, { component: 'navigation', pathname: '/customer/become-store-owner' });
+    await app.flush();
+    const active = app.nodes.filter(node => node.type === 'a' && node.props['aria-current'] === 'page');
+    assert.equal(active.length, 1); assert.equal(active[0].props.to, '/customer/become-store-owner');
+    app.unmount();
+    const page = harness(prefix, { component: 'upgrade' }); await page.flush();
+    assert.match(page.text, /hiện chưa khả dụng/);
+    assert.equal(page.nodes.some(node => node.type === 'form'), false);
+    assert.equal(page.nodes.find(node => node.type === 'button').props.disabled, true);
+    assert.equal(page.nodes.some(node => node.type === 'a' && ['/register', '/store/dashboard'].includes(node.props.to)), false);
+    assert.equal(page.calls.length, 0); assert.equal(page.counts.logout, 0);
+    page.unmount();
+  });
+
   test(`${prefix}account group opens for all existing tabs, highlights exactly one child and supports Escape`, async () => {
     const app = harness(prefix, { component: 'navigation' }); await app.flush();
     for (const tab of ['INFO', 'SECURITY']) {
@@ -98,7 +130,7 @@ for (const prefix of ['../src/', '../frontend/src/']) {
     assert.equal(compact.nodes.filter(node => node.type === 'a').length, 0);
     compact.nodes.find(node => node.type === 'button').props.onClick(); assert.equal(expanded, 1); compact.unmount();
     const mobile = harness(prefix, { component: 'navigation', props: { mobile: true, onNavigate: () => navigated++ } }); await mobile.flush();
-    assert.equal(mobile.nodes.filter(node => node.type === 'a').length, 4);
+    assert.equal(mobile.nodes.filter(node => node.type === 'a').length, 5);
     assert.ok(!mobile.text.includes('Địa chỉ đã lưu'));
     mobile.find('a', 'Thông tin cá nhân').props.onClick(); assert.equal(navigated, 1); mobile.unmount();
   });

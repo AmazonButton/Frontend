@@ -330,7 +330,7 @@ export const AdminDashboard: React.FC = () => {
   const [subscriptionPlans, setSubscriptionPlans] = useState<any[]>([]);
   const [plansLoading, setPlansLoading] = useState(false);
   const [planSaving, setPlanSaving] = useState(false);
-  const [plansSubTab, setPlansSubTab] = useState<'STORE_PLANS' | 'RENTAL_PACKAGES'>('STORE_PLANS');
+  const [plansSubTab, setPlansSubTab] = useState<'STORE_PLANS' | 'STORE_SUBSCRIPTIONS' | 'RENTAL_PACKAGES'>('STORE_PLANS');
   const [rentalPackages, setRentalPackages] = useState<RentalPackageItem[]>([]);
   const [rentalPackagesLoading, setRentalPackagesLoading] = useState(false);
   const [rentalPackageSaving, setRentalPackageSaving] = useState(false);
@@ -457,7 +457,7 @@ export const AdminDashboard: React.FC = () => {
   }, [allStores]);
 
   useEffect(() => {
-    if (allStores.length > 0 && plansSubTab === 'STORE_PLANS') {
+    if (allStores.length > 0 && plansSubTab === 'STORE_SUBSCRIPTIONS') {
       void loadStoreSubscriptions(allStores);
     }
   }, [allStores, plansSubTab, loadStoreSubscriptions]);
@@ -1955,6 +1955,15 @@ export const AdminDashboard: React.FC = () => {
             </button>
             <button
               type="button"
+              onClick={() => { setPlansSubTab('STORE_SUBSCRIPTIONS'); selectTab('PLANS'); }}
+              aria-pressed={plansSubTab === 'STORE_SUBSCRIPTIONS' && activeTab === 'PLANS'}
+              className={`px-3.5 py-1.5 rounded-lg text-xs font-bold transition-all cursor-pointer flex items-center gap-2 ${plansSubTab === 'STORE_SUBSCRIPTIONS' && activeTab === 'PLANS' ? 'bg-[#0E6BA8] text-white shadow-xs' : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800'}`}
+            >
+              <StoreIcon className="w-3.5 h-3.5" />
+              <span>Cửa hàng đã mua & sử dụng gói</span>
+            </button>
+            <button
+              type="button"
               onClick={() => {
                 setPlansSubTab('RENTAL_PACKAGES');
                 selectTab('RENTALS');
@@ -1971,8 +1980,9 @@ export const AdminDashboard: React.FC = () => {
             </button>
           </div>
 
-          {(plansSubTab === 'STORE_PLANS' && activeTab !== 'RENTALS') ? (
+          {(plansSubTab !== 'RENTAL_PACKAGES' && activeTab !== 'RENTALS') ? (
             <div className="space-y-5">
+              {plansSubTab === 'STORE_PLANS' && <div className="space-y-5">
               <div className="flex flex-col gap-3 rounded-xl border border-sky-100 bg-gradient-to-r from-sky-50 to-white p-5 dark:border-sky-900/50 dark:from-sky-950/30 dark:to-zinc-900 sm:flex-row sm:items-start sm:justify-between">
                 <div>
                   <div className="flex items-center gap-2">
@@ -2013,6 +2023,8 @@ export const AdminDashboard: React.FC = () => {
                   <button disabled={planSaving} className="flex w-full items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3 py-2 text-xs font-semibold text-white transition-colors hover:bg-[#0B5586] disabled:opacity-50 cursor-pointer"><Plus className="h-3.5 w-3.5" /> {planSaving ? 'Đang tạo…' : 'Tạo gói đang hoạt động'}</button>
                 </form>
               </div>
+              </div>}
+              {plansSubTab === 'STORE_SUBSCRIPTIONS' && <section>
               {/* Theo dõi cửa hàng đã mua gói dịch vụ */}
               <section className="overflow-hidden rounded-xl border border-zinc-200 bg-white shadow-2xs dark:border-zinc-800 dark:bg-zinc-900">
                 <div className="border-b border-zinc-100 p-5 dark:border-zinc-800">
@@ -2195,6 +2207,7 @@ export const AdminDashboard: React.FC = () => {
                 </div>
               </section>
 
+              </section>}
             </div>
           ) : (
             <div className="space-y-5">

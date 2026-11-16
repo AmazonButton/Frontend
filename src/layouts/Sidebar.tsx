@@ -77,7 +77,7 @@ export const Sidebar: React.FC = () => {
 
   const isCustomer = user?.role === 'CUSTOMER';
   const accountTab = new URLSearchParams(location.search).get('tab') || 'INFO';
-  const selectedAccountTab = location.pathname === '/customer/verification' ? 'VERIFICATION' : accountTab;
+  const selectedAccountTab = location.pathname === '/customer/become-store-owner' ? 'BECOME_STORE_OWNER' : location.pathname === '/customer/banking' ? 'BANKING' : location.pathname === '/customer/verification' ? 'VERIFICATION' : accountTab;
   const isAdmin = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '');
   const links = isCustomer
     ? customerLinks
@@ -122,7 +122,7 @@ export const Sidebar: React.FC = () => {
     }}>
       <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 px-4 py-3 text-sm font-semibold text-zinc-800 dark:text-zinc-100 [&::-webkit-details-marker]:hidden">
         <Menu size={20} className="shrink-0" />
-        <span className="min-w-0 break-words">{isAdmin && location.pathname === '/admin/payouts' ? 'Theo dõi chi trả' : isAdmin && location.pathname === '/admin/dashboard' && ['PLANS', 'RENTALS'].includes(new URLSearchParams(location.search).get('section') || '') ? 'Gói nút bấm' : !isCustomer && !isAdmin && ['/store/finance', '/store/service-plans'].includes(location.pathname) ? 'Gói & ngân hàng' : isCustomer && ['/customer/profile', '/profile', '/customer/verification'].includes(location.pathname) ? CUSTOMER_ACCOUNT_LINKS.find(item => item.tab === selectedAccountTab)?.label || 'Tài khoản' : links.find((item) => isLinkActive(item.to))?.label || 'Menu điều hướng'}</span>
+        <span className="min-w-0 break-words">{isAdmin && location.pathname === '/admin/payouts' ? 'Theo dõi chi trả' : isAdmin && location.pathname === '/admin/dashboard' && ['PLANS', 'RENTALS'].includes(new URLSearchParams(location.search).get('section') || '') ? 'Gói nút bấm' : !isCustomer && !isAdmin && ['/store/finance', '/store/service-plans'].includes(location.pathname) ? 'Gói & ngân hàng' : isCustomer && ['/customer/profile', '/profile', '/customer/verification', '/customer/banking', '/customer/become-store-owner'].includes(location.pathname) ? CUSTOMER_ACCOUNT_LINKS.find(item => item.tab === selectedAccountTab)?.label || 'Tài khoản' : links.find((item) => isLinkActive(item.to))?.label || 'Menu điều hướng'}</span>
         <span className="ml-auto shrink-0 text-xs text-zinc-500">Menu</span>
       </summary>
       <nav aria-label="Điều hướng trên điện thoại" className="grid gap-1 px-3 pb-3 sm:grid-cols-2">

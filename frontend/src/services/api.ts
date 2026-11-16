@@ -139,8 +139,24 @@ export async function getOrRefreshValidToken(forceRefresh = false): Promise<stri
 }
 
 // Request interceptor to attach JWT Access Token proactively & ensure proper FormData handling
+export function isRecoverableRead(config: any): boolean {
+  return String(config?.method || 'get').toLowerCase() === 'get'
+    && ['/orders', '/admin/stores/pending'].includes(String(config?.url || '').split('?')[0]);
+}
+
+export function isTransientConnectionError(error: any): boolean {
+  if (error?.code === 'ERR_CANCELED' || error?.config?.signal?.aborted) return false;
+  if (error?.response) return [502, 503, 504].includes(error.response.status);
+  return ['ERR_NETWORK', 'ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'ECONNREFUSED', 'EAI_AGAIN'].includes(error?.code);
+}
+
 api.interceptors.request.use(async (config) => {
   throwIfApiCoolingDown(config);
+  if (isRecoverableRead(config)) {
+    const scoped = config as any;
+    if (scoped._readSessionMarker == null) scoped._readSessionMarker = apiSessionMarker();
+    if (scoped._readSessionMarker !== apiSessionMarker()) throw new axios.CanceledError('Tài khoản đã thay đổi.');
+  }
   const currentBase = resolveApiUrl();
   if (config.baseURL && !config.baseURL.startsWith(currentBase)) {
     config.baseURL = `${currentBase}${API_PREFIX}`;
@@ -224,6 +240,15 @@ api.interceptors.response.use(
     if (error.isLocalCooldown) return Promise.reject(error);
     if (error.response?.status === 429) { recordRateLimit(error); return Promise.reject(apiCooldownError(originalRequest)); }
     if (!originalRequest) return Promise.reject(error);
+    if (isRecoverableRead(originalRequest) && isTransientConnectionError(error)
+      && !originalRequest._readRetried && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+      originalRequest._readRetried = true;
+      const scope = originalRequest._readSessionMarker;
+      await new Promise(resolve => setTimeout(resolve, 750));
+      if (originalRequest.signal?.aborted || scope !== apiSessionMarker()) return Promise.reject(new axios.CanceledError('Yêu cầu đã hủy hoặc tài khoản đã thay đổi.'));
+      if (getApiRetryUntil()) return Promise.reject(apiCooldownError(originalRequest));
+      return api(originalRequest);
+    }
     const isAuthEndpoint = isPublicAuthEndpoint(originalRequest.url);
     if (error.response?.status === 404 && !originalRequest._prefixRetried && originalRequest.url) {
       originalRequest._prefixRetried = true;

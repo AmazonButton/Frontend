@@ -102,7 +102,7 @@ export const StoreFinancePage: React.FC = () => {
     if (operationRef.current || (requestRef.current && !sameRequest && !force)) return false;
     const request = readFinanceVerification(JSON.stringify({ verificationId: transaction.verificationId, bankAccountId: transaction.bankAccountId,
       bankName: transaction.bankName, accountName: transaction.accountName, accountNumberMasked: transaction.accountNumberMasked,
-      referenceCode: transaction.referenceCode, amount: transaction.expectedAmount, expiresAt: transaction.expiresAt,
+      referenceCode: transaction.referenceCode, transferDescription: transaction.transferDescription, amount: transaction.expectedAmount, expiresAt: transaction.expiresAt,
       instructions: transaction.instructions || '', recipientBankBin: transaction.recipientBankBin,
       recipientBankName: transaction.recipientBankName, recipientAccountNumber: transaction.recipientAccountNumber,
       recipientAccountHolder: transaction.recipientAccountHolder, qrCodeUrl: transaction.qrCodeUrl, ...(transaction.checkoutUrl ? { checkoutUrl: transaction.checkoutUrl } : {}) }));
@@ -251,7 +251,7 @@ export const StoreFinancePage: React.FC = () => {
     if (!storeId || !canManageBanks || (!lookup && !validManual) || !nameConfirmed || activeRequest || creationUncertain || !begin('create')) return;
     setFormError('');
     try {
-      const request = await flow.verify(storeId, bankBin, accountNumber, lookup ? undefined : manualAccountName);
+      const request = await flow.verify(storeId, bankBin, accountNumber, lookup ? undefined : manualAccountName, window.location?.origin);
       if (scopeRef.current !== scope) return;
       saveRequest({ ...request, initialAccountStatus: accounts.find(account => String(account.id) === request.bankAccountId)?.verificationStatus || 'PENDING' }); setRequestChecked(true); setNow(Date.now()); setFormOpen(false); setLookup(null); setManualNameRequired(false); setManualAccountName(''); setNameConfirmed(false); setAccountNumber('');
       setNotice('Đã tạo yêu cầu xác minh. Tài khoản chỉ được xác nhận sau khi ngân hàng trả kết quả.');

@@ -1,36 +1,36 @@
-// Contracts checked against deployed Swagger and backend b03ae5b (12/11/2026).
+// Contracts checked against deployed Swagger and backend 076592d (15/11/2026).
 export interface BankingTransport {
   get(path: string, config?: any): Promise<any>;
   post(path: string, body?: any): Promise<any>;
   patch(path: string, body?: any): Promise<any>;
   delete(path: string): Promise<any>;
 }
-export interface BankOption { bin: string; code: string; name: string; shortName: string }
+export interface BankOption { bin: string; code: string; name: string; shortName: string; transferSupported?: boolean; lookupSupported?: boolean }
 export interface CustomerBankAccount {
   id: string; bankBin: string; bankCode?: string; bankName: string;
   accountNumberMasked: string; accountName: string; verificationStatus: string; isDefault: boolean;
 }
 export interface CustomerBankSession {
   accountId: string; sessionReference: string; orderCode: string; checkoutUrl: string;
-  amount: number; sessionStatus: string; verificationStatus: string; expiresAt: string;
+  amount: number; sessionStatus: string; verificationStatus: string; expiresAt: string; qrCode?: string | null;
 }
 export interface RefundSummary { totalObligationAmount: number; totalRefundedAmount: number; totalPendingRefundAmount: number }
 export interface CustomerBankStatus {
   accountId: string; accountVerificationStatus: string; message: string;
   session: null | { sessionReference: string; sessionStatus: string; verificationStatus: string;
     paymentStatus: string; refundStatus: string; refundSummary: RefundSummary;
-    expiresAt: string; isExpired: boolean; rejectionReason?: string | null; checkoutUrl?: string | null };
+    expiresAt: string; isExpired: boolean; rejectionReason?: string | null; checkoutUrl?: string | null; qrCode?: string | null };
 }
 export interface CustomerBankHistory extends RefundSummary {
   sessionId: string; sessionReference: string; orderCode?: string | null; sessionStatus: string;
   verificationStatus: string; paymentReceived: boolean; receivedAmount: number | null;
   refundStatus: string; expiresAt: string; verifiedAt?: string | null; createdAt: string;
   accountId?: string | null; bankBin?: string | null; bankName?: string | null;
-  accountNumberMasked?: string | null; accountName?: string | null; checkoutUrl?: string | null;
+  accountNumberMasked?: string | null; accountName?: string | null; checkoutUrl?: string | null; qrCode?: string | null;
 }
 export interface StoreBankTransaction {
   verificationId: string; bankAccountId: string; storeId: string; bankName: string;
-  accountNumberMasked: string; accountName: string; referenceCode: string;
+  accountNumberMasked: string; accountName: string; referenceCode: string; transferDescription?: string;
   expectedAmount: number; actualAmount: number | null; status: string; refundStatus: string;
   expiresAt: string; verifiedAt?: string | null; createdAt: string;
   recipientBankBin?: string; recipientBankName?: string; recipientAccountNumber?: string;
@@ -69,6 +69,8 @@ export function storeFailureMessage(reason?: string | null) {
   return ({
     SENDER_ACCOUNT_UNVERIFIABLE: 'Chưa nhận được số tài khoản chuyển tiền đầy đủ từ PayOS/ngân hàng (hoặc bị che dấu *). Nếu bạn đã chuyển 2.000 ₫, khoản tiền đang chờ hỗ trợ hoàn thủ công.',
     SENDER_ACCOUNT_MISMATCH: 'Số tài khoản chuyển tiền không khớp với tài khoản cửa hàng đang xác minh.',
+    SENDER_ACCOUNT_MASKED: 'Ngân hàng chỉ cung cấp số tài khoản chuyển tiền đã che. Hệ thống chưa đủ dữ liệu để xác minh chính chủ; khoản hoàn cần được hỗ trợ đối soát.',
+    SENDER_BANK_UNVERIFIABLE: 'Chưa xác định được ngân hàng chuyển tiền từ dữ liệu thanh toán. Hệ thống chưa thể xác minh chính chủ tự động.',
     SENDER_BANK_MISMATCH: 'Ngân hàng chuyển tiền không khớp với ngân hàng đã đăng ký xác minh.',
     AMOUNT_MISMATCH: 'Số tiền nhận được không khớp đúng số tiền yêu cầu xác minh.',
     EXPIRED: 'Giao dịch được ghi nhận sau khi phiên xác minh đã hết hạn.',
@@ -107,6 +109,14 @@ export function bankCheckoutUrl(value: unknown): string | null {
       && (url.hostname === 'payos.vn' || url.hostname.endsWith('.payos.vn')) ? url.href : null;
   } catch { return null; }
 }
+/** Encode only the bank QR payload supplied by the current backend session. */
+export function bankQrPayload(value: unknown): string | null {
+  return typeof value === 'string' && value.startsWith('000201') && value.length <= 2000
+    && new TextEncoder().encode(value).length <= 2000 ? value : null;
+}
+export function bankTransferDescription(receipt: { referenceCode: string; transferDescription?: string }) {
+  return typeof receipt.transferDescription === 'string' && receipt.transferDescription.trim() ? receipt.transferDescription : receipt.referenceCode;
+}
 export function bankSessionExpired(expiresAt?: string, now = Date.now()) {
   const expiry = Date.parse(expiresAt || '');
   return !Number.isFinite(expiry) || expiry <= now;
@@ -122,7 +132,9 @@ export function customerBankCheckout(status: CustomerBankStatus | null, checkout
     || current.verificationStatus !== 'PENDING' || bankSessionExpired(current.expiresAt, now)
     || (session && (session.isExpired || session.paymentStatus !== 'PENDING'))) return null;
   const url = bankCheckoutUrl(session?.checkoutUrl || matchingCheckout?.checkoutUrl);
-  return url ? { url, expiresAt: current.expiresAt, amount: matchingCheckout?.amount ?? null } : null;
+  const qrCode = bankQrPayload(session?.qrCode || matchingCheckout?.qrCode);
+  return url ? { url, expiresAt: current.expiresAt, amount: matchingCheckout?.amount ?? null,
+    ...(qrCode ? { qrCode } : {}) } : null;
 }
 export function customerBankPayload(bank: BankOption, number: string, name: string, isDefault: boolean) {
   if (!bank || !/^\d{6}$/.test(bank.bin)) throw new Error('Vui lòng chọn ngân hàng.');

@@ -37,6 +37,9 @@ function getSignature(source, filename, functionName) {
 
 const sources = [
   ['../src/hooks/useOrderSync.ts', 'useOrderSync'],
+  ['../src/hooks/useStoreListingAccess.ts', 'useStoreListingAccess'],
+  ['../src/pages/store/StoreProductsPage.tsx', 'StoreProductsPage'],
+  ['../src/pages/store/StoreDashboard.tsx', 'StoreDashboard'],
   ['../src/components/common/NotificationBellPopover.tsx', 'NotificationBellPopover'],
 ];
 
@@ -93,3 +96,22 @@ test('A reset custom hook also resets its consuming component even if the parent
   assert.equal(update.staleFamilies.size, 1);
   assert.equal(update.updatedFamilies.size, 0);
 });
+
+for (const [file, functionName] of sources.filter(([, name]) => ['StoreProductsPage', 'StoreDashboard'].includes(name))) {
+  test(`${functionName}: a hook edit and rollback remount the actual page even without nested refresh metadata`, () => {
+    const source = readFileSync(new URL(file, import.meta.url), 'utf8');
+    const signature = getSignature(source, file, functionName);
+    let current = function StorePage() {};
+    refreshRuntime.setSignature(current, signature.key, signature.forceReset);
+    refreshRuntime.register(current, `${functionName}-listing-hook-recovery`);
+    for (const revision of ['edited-hook', 'restored-hook']) {
+      const next = function StorePage() {};
+      refreshRuntime.setSignature(next, signature.key, signature.forceReset);
+      refreshRuntime.register(next, `${functionName}-listing-hook-recovery`);
+      const update = refreshRuntime.performReactRefresh();
+      assert.equal(update.staleFamilies.size, 1, `${revision} must discard the old hook queues`);
+      assert.equal(update.updatedFamilies.size, 0);
+      current = next;
+    }
+  });
+}

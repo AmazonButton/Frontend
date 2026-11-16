@@ -20,6 +20,36 @@ const transaction = { verificationId: '21', bankAccountId: '31', storeId: '12', 
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 
 for (const prefix of ['../src/', '../frontend/src/']) {
+  test(prefix + 'customer QR uses the status response and disappears after a confirmed payment', async () => {
+    const app = harness(prefix);
+    const status = pendingStatus(); Object.assign(status.session, { checkoutUrl: session.checkoutUrl, qrCode: '000201SERVER_QR' });
+    app.setStatus(status); await app.flush(); await app.click('Xem xác minh & hoàn tiền');
+    assert.equal(app.nodes.find(n => n.type === 'bank-payment-qr')?.props.value, '000201SERVER_QR');
+    app.setStatus({ ...status, accountVerificationStatus: 'VERIFIED', session: { ...status.session, sessionStatus: 'CONSUMED', paymentStatus: 'PAID', verificationStatus: 'VERIFIED', refundStatus: 'REFUNDED' } });
+    await app.tick();
+    assert.ok(!app.nodes.some(n => n.type === 'bank-payment-qr'));
+    assert.equal(app.calls.some(c => c.method !== 'get'), false); app.unmount();
+  });
+  test(prefix + 'manual result check applies the verified status after an older account-list response', async () => {
+    const list = deferred(); let hold = false;
+    const app = harness(prefix, { override: (method, path) => hold && path === '/customers/me/bank-accounts' ? list.promise : undefined });
+    await app.flush(); await app.click('Xem xác minh & hoàn tiền');
+    const before = app.calls.filter(c => c.path.endsWith('/verification-status')).length;
+    const paid = pendingStatus(); paid.accountVerificationStatus = 'VERIFIED'; paid.message = 'Tài khoản đã được xác minh chính chủ.';
+    Object.assign(paid.session, { sessionStatus: 'CONSUMED', verificationStatus: 'VERIFIED', paymentStatus: 'PAID', refundStatus: 'REFUNDED' });
+    app.setStatus(paid); hold = true;
+    const checking = app.click('Kiểm tra kết quả'); await app.flush();
+    assert.equal(app.calls.filter(c => c.path.endsWith('/verification-status')).length, before);
+    list.resolve(ok([account])); await checking; await app.flush();
+    const badges = app.nodes.filter(n => n.type === 'bank-badge');
+    assert.equal(badges[0].props.value, 'VERIFIED');
+    assert.ok(app.text.includes(paid.message));
+    assert.ok(!app.text.includes('2.000 ₫ đang trong quy trình hoàn trả'));
+    app.unmount();
+  });
+}
+
+for (const prefix of ['../src/', '../frontend/src/']) {
   test(prefix + 'reload restores an existing payment and synchronizes verification and history without a click or POST', async () => {
     let paid = false;
     const row = () => ({ sessionId: '901', accountId: '31', sessionReference: session.sessionReference, sessionStatus: paid ? 'CONSUMED' : 'ACTIVE', verificationStatus: paid ? 'VERIFIED' : 'PENDING', paymentReceived: paid, receivedAmount: paid ? 2000 : null, refundStatus: paid ? 'PROCESSING_REFUND' : 'NONE', totalRefundedAmount: 0, totalPendingRefundAmount: paid ? 2000 : 0, expiresAt: future, createdAt: future });
@@ -143,7 +173,7 @@ function harness(prefix, { component = 'customer', override, props = {} } = {}) 
       if (name.endsWith('/banking-flow')) return banking;
       if (name.endsWith('/store-finance-flow')) return { financeError };
       if (name.endsWith('/request-backoff')) return { getApiRetryUntil: () => cooldown };
-      if (name.endsWith('/BankingPrimitives')) return { BankBadge: 'bank-badge', BankCopy: 'bank-copy', BankError: 'bank-error', BankPagination: 'bank-pagination', bankButton: 'button', bankInput: 'input' };
+      if (name.endsWith('/BankingPrimitives')) return { BankBadge: 'bank-badge', BankPaymentQr: 'bank-payment-qr', BankCopy: 'bank-copy', BankError: 'bank-error', BankPagination: 'bank-pagination', bankButton: 'button', bankInput: 'input' };
       if (name.endsWith('/OperationPrimitives')) return { card: 'card', primaryButton: 'primary' };
       throw new Error(`Unexpected import ${name}`);
     },

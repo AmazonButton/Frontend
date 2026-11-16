@@ -348,7 +348,7 @@ test('UI blocks duplicate confirmation clicks while mutation is in flight', asyn
 });
 
 test('restored pending store verification keeps the server recipient and QR without creating a new request', async () => {
-  const transaction = { ...receipt, storeId: '12', expectedAmount: 2000, status: 'PENDING', actualAmount: null,
+  const transaction = { ...receipt, transferDescription: 'S1234567', storeId: '12', expectedAmount: 2000, status: 'PENDING', actualAmount: null,
     recipientBankBin: '970422', recipientBankName: 'PLATFORM BANK', recipientAccountNumber: '0012345678',
     recipientAccountHolder: 'PLATFORM RECIPIENT', qrCodeUrl: 'https://img.vietqr.io/image/test.png' };
   const get = async path => {
@@ -364,6 +364,7 @@ test('restored pending store verification keeps the server recipient and QR with
   assert.equal(restored.recipientBankBin, transaction.recipientBankBin);
   assert.equal(restored.qrCodeUrl, transaction.qrCodeUrl);
   assert.equal(restored.instructions, transaction.instructions);
+  assert.equal(restored.transferDescription, transaction.transferDescription);
   assert.equal(restored.amount, 2000);
   assert.equal(h.calls.filter(call => call.method !== 'get').length, 0);
   assert.ok(h.calls.filter(call => call.path === '/bank-account-verifications/21').length <= 2, 'restoration must not create a polling render loop');

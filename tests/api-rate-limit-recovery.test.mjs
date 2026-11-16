@@ -27,12 +27,47 @@ function harness(prefix='../src/'){
   const axios=config=>api(config);
   axios.create=()=>api;axios.CanceledError=class extends Error{code='ERR_CANCELED';};
   axios.post=async(url,data,config)=>{calls.refresh.push({url,data,config});return calls.refreshImpl?await calls.refreshImpl():{data:{success:true,data:{accessToken:jwt(now/1000+3600),refreshToken:'refresh-next'}}};};
-  const common={localStorage,window,Date:Clock,Event,FormData,atob,decodeURIComponent,console,importMeta:{env:{}}};
+  const delays=[];
+  const common={localStorage,window,navigator:{onLine:true},setTimeout:(fn,delay)=>{delays.push(delay);calls.delayImpl?.();return setTimeout(fn,0);},Date:Clock,Event,FormData,atob,decodeURIComponent,console,importMeta:{env:{}}};
   const backoff={};vm.runInNewContext(compile(readFileSync(new URL(prefix+'services/request-backoff.ts',import.meta.url),'utf8')),{...common,exports:backoff});
   const module={exports:{}};vm.runInNewContext(compile(readFileSync(new URL(prefix+'services/api.ts',import.meta.url),'utf8')),{...common,module,exports:module.exports,require:name=>name==='axios'?axios:name==='./request-backoff'?backoff:assert.fail(name)});
-  return {exports:module.exports,api,calls,localStorage,values,window,backoff,advance:ms=>{now+=ms;},valid:()=>jwt(now/1000+3600),now:()=>now,common};
+  return {exports:module.exports,api,calls,localStorage,values,window,backoff,delays,advance:ms=>{now+=ms;},valid:()=>jwt(now/1000+3600),now:()=>now,common};
 }
 for(const prefix of ['../src/','../frontend/src/']){
+  test(`${prefix}transient order and pending-store GETs recover once with the original query`,async()=>{
+    for(const url of ['/orders','/admin/stores/pending']){
+      const h=harness(prefix);h.values.set('smart_order_token',h.valid());
+      h.calls.wireImpl=async()=>{if(h.calls.wire.length===1)throw{response:{status:502,data:{errorCode:'DEV_PROXY_UPSTREAM_UNAVAILABLE'}}};return{data:{success:true,data:[{id:'1'}]}};};
+      const result=await h.api.get(url,{params:{pageSize:10,page:1}});
+      assert.equal(result.data.success,true);assert.equal(h.calls.wire.length,2);assert.deepEqual(h.delays,[750]);
+      assert.deepEqual(h.calls.wire[1].params,{pageSize:10,page:1});assert.equal(h.calls.refresh.length,0);
+    }
+  });
+  test(`${prefix}persistent reset stops after two GET attempts without losing credentials`,async()=>{
+    const h=harness(prefix);h.values.set('smart_order_token',h.valid());
+    h.calls.wireImpl=async()=>{throw{code:'ECONNRESET'};};
+    await assert.rejects(h.api.get('/orders'),error=>error.code==='ECONNRESET');
+    assert.equal(h.calls.wire.length,2);assert.deepEqual(h.delays,[750]);assert.equal(h.window.location.href,'');assert.ok(h.values.has('smart_order_token'));
+  });
+  test(`${prefix}connection recovery never replays mutations, unrelated GETs or application errors`,async()=>{
+    for(const config of [{url:'/orders',method:'post'},{url:'/orders',method:'put'},{url:'/orders',method:'patch'},{url:'/orders',method:'delete'},{url:'/billing-charges/1',method:'get'}]){
+      const h=harness(prefix);h.values.set('smart_order_token',h.valid());h.calls.wireImpl=async()=>{throw{code:'ERR_NETWORK'};};
+      await assert.rejects(h.api(config));assert.equal(h.calls.wire.length,1);assert.equal(h.delays.length,0);
+    }
+    for(const status of [400,403,409,422,429,500]){
+      const h=harness(prefix);h.values.set('smart_order_token',h.valid());h.calls.wireImpl=async()=>{throw{response:{status,headers:{}}};};
+      await assert.rejects(h.api.get('/orders'));assert.equal(h.calls.wire.length,1);assert.equal(h.delays.length,0);
+    }
+  });
+  test(`${prefix}cancel, offline, account switch and rate-limit cooldown stop read recovery`,async()=>{
+    for(const reason of ['cancel','offline','switch','cooldown']){
+      const h=harness(prefix);h.values.set('smart_order_token',h.valid());const controller=new AbortController();
+      if(reason==='offline')h.common.navigator.onLine=false;
+      h.calls.delayImpl=()=>{if(reason==='cancel')controller.abort();if(reason==='switch')h.values.set('smart_order_user',JSON.stringify({id:'2'}));if(reason==='cooldown')h.backoff.deferApiRequests(10000);};
+      h.calls.wireImpl=async()=>{throw{code:'ERR_NETWORK'};};
+      await assert.rejects(h.api.get('/orders',{signal:controller.signal}));assert.equal(h.calls.wire.length,1);assert.equal(h.calls.refresh.length,0);
+    }
+  });
   test(`${prefix}concurrent proactive/forced refreshes share one actual HTTP refresh`,async()=>{
     const h=harness(prefix);let resolve;h.calls.refreshImpl=()=>new Promise(done=>{resolve=done;});
     const promises=Array.from({length:20},(_,i)=>h.exports.getOrRefreshValidToken(Boolean(i%2)));

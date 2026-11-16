@@ -9,7 +9,13 @@ import { SidebarProvider } from './context/SidebarContext';
 import { ToastProvider } from './context/ToastContext';
 import { App } from './App';
 import { initGlobalModalScrollLock } from './hooks/useBodyScrollLock';
+import { isModuleLoadError, recoverModuleLoad } from './services/module-recovery';
 import './index.css';
+
+window.addEventListener('vite:preloadError', (event: Event) => {
+  // Keep the rejection visible to React so failed recovery has a retry screen.
+  void recoverModuleLoad((event as Event & { payload: unknown }).payload);
+});
 
 // Automatically lock background scrolling whenever any modal/popup is open
 initGlobalModalScrollLock();
@@ -20,11 +26,11 @@ const GOOGLE_CLIENT_ID =
 
 class ErrorBoundary extends React.Component<
   { children: React.ReactNode },
-  { hasError: boolean; error: Error | null }
+  { hasError: boolean; error: Error | null; recovering: boolean }
 > {
   constructor(props: { children: React.ReactNode }) {
     super(props);
-    this.state = { hasError: false, error: null };
+    this.state = { hasError: false, error: null, recovering: false };
   }
 
   static getDerivedStateFromError(error: Error) {
@@ -36,10 +42,16 @@ class ErrorBoundary extends React.Component<
     ) {
       return { hasError: false, error: null };
     }
-    return { hasError: true, error };
+    return { hasError: true, error, recovering: isModuleLoadError(error) };
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo) {
+    if (isModuleLoadError(error)) {
+      void recoverModuleLoad(error).then(reloaded => {
+        if (!reloaded) this.setState({ recovering: false });
+      });
+      return;
+    }
     if (
       error.message?.includes('removeChild') ||
       error.message?.includes('insertBefore') ||
@@ -60,15 +72,20 @@ class ErrorBoundary extends React.Component<
               ⚠️
             </div>
             <h2 className="text-lg font-bold text-slate-900 dark:text-white">
-              Đã xảy ra lỗi hiển thị
+              {isModuleLoadError(this.state.error) ? 'Chưa tải được trang' : 'Đã xảy ra lỗi hiển thị'}
             </h2>
             <p className="text-xs text-slate-500 dark:text-slate-400 break-words">
-              {this.state.error?.message || 'Đang khôi phục giao diện làm việc...'}
+              {this.state.recovering
+                ? 'Đang kiểm tra và tải lại phiên bản mới. Vui lòng chờ trong giây lát…'
+                : isModuleLoadError(this.state.error)
+                  ? 'Kết nối có thể bị gián đoạn hoặc trang vừa được cập nhật. Hãy kiểm tra mạng rồi thử tải lại.'
+                  : 'Không thể hiển thị nội dung lúc này. Vui lòng thử tải lại trang.'}
             </p>
             <div className="pt-2 flex gap-3 justify-center">
               <button
                 type="button"
                 onClick={() => window.location.reload()}
+                disabled={this.state.recovering}
                 className="px-4 py-2 bg-[#287DA8] hover:bg-[#20668a] text-white text-xs font-semibold rounded-lg transition-colors cursor-pointer"
               >
                 Tải lại trang
@@ -77,11 +94,11 @@ class ErrorBoundary extends React.Component<
                 type="button"
                 onClick={() => {
                   this.setState({ hasError: false, error: null });
-                  window.location.href = '/store/dashboard';
+                  window.location.href = '/';
                 }}
                 className="px-4 py-2 bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 dark:hover:bg-zinc-700 text-slate-700 dark:text-slate-200 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
               >
-                Về Bảng Điều Khiển
+                Về trang chủ
               </button>
             </div>
           </div>

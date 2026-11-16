@@ -1,13 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { BadgeCheck, ChevronDown, KeyRound, Landmark, UserRound } from 'lucide-react';
+import { BadgeCheck, ChevronDown, KeyRound, Landmark, Store, UserRound } from 'lucide-react';
 
 export const CUSTOMER_ACCOUNT_LINKS = [
   { to: '/customer/profile?tab=INFO', tab: 'INFO', label: 'Thông tin cá nhân', icon: UserRound },
   { to: '/customer/verification', tab: 'VERIFICATION', label: 'Xác minh eKYC', icon: BadgeCheck },
   { to: '/customer/banking', tab: 'BANKING', label: 'Ngân hàng & hoàn tiền', icon: Landmark },
   { to: '/customer/profile?tab=SECURITY', tab: 'SECURITY', label: 'Bảo mật & Đổi mật khẩu', icon: KeyRound },
+  { to: '/customer/become-store-owner', tab: 'BECOME_STORE_OWNER', label: 'Trở thành chủ cửa hàng', icon: Store },
 ];
 
 export const CustomerAccountNavigation: React.FC<{
@@ -17,9 +18,9 @@ export const CustomerAccountNavigation: React.FC<{
   onNavigate?: () => void;
 }> = ({ mobile = false, collapsed = false, onExpandSidebar, onNavigate }) => {
   const location = useLocation();
-  const isAccount = ['/customer/profile', '/profile', '/customer/verification', '/customer/banking'].includes(location.pathname);
+  const isAccount = ['/customer/profile', '/profile', '/customer/verification', '/customer/banking', '/customer/become-store-owner'].includes(location.pathname);
   const activeTab = new URLSearchParams(location.search).get('tab') || 'INFO';
-  const selectedTab = location.pathname === '/customer/verification' ? 'VERIFICATION' : location.pathname === '/customer/banking' ? 'BANKING' : activeTab;
+  const selectedTab = location.pathname === '/customer/become-store-owner' ? 'BECOME_STORE_OWNER' : location.pathname === '/customer/verification' ? 'VERIFICATION' : location.pathname === '/customer/banking' ? 'BANKING' : activeTab;
   const [expanded, setExpanded] = useState(isAccount);
   const trigger = useRef<HTMLButtonElement>(null);
   const reducedMotion = useReducedMotion();
