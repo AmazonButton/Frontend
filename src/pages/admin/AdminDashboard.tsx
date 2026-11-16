@@ -1739,11 +1739,36 @@ export const AdminDashboard: React.FC = () => {
                 );
               }
 
+              const visibleAllocated = allocatedList.slice(0, 100);
+              const selectableIds = visibleAllocated.filter((d) => !d.customerId).map((d) => d.deviceId);
+              const allAllocatedSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedDeviceIds.includes(id));
+
               return (
                 <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
                   <table className="w-full text-left text-xs">
                     <thead className="bg-zinc-50 dark:bg-zinc-900/60 text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
                       <tr>
+                        <th scope="col" className="py-2.5 px-3 w-10">
+                          <button
+                            type="button"
+                            aria-label="Chọn tất cả nút chưa gắn khách"
+                            disabled={selectableIds.length === 0}
+                            onClick={() => {
+                              if (allAllocatedSelected) {
+                                setSelectedDeviceIds((prev) => prev.filter((id) => !selectableIds.includes(id)));
+                              } else {
+                                setSelectedDeviceIds((prev) => Array.from(new Set([...prev, ...selectableIds])));
+                              }
+                            }}
+                            className="flex items-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {allAllocatedSelected ? (
+                              <CheckSquare className="w-4 h-4 text-[#0E6BA8]" />
+                            ) : (
+                              <Square className="w-4 h-4 text-zinc-500" />
+                            )}
+                          </button>
+                        </th>
                         <th className="py-2.5 px-3 font-medium">Mã Thiết Bị</th>
                         <th className="py-2.5 px-3 font-medium">Cửa Hàng Đang Giữ</th>
                         <th className="py-2.5 px-3 font-medium">Khách Hàng</th>
@@ -1752,12 +1777,33 @@ export const AdminDashboard: React.FC = () => {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
-                      {allocatedList.slice(0, 100).map((dev) => {
+                      {visibleAllocated.map((dev) => {
                         const matchedStore = allStores.find((s) => String(s.id || s.storeId) === String(dev.storeId));
                         const storeName = dev.store?.storeName || dev.store?.name || matchedStore?.name || `Cửa hàng #${dev.storeId}`;
                         const storeCode = matchedStore?.code || matchedStore?.storeCode || '';
+                        const canSelect = !dev.customerId;
+                        const isSelected = selectedDeviceIds.includes(dev.deviceId);
                         return (
-                          <tr key={dev.id || dev.deviceId} className="hover:bg-zinc-50 dark:hover:bg-zinc-850/40">
+                          <tr
+                            key={dev.id || dev.deviceId}
+                            className={`transition-colors ${isSelected ? 'bg-sky-50/60 dark:bg-sky-950/20' : 'hover:bg-zinc-50 dark:hover:bg-zinc-850/40'}`}
+                          >
+                            <td className="py-2.5 px-3">
+                              <button
+                                type="button"
+                                disabled={!canSelect}
+                                onClick={() => toggleDeviceSelect(dev.deviceId)}
+                                aria-label={`Chọn nút ${dev.deviceId}`}
+                                title={canSelect ? 'Tick chọn để giao cho cửa hàng' : 'Nút đã gắn khách hàng, không thể giao lại'}
+                                className="flex items-center cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
+                              >
+                                {isSelected ? (
+                                  <CheckSquare className="w-4 h-4 text-[#0E6BA8]" />
+                                ) : (
+                                  <Square className="w-4 h-4 text-zinc-500" />
+                                )}
+                              </button>
+                            </td>
                             <td className="py-2.5 px-3 font-semibold text-zinc-900 dark:text-white">
                               <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-xs">
                                 {dev.deviceId}
