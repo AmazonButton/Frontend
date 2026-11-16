@@ -1,3 +1,4 @@
+import { EditStorePlanModal } from '../../components/admin/EditStorePlanModal';
 import './admin-ui.css';
 import { ADMIN_SECTIONS, adminActionLabel, adminEntityLabel, adminTriggerLabel } from './admin-presentation';
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
@@ -329,6 +330,7 @@ export const AdminDashboard: React.FC = () => {
   const [pendingStores, setPendingStores] = useState<Store[]>([]);
   const [subscriptionPlans, setSubscriptionPlans] = useState<any[]>([]);
   const [plansLoading, setPlansLoading] = useState(false);
+  const [editingPlan, setEditingPlan] = useState<any>(null);
   const [planSaving, setPlanSaving] = useState(false);
   const [plansSubTab, setPlansSubTab] = useState<'STORE_PLANS' | 'STORE_SUBSCRIPTIONS' | 'RENTAL_PACKAGES'>('STORE_PLANS');
   const [rentalPackages, setRentalPackages] = useState<RentalPackageItem[]>([]);
@@ -2120,7 +2122,8 @@ export const AdminDashboard: React.FC = () => {
                     const planId = String(plan.planId || plan.id || '');
                     return <div key={planId} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><p className="truncate text-sm font-semibold text-zinc-900 dark:text-white">{plan.planName}</p><span className={`rounded-full px-2 py-0.5 text-[10px] font-bold ${plan.isActive ? 'bg-emerald-50 text-emerald-700 dark:bg-emerald-950/40 dark:text-emerald-300' : 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>{plan.isActive ? 'ĐANG HOẠT ĐỘNG' : 'TẠM DỪNG'}</span></div><p className="mt-1 text-xs text-zinc-500">{plan.planCode} · {Number(plan.price || 0).toLocaleString('vi-VN')} ₫ · {plan.durationDays} ngày · tối đa {plan.maxProducts} sản phẩm</p>{plan.description && <p className="mt-1 text-xs text-zinc-500">{plan.description}</p>}</div>
-                      <button type="button" onClick={() => handlePlanActiveChange(plan)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${plan.isActive ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{plan.isActive ? 'Tạm dừng' : 'Kích hoạt'}</button>
+                      <div className="flex shrink-0 flex-wrap items-center gap-2"><button type="button" onClick={() => setEditingPlan(plan)} className="min-h-9 rounded-lg border border-sky-200 px-3 py-1.5 text-xs font-semibold text-[#287DA8] hover:bg-sky-50 dark:border-sky-800 dark:text-sky-300">Chỉnh sửa</button>
+                      <button type="button" onClick={() => handlePlanActiveChange(plan)} className={`rounded-lg px-3 py-1.5 text-xs font-semibold transition-colors cursor-pointer ${plan.isActive ? 'border border-amber-200 bg-amber-50 text-amber-700 hover:bg-amber-100 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300' : 'bg-emerald-600 text-white hover:bg-emerald-700'}`}>{plan.isActive ? 'Tạm dừng' : 'Kích hoạt'}</button></div>
                     </div>;
                   })}</div>}
                 </section>
@@ -3277,6 +3280,11 @@ export const AdminDashboard: React.FC = () => {
         </AnimatePresence>,
         document.body
       )}
+      {editingPlan && <EditStorePlanModal key={String(editingPlan.planId || editingPlan.id)} plan={editingPlan} onClose={() => setEditingPlan(null)} onSaved={changes => {
+        setSubscriptionPlans(items => items.map(item => String(item.planId || item.id) === String(editingPlan.planId || editingPlan.id) ? { ...item, ...changes } : item));
+        setEditingPlan(null);
+        void loadSubscriptionPlans();
+      }} />}
     </div>
   );
 };

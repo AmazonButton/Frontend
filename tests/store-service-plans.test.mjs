@@ -91,7 +91,7 @@ function screen(prefix,{post,get,storage=new Map(),component='page'}={}) {
   const source=readFileSync(new URL(prefix+(component==='page'?'pages/store/StoreServicePlansPage.tsx':component==='history'?'components/store/StoreRegisteredPeriods.tsx':'components/store/StorePlanPayosPayment.tsx'),import.meta.url),'utf8');const exports={};
   vm.runInNewContext(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2020,jsx:ts.JsxEmit.ReactJSX}}).outputText,{
     exports,URL,document:{visibilityState:'visible'},crypto:{randomUUID:()=> 'test-uuid'},sessionStorage:{getItem:k=>storage.get(k)||null,setItem:(k,v)=>storage.set(k,v),removeItem:k=>storage.delete(k)},window:{location:{origin:'https://frontend.example'},setInterval:fn=>{const id=timers.size+1;timers.set(id,fn);return id;},clearInterval:id=>timers.delete(id),addEventListener(){},removeEventListener(){}},
-    require(name){if(name==='react')return react;if(name==='react/jsx-runtime')return{jsx,jsxs:jsx};if(name==='react-router-dom')return{Link:'a'};if(name==='lucide-react')return new Proxy({},{get:(_,k)=>`icon.${String(k)}`});if(name.endsWith('/api'))return{api:transport};if(name.endsWith('/AuthContext'))return{useAuth:()=>({user:{id:'7',storeId:'12',role:'STORE_OWNER'}})};if(name.endsWith('/store-finance-flow'))return{financeError,financeStoreId:()=> '12'};if(name.endsWith('/wallet.service'))return{walletService:{getWallet:async()=>({data:{storeId:'12',availableBalance:100000}})}};if(name.endsWith('/request-backoff'))return{getApiRetryUntil:()=>0};if(name.endsWith('/store-service-plans'))return plans;if(name.endsWith('/store-subscription-overview'))return overview;if(name.endsWith('/BankingPrimitives'))return{BankError:'error',bankButton:'button'};if(name.endsWith('/OperationPrimitives'))return{card:'card',primaryButton:'primary'};if(name.endsWith('/StorePlanPayosPayment'))return{StorePlanPayosPayment:'payos-payment'};throw Error(name);},
+    require(name){if(name==='react-dom')return{createPortal:children=>children};if(name.endsWith('/useBodyScrollLock'))return{useBodyScrollLock:()=>{}};if(name==='react')return react;if(name==='react/jsx-runtime')return{jsx,jsxs:jsx};if(name==='react-router-dom')return{Link:'a'};if(name==='lucide-react')return new Proxy({},{get:(_,k)=>`icon.${String(k)}`});if(name.endsWith('/api'))return{api:transport};if(name.endsWith('/AuthContext'))return{useAuth:()=>({user:{id:'7',storeId:'12',role:'STORE_OWNER'}})};if(name.endsWith('/store-finance-flow'))return{financeError,financeStoreId:()=> '12'};if(name.endsWith('/wallet.service'))return{walletService:{getWallet:async()=>({data:{storeId:'12',availableBalance:100000}})}};if(name.endsWith('/request-backoff'))return{getApiRetryUntil:()=>0};if(name.endsWith('/store-service-plans'))return plans;if(name.endsWith('/store-subscription-overview'))return overview;if(name.endsWith('/BankingPrimitives'))return{BankError:'error',bankButton:'button'};if(name.endsWith('/OperationPrimitives'))return{card:'card',primaryButton:'primary'};if(name.endsWith('/StorePlanPayosPayment'))return{StorePlanPayosPayment:'payos-payment'};throw Error(name);},
   });
   const walk=v=>v&&typeof v==='object'?[v,...[v.props?.children].flat(Infinity).flatMap(walk)]:[];
   const text=v=>v==null||typeof v==='boolean'?'':typeof v!=='object'?String(v):[v.props?.children].flat(Infinity).map(text).join('');
@@ -138,7 +138,7 @@ for(const prefix of ['../src/','../frontend/src/']) {
       const slow=deferred();let reads=0;
       const app=screen(prefix,{component,get:path=>path.endsWith('/plans')&&++reads===(component==='page'?2:1)?slow.promise:undefined});
       await app.flush();if(component==='page')await app.click('Đăng ký gói');
-      const button=app.button(component==='page'?'Xác nhận đăng ký & thanh toán':'Tạo thanh toán PayOS');
+      const button=app.button(component==='page'?'Thanh toán bằng ví cửa hàng':'Tạo thanh toán PayOS');
       const work=button.props.onClick();await app.flush();app.unmount();slow.resolve(ok([plan]));await work;
       assert.equal(app.calls.some(call=>call.method==='post'),false);
     }
@@ -167,16 +167,16 @@ for(const prefix of ['../src/','../frontend/src/']) {
   });
   test(`${prefix}plan selection never charges until explicit confirmation and then reads the actual effective period`,async()=>{
     const app=screen(prefix);await app.flush();assert.match(app.text,/60\.000/);assert.equal(app.calls.some(c=>c.method==='post'),false);
-    await app.click('Đăng ký gói');assert.equal(app.calls.some(c=>c.method==='post'),false);await app.click('Xác nhận đăng ký & thanh toán');
+    await app.click('Đăng ký gói');assert.equal(app.calls.some(c=>c.method==='post'),false);await app.click('Thanh toán bằng ví cửa hàng');
     const call=app.calls.find(c=>c.method==='post');assert.equal(call.path,'/store/subscriptions/subscribe');assert.equal(call.body.planId,1);assert.equal(app.storage.size,0);assert.match(app.text,/Đăng ký #19/);app.unmount();
   });
   test(`${prefix}uncertain plan registration is not retried automatically and keeps its idempotency key on explicit recovery`,async()=>{
-    const app=screen(prefix,{post:async()=>{throw new Error('timeout');}});await app.flush();await app.click('Đăng ký gói');await app.click('Xác nhận đăng ký & thanh toán');
+    const app=screen(prefix,{post:async()=>{throw new Error('timeout');}});await app.flush();await app.click('Đăng ký gói');await app.click('Thanh toán bằng ví cửa hàng');
     assert.equal(app.calls.filter(c=>c.method==='post').length,1);assert.equal(app.storage.size,1);const key=app.calls.find(c=>c.method==='post').body.idempotencyKey;
     const retry=app.nodes.filter(n=>n.type==='button'&&visibleText(n)==='Kiểm tra lại yêu cầu').at(-1);assert.ok(retry);await retry.props.onClick();await app.flush();
     assert.equal(app.calls.filter(c=>c.method==='post').length,2);assert.equal(app.calls.filter(c=>c.method==='post')[1].body.idempotencyKey,key);app.unmount();
   });
   test(`${prefix}duplicate confirmation clicks send one registration`,async()=>{
-    const job=deferred();const app=screen(prefix,{post:()=>job.promise});await app.flush();await app.click('Đăng ký gói');const button=app.button('Xác nhận đăng ký & thanh toán');const one=button.props.onClick(),two=button.props.onClick();await app.flush();assert.equal(app.calls.filter(c=>c.method==='post').length,1);job.resolve(ok(subscription));await Promise.all([one,two]);await app.flush();app.unmount();
+    const job=deferred();const app=screen(prefix,{post:()=>job.promise});await app.flush();await app.click('Đăng ký gói');const button=app.button('Thanh toán bằng ví cửa hàng');const one=button.props.onClick(),two=button.props.onClick();await app.flush();assert.equal(app.calls.filter(c=>c.method==='post').length,1);job.resolve(ok(subscription));await Promise.all([one,two]);await app.flush();app.unmount();
   });
 }

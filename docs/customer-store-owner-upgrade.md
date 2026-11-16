@@ -1,5 +1,6 @@
 # Nâng cấp khách hàng thành chủ cửa hàng
 
+    
 ## Giao diện đã bổ sung
 
 - Tên mục: **Trở thành chủ cửa hàng**.

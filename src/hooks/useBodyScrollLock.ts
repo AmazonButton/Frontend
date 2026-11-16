@@ -121,6 +121,8 @@ export function useBodyScrollLock(isLocked: boolean = true): void {
  * Check if a DOM element represents a modal backdrop overlay
  */
 const isModalBackdropElement = (el: Element): boolean => {
+  // Persistent payment dialogs stay mounted while hidden to retain their session.
+  if (el.closest('[hidden]')) return false;
   if (el.hasAttribute('data-modal') || el.getAttribute('role') === 'dialog') {
     return true;
   }
@@ -174,6 +176,8 @@ export function initGlobalModalScrollLock(): () => void {
   observer.observe(document.body, {
     childList: true,
     subtree: true,
+    attributes: true,
+    attributeFilter: ['hidden'],
   });
 
   // Initial check
