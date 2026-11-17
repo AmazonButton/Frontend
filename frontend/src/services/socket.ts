@@ -66,8 +66,13 @@ export function resolveSocketUrl(): string {
   if (typeof envSocketUrl === 'string' && envSocketUrl.startsWith('http') && !envSocketUrl.includes('workers.dev')) return envSocketUrl.trim().replace(/\/+$/, '');
   const resolved = typeof resolveApiUrl === 'function' ? resolveApiUrl() : API_URL;
   if (typeof resolved === 'string' && resolved.startsWith('http') && !resolved.includes('workers.dev')) return resolved.trim().replace(/\/+$/, '');
-  if (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1')) {
-    return 'http://localhost:5000';
+  // API calls can use a same-origin proxy while WebSockets connect directly
+  // to the backend configured for that proxy.
+  const backendUrl = (import.meta as any).env?.VITE_BACKEND_URL
+    || (import.meta as any).env?.VITE_API_BASE_URL
+    || (import.meta as any).env?.VITE_API_URL;
+  if (typeof backendUrl === 'string' && backendUrl.startsWith('http') && !backendUrl.includes('workers.dev')) {
+    return backendUrl.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '').replace(/\/api$/, '');
   }
   return CLUSTER_WEBSOCKET_NODES[0];
 }

@@ -27,12 +27,13 @@ export const productDiscounts = {
   },
   async remove(id: string) { return api.delete(`/discounts/${id}`); },
 };
-export function discountedPrice(price: number, discounts: ProductDiscount[] = [], now = Date.now()) {
+export function discountedPrice(price: number, discounts: ProductDiscount[] = [], now = Date.now(), decimalPlaces = 0) {
   const active = discounts.find(discount => discount.status === 'ACTIVE'
     && Date.parse(discount.startAt) <= now && Date.parse(discount.endAt) >= now);
   if (!active) return price;
+  const scale = 10 ** decimalPlaces;
   const reduction = active.discountPercent != null
-    ? Math.round(price * Number(active.discountPercent) / 100)
+    ? Math.round(price * Number(active.discountPercent) / 100 * scale) / scale
     : Number(active.discountAmount || 0);
   return Number.isFinite(reduction) ? Math.max(0, price - reduction) : price;
 }

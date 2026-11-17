@@ -1,4 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
+import { useProductDiscounts } from '../hooks/useProductDiscounts';
+import { DiscountPrice } from '../components/products/DiscountPrice';
 import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, MotionConfig, useReducedMotion } from 'framer-motion';
 import { Play, Pause, Volume2, VolumeX, ArrowRight, ShieldCheck, Zap, Battery, CheckCircle2, ShoppingCart, Search, Droplets, Star, Shield, Check, Sparkles, MousePointerClick, SearchX, Cog, Truck, ChevronLeft, ChevronRight, X } from 'lucide-react';
@@ -184,6 +186,7 @@ export const LandingPage: React.FC = () => {
   const [addedProductId, setAddedProductId] = useState<string | null>(null);
   const cachedCatalog = getInitialStorefrontCatalog();
   const [storefrontProducts, setStorefrontProducts] = useState<any[]>(cachedCatalog);
+  const { discounts, now: discountNow } = useProductDiscounts(storefrontProducts.slice(0, 8).map(product => String(product.id)));
   const [productsLoading, setProductsLoading] = useState(cachedCatalog.length === 0);
   const [cartCount, setCartCount] = useState(0);
   const [cartPulse, setCartPulse] = useState(false);
@@ -443,7 +446,7 @@ export const LandingPage: React.FC = () => {
                   <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#1976D2]"><ShoppingCart className="h-4 w-4"/>{selectedProduct.store?.name || 'Cửa hàng đối tác'}</div>
                   <p className="mt-5 text-sm font-medium text-slate-500">{selectedProduct.category}{selectedProduct.brand ? ` · ${selectedProduct.brand}` : ''}</p>
                   <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{selectedProduct.name}</h2>
-                  <p className="mt-4 text-3xl font-bold text-[#1976D2]">{Number(selectedProduct.price).toLocaleString('vi-VN')} ₫</p>
+                  <p className="mt-4 text-3xl font-bold text-[#1976D2]"><DiscountPrice price={Number(selectedProduct.price)} discounts={discounts[selectedProduct.id]} now={discountNow}/></p>
                   <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600"><p>Đơn vị: <strong className="text-slate-800">{selectedProduct.unit || 'Sản phẩm'}</strong></p><p className="mt-1">Sản phẩm được cập nhật giá và tồn kho trực tiếp từ cửa hàng.</p></div>
                   <p className="mt-4 text-sm font-medium text-emerald-700">{Math.max(0, Number(selectedProduct.stock || 0) - Number(selectedProduct.reservedStock || 0)) > 0 ? `Còn hàng · ${Math.max(0, Number(selectedProduct.stock || 0) - Number(selectedProduct.reservedStock || 0))} sản phẩm` : 'Tạm hết hàng'}</p>
                   <div className="mt-auto grid gap-3 pt-8 sm:grid-cols-2">
@@ -638,7 +641,7 @@ export const LandingPage: React.FC = () => {
                         {product.name}
                       </h3>
                       <span className="mt-1 text-lg font-bold tabular-nums text-[#1976D2] dark:text-sky-400">
-                        {Number(product.price).toLocaleString('vi-VN')} ₫
+                        <DiscountPrice price={Number(product.price)} discounts={discounts[product.id]} now={discountNow}/>
                       </span>
                       <p className="mt-2 break-words text-[13px] leading-5 text-slate-600 dark:text-slate-300">{product.store?.name || 'Đang bán'}</p>
                       <p className="mt-1 break-words text-[13px] leading-5 text-slate-600 dark:text-slate-400">

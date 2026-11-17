@@ -21,6 +21,8 @@ const WhiteDeviceAirPodsModal = React.lazy(() => import('../../components/device
 import { OrderSuccessModal } from '../../components/orders/OrderSuccessModal';
 import { CustomerStoreSelectorModal, StoreItem } from '../../components/customer/CustomerStoreSelectorModal';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
+import { useProductDiscounts } from '../../hooks/useProductDiscounts';
+import { discountedPrice } from '../../services/product-discounts';
 
 
 // ─────────────────────────────────────────────
@@ -307,6 +309,10 @@ const CustomerHomeWorkspace: React.FC = () => {
   const [configSuccessMsg, setConfigSuccessMsg] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
   const [availableProducts, setAvailableProducts] = useState<Product[]>([]);
+  const { discounts, now: discountNow } = useProductDiscounts([
+    ...devices.map(device => device.configuration?.productId || device.productId || device.configuration?.product?.id || device.product?.id || ''),
+    ...availableProducts.map(product => product.id),
+  ]);
   const [unclaimingDevice, setUnclaimingDevice] = useState<Device | null>(null);
   const [unclaimLoading, setUnclaimLoading] = useState(false);
 
@@ -1132,7 +1138,8 @@ const CustomerHomeWorkspace: React.FC = () => {
 
               const name = dev.customName || cfg?.customName || 'Nút Đặt Hàng';
               const quantity = cfg?.defaultQuantity || 1;
-              const unitPrice = product?.price ?? 0;
+              // Button orders snapshot percentage discounts to two decimal places.
+              const unitPrice = product ? discountedPrice(product.price, discounts[product.id], discountNow, 2) : 0;
               const totalPrice = unitPrice * quantity;
               const priceStr = product ? `${Number(totalPrice || 0).toLocaleString('vi-VN')} ₫` : null;
 
@@ -1749,7 +1756,7 @@ const CustomerHomeWorkspace: React.FC = () => {
                       <option value="">-- Chọn sản phẩm --</option>
                       {availableProducts.filter(p => String(p.storeId) === String(configModalDevice.storeId)).map((p) => (
                         <option key={p.id} value={p.id}>
-                          {p.name} {p.unit ? `(${p.unit})` : ''} — {p.price?.toLocaleString('vi-VN')} đ
+                          {p.name} {p.unit ? `(${p.unit})` : ''} — {discountedPrice(p.price, discounts[p.id], discountNow).toLocaleString('vi-VN')} đ
                         </option>
                       ))}
                     </select>
