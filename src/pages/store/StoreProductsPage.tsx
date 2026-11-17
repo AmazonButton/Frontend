@@ -1,3 +1,4 @@
+import { ProductDiscountPanel } from '../../components/products/ProductDiscountPanel';
 // @refresh reset
 import { formatMetric } from '../../services/dashboard-metrics';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -15,6 +16,7 @@ import { isStoreSuspended } from '../../services/store-status';
 import { Link } from 'react-router-dom';
 import { Product } from '../../types';
 import {
+  Tag,
   Package,
   Plus,
   AlertTriangle,
@@ -164,6 +166,7 @@ export const StoreProductsPage: React.FC = () => {
   const [productsError, setProductsError] = useState('');
 
   // Edit Product Modal State
+  const [discountProduct, setDiscountProduct] = useState<Product | null>(null);
   const [editingProduct, setEditingProduct] = useState<Product | null>(null);
   const [editName, setEditName] = useState('');
   const [editBrand, setEditBrand] = useState('');
@@ -629,6 +632,7 @@ export const StoreProductsPage: React.FC = () => {
 
   return (
     <div className="space-y-6 text-zinc-900 dark:text-zinc-100">
+      {discountProduct && <ProductDiscountPanel product={discountProduct} onClose={() => setDiscountProduct(null)}/> }
       {!user?.storeId && user?.role !== 'SUPER_ADMIN' && (
         <div className="p-3.5 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-xl flex items-center gap-3 text-xs text-amber-800 dark:text-amber-200 animate-in fade-in">
           <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600 dark:text-amber-400" />
@@ -1114,6 +1118,17 @@ export const StoreProductsPage: React.FC = () => {
                       {/* Thao Tác Chi Tiết */}
                       <td className="py-3 px-4 text-right whitespace-nowrap">
                         <div className="inline-flex items-center gap-1">
+                          <button
+                            type="button"
+                            disabled={isSuspended}
+                            onClick={() => setDiscountProduct(prod)}
+                            title="Quản lý giảm giá"
+                            aria-label={`Quản lý giảm giá ${prod.name}`}
+                            className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[#287DA8] hover:bg-[#287DA8]/10"
+                          >
+                            <Tag size={14}/>
+                            <span className="hidden sm:inline text-[11px] font-medium">Giảm giá</span>
+                          </button>
                           <motion.button
                             type="button"
                             whileTap={{ scale: 0.94 }}

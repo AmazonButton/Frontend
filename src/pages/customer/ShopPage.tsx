@@ -1,3 +1,6 @@
+import { useProductDiscounts } from '../../hooks/useProductDiscounts';
+import { discountedPrice } from '../../services/product-discounts';
+import { DiscountPrice } from '../../components/products/DiscountPrice';
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
@@ -56,6 +59,10 @@ export const ShopPage: React.FC = () => {
   const cachedProducts = getInitialStorefrontCatalog();
   const [products, setProducts] = useState<Product[]>(cachedProducts);
   const [cart, setCart] = useState<CartLine[]>(loadCart);
+  const { discounts, now: discountNow } = useProductDiscounts([...products.map(product => product.id), ...cart.map(line => line.product.id)]);
+  const currentPrices = new Map(products.map(product => [product.id, product.price]));
+  const basePrice = (product: Product) => currentPrices.get(product.id) ?? product.price;
+  const salePrice = (product: Product) => discountedPrice(basePrice(product), discounts[product.id], discountNow);
   const [search, setSearch] = useState(() => {
     if (typeof window !== 'undefined') {
       return new URLSearchParams(window.location.search).get('search') || '';
@@ -258,7 +265,9 @@ export const ShopPage: React.FC = () => {
   const cartCount = cart.reduce((sum, line) => sum + line.quantity, 0);
   const selectedCart = useMemo(() => cart.filter((line) => line.selected !== false), [cart]);
   const selectedCount = selectedCart.reduce((sum, line) => sum + line.quantity, 0);
-  const total = selectedCart.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
+  const subtotal = selectedCart.reduce((sum, line) => sum + basePrice(line.product) * line.quantity, 0);
+  const total = selectedCart.reduce((sum, line) => sum + salePrice(line.product) * line.quantity, 0);
+  const savings = subtotal - total;
   const selectedStore = selectedCart[0]?.product.storeId;
   const cartGroups = useMemo(() => groupCartByStore(cart), [cart]);
   const selectedGroups = useMemo(() => groupCartByStore(selectedCart), [selectedCart]);
@@ -671,7 +680,7 @@ export const ShopPage: React.FC = () => {
         const stock = Math.max(0, product.stock - product.reservedStock);
         return <article key={product.id} className="shop-product group overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
           <button type="button" onClick={() => setSelectedProduct(product)} className="shop-product-image relative block aspect-square w-full overflow-hidden bg-slate-50 text-left">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} crossOrigin="anonymous" referrerPolicy="no-referrer" loading="lazy" className="h-full w-full object-cover transition group-hover:scale-[1.03]"/> : <div className="grid h-full place-items-center text-5xl">🛍️</div>}<span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-slate-600"><Store className="mr-1 inline" size={12}/>{product.store.name}</span></button>
-          <div className="shop-product-info p-3 sm:p-4"><p className="truncate text-[11px] font-semibold uppercase tracking-wide text-teal-700">{product.category}</p><h3 className="mt-1 min-h-10 text-sm font-semibold"><button type="button" onClick={() => setSelectedProduct(product)} className="line-clamp-2 text-left hover:text-[#287DA8] hover:underline">{product.name}</button></h3><p className="mt-1 truncate text-xs text-slate-500">{product.brand || product.unit}</p><div className="shop-product-actions mt-3 flex items-end justify-between gap-2"><div><p className="text-base font-bold text-[#287DA8]">{money(product.price)}</p><p className="text-[11px] text-slate-400">Còn {stock} {product.unit || 'sản phẩm'}</p></div><button type="button" onClick={() => buyNow(product)} disabled={!stock} className="shop-buy-now mt-2 w-auto shrink-0 rounded-lg border bg-[#287DA8] px-2 py-1.5 text-xs font-semibold text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:opacity-40">Mua ngay</button>{line ? <div className="shop-quantity flex items-center gap-2 rounded-lg bg-[#EAF4F9] p-1"><button onClick={() => changeQuantity(product,-1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white"><Minus size={15}/></button><span className="min-w-4 text-center text-sm font-semibold">{line.quantity}</span><button disabled={line.quantity >= stock} onClick={() => changeQuantity(product,1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white disabled:opacity-40"><Plus size={15}/></button></div> : <button disabled={!stock || (!!cartStore && cartStore !== product.storeId)} title={cartStore && cartStore !== product.storeId ? 'Hoàn tất giỏ hiện tại trước khi chọn cửa hàng khác' : ''} onClick={(event) => addWithAnimation(product, event)} aria-label={`Th?m ${product.name} v?o gi?`} className="shop-add grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#287DA8] text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:bg-slate-300"><Plus size={18}/></button>}</div></div>
+          <div className="shop-product-info p-3 sm:p-4"><p className="truncate text-[11px] font-semibold uppercase tracking-wide text-teal-700">{product.category}</p><h3 className="mt-1 min-h-10 text-sm font-semibold"><button type="button" onClick={() => setSelectedProduct(product)} className="line-clamp-2 text-left hover:text-[#287DA8] hover:underline">{product.name}</button></h3><p className="mt-1 truncate text-xs text-slate-500">{product.brand || product.unit}</p><div className="shop-product-actions mt-3 flex items-end justify-between gap-2"><div><p className="text-base font-bold text-[#287DA8]">{<DiscountPrice price={basePrice(product)} discounts={discounts[product.id]} now={discountNow}/>}</p><p className="text-[11px] text-slate-400">Còn {stock} {product.unit || 'sản phẩm'}</p></div><button type="button" onClick={() => buyNow(product)} disabled={!stock} className="shop-buy-now mt-2 w-auto shrink-0 rounded-lg border bg-[#287DA8] px-2 py-1.5 text-xs font-semibold text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:opacity-40">Mua ngay</button>{line ? <div className="shop-quantity flex items-center gap-2 rounded-lg bg-[#EAF4F9] p-1"><button onClick={() => changeQuantity(product,-1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white"><Minus size={15}/></button><span className="min-w-4 text-center text-sm font-semibold">{line.quantity}</span><button disabled={line.quantity >= stock} onClick={() => changeQuantity(product,1)} className="grid h-7 w-7 place-items-center rounded-md text-[#287DA8] hover:bg-white disabled:opacity-40"><Plus size={15}/></button></div> : <button disabled={!stock || (!!cartStore && cartStore !== product.storeId)} title={cartStore && cartStore !== product.storeId ? 'Hoàn tất giỏ hiện tại trước khi chọn cửa hàng khác' : ''} onClick={(event) => addWithAnimation(product, event)} aria-label={`Th?m ${product.name} v?o gi?`} className="shop-add grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-[#287DA8] text-white hover:bg-[#206588] disabled:cursor-not-allowed disabled:bg-slate-300"><Plus size={18}/></button>}</div></div>
         </article>;
       })}</div>}
       <p className="mt-8 text-center text-xs text-slate-400">Bạn có thể xem sản phẩm mà không cần tài khoản. Đơn hàng trực tuyến sẽ được gửi trực tiếp đến cửa hàng bán sản phẩm.</p>
@@ -695,7 +704,7 @@ export const ShopPage: React.FC = () => {
                   <div className="mb-4 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-[#287DA8]"><Store size={15}/>{selectedProduct.store.name}</div>
                   <p className="text-sm font-medium text-slate-500">{selectedProduct.category}{selectedProduct.brand ? ` · ${selectedProduct.brand}` : ''}</p>
                   <h2 className="mt-2 text-2xl font-bold tracking-tight text-slate-900 sm:text-3xl">{selectedProduct.name}</h2>
-                  <p className="mt-4 text-3xl font-bold text-[#287DA8]">{money(selectedProduct.price)}</p>
+                  <p className="mt-4 text-3xl font-bold text-[#287DA8]">{<DiscountPrice price={basePrice(selectedProduct)} discounts={discounts[selectedProduct.id]} now={discountNow}/>}</p>
                   <div className="mt-5 rounded-2xl bg-slate-50 p-4 text-sm leading-6 text-slate-600">
                     <p>Đơn vị: <strong className="text-slate-800">{selectedProduct.unit || 'Sản phẩm'}</strong></p>
                     <p className="mt-1">Sản phẩm được cung cấp bởi {selectedProduct.store.name}, cập nhật tồn kho theo thời gian thực.</p>
@@ -770,7 +779,7 @@ export const ShopPage: React.FC = () => {
                   </label>
                   {cartGroups.map((group) => {
                     const isAllGroupSelected = group.lines.length > 0 && group.lines.every((line) => line.selected);
-                    const groupTotal = group.lines.reduce((sum, line) => sum + line.product.price * line.quantity, 0);
+                    const groupTotal = group.lines.reduce((sum, line) => sum + salePrice(line.product) * line.quantity, 0);
 
                     return (
                     <motion.section layout key={group.storeId} className="mb-4 overflow-hidden rounded-xl border border-slate-200 bg-white p-3 shadow-xs">
@@ -838,7 +847,7 @@ export const ShopPage: React.FC = () => {
                         <p className="truncate text-sm font-semibold">{product.name}</p>
                         <p className="text-xs text-slate-500">{product.store.name}</p>
                         <div className="mt-1.5 flex items-center justify-between">
-                          <b className="text-sm text-[#287DA8]">{money(product.price * quantity)}</b>
+                          <b className="text-sm text-[#287DA8]">{<DiscountPrice price={basePrice(product)} quantity={quantity} discounts={discounts[product.id]} now={discountNow}/>}</b>
                           <div className="flex items-center gap-1.5">
                             <motion.button
                               whileTap={{ scale: 0.8 }}
@@ -909,7 +918,7 @@ export const ShopPage: React.FC = () => {
                   <span className="font-bold text-[#287DA8]">{money(total)}</span>
                 </div>
               )}
-              <div className="mb-4 flex justify-between text-sm">
+              {savings > 0 && <div className="mb-3 space-y-2 text-sm"><div className="flex justify-between text-slate-500"><span>Tiền hàng trước giảm</span><span>{money(subtotal)}</span></div><div className="flex justify-between text-emerald-700"><span>Ưu đãi sản phẩm · Tự động áp dụng</span><span>−{money(savings)}</span></div></div>}<div className="mb-4 flex justify-between text-sm">
                 <span className="text-slate-600">Tổng cộng</span>
                 <b className="text-lg text-[#287DA8]">{money(total)}</b>
               </div>
@@ -1102,10 +1111,10 @@ export const ShopPage: React.FC = () => {
 
             <div className="mt-5 border-t border-slate-200 pt-4 lg:mt-auto lg:pt-5">
             {selectedGroups.length > 1 && <div className="mb-4 space-y-2 rounded-xl bg-sky-50 p-3 text-xs text-slate-600">
-              {selectedGroups.map((group) => <div key={group.storeId} className="flex justify-between gap-3"><span>{group.storeName}</span><b>{money(group.totalAmount)}</b></div>)}
+              {selectedGroups.map((group) => <div key={group.storeId} className="flex justify-between gap-3"><span>{group.storeName}</span><b>{money(group.lines.reduce((sum, line) => sum + salePrice(line.product) * line.quantity, 0))}</b></div>)}
               <p className="border-t border-sky-100 pt-2">{form.paymentMethod === 'PAYOS' ? 'Sau khi đặt hàng, thanh toán PayOS riêng cho từng đơn trong lịch sử đơn hàng.' : 'Thanh toán COD riêng khi nhận hàng của từng cửa hàng.'}</p>
             </div>}
-            <div className="flex items-center justify-between gap-3 text-sm">
+            {savings > 0 && <div className="mb-3 space-y-2 text-sm"><div className="flex justify-between text-slate-500"><span>Tiền hàng trước giảm</span><span>{money(subtotal)}</span></div><div className="flex justify-between text-emerald-700"><span>Ưu đãi sản phẩm · Tự động áp dụng</span><span>−{money(savings)}</span></div></div>}<div className="flex items-center justify-between gap-3 text-sm">
               <span className="text-slate-600">Tổng thanh toán</span>
               <b className="text-lg text-[#287DA8]">{money(total)}</b>
             </div>
