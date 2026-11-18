@@ -1,14 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { ChevronDown, KeyRound, LogOut, MapPin, ShoppingBag, UserRound } from 'lucide-react';
+import { ChevronDown, KeyRound, LogOut, UserRound } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { LogoutConfirmModal } from '../common/LogoutConfirmModal';
 
 export const ADMIN_ACCOUNT_LINKS = [
   { to: '/admin/profile?tab=INFO', tab: 'INFO', label: 'Thông tin cá nhân', icon: UserRound },
-  { to: '/admin/profile?tab=ORDERS', tab: 'ORDERS', label: 'Lịch sử đặt hàng', icon: ShoppingBag },
-  { to: '/admin/profile?tab=ADDRESSES', tab: 'ADDRESSES', label: 'Địa chỉ đã lưu', icon: MapPin },
   { to: '/admin/profile?tab=SECURITY', tab: 'SECURITY', label: 'Bảo mật & Đổi mật khẩu', icon: KeyRound },
 ];
 

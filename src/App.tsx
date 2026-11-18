@@ -189,23 +189,11 @@ export const App: React.FC = () => {
             <Route path="/store/service-plans" element={<ProtectedRoute allowedRoles={['STORE_OWNER']}><StoreServicePlansPage /></ProtectedRoute>} />
             <Route path="/store/device-templates" element={<StoreDeviceTemplatesPage />} />
             <Route path="/store/products" element={<StoreProductsPage />} />
+            <Route path="/store/profile" element={<ProfilePage />} />
             <Route path="/store/analytics" element={<StoreRevenuePage />} />
             <Route path="/store/wallet" element={<Navigate to={storeWalletRedirect(location.search)} replace />} />
             <Route path="/store/finance" element={<ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER']}><StoreFinancePage /></ProtectedRoute>} />
           </Route>
-
-          {/* Standalone Store Profile Route (No Trạm Điều Hành sidebar) */}
-          <Route
-            path="/store/profile"
-            element={
-              <ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF']}>
-                <>
-                  <StandaloneProfileBackNavigation />
-                  <ProfilePage />
-                </>
-              </ProtectedRoute>
-            }
-          />
 
           {/* Customer routes share the collapsible desktop sidebar. */}
           <Route

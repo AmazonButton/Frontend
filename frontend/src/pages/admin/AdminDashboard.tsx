@@ -797,6 +797,33 @@ export const AdminDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchAdminData();
+
+    const handleStoreChange = () => {
+      try {
+        if (typeof window !== 'undefined' && window.sessionStorage) {
+          window.sessionStorage.removeItem('sob_cached_admin_stores');
+        }
+      } catch {}
+      fetchAdminData();
+    };
+
+    const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'smart_order_store_changed' || e.key === 'smart_order_catalog_changed') {
+        handleStoreChange();
+      }
+    };
+
+    window.addEventListener('store:updated', handleStoreChange);
+    window.addEventListener('catalog:changed', handleStoreChange);
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener('focus', handleStoreChange);
+
+    return () => {
+      window.removeEventListener('store:updated', handleStoreChange);
+      window.removeEventListener('catalog:changed', handleStoreChange);
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener('focus', handleStoreChange);
+    };
   }, []);
 
   const handleApprove = async (storeId: string) => {

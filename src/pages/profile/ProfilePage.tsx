@@ -70,7 +70,7 @@ export const ProfilePage: React.FC = () => {
   const requestedTab = searchParams.get('tab') || 'INFO';
   const allowedTabs: ProfileTab[] = isStoreOwner
     ? ['INFO', 'NOTIFICATIONS', 'SECURITY']
-    : isAdmin ? ['INFO', 'ORDERS', 'ADDRESSES', 'SECURITY']
+    : isAdmin ? ['INFO', 'SECURITY']
     : isCustomer ? ['INFO', 'DEVICES', 'ORDERS', 'SECURITY']
     : ['INFO', 'DEVICES', 'ORDERS', 'ADDRESSES', 'SECURITY'];
   const activeTab: ProfileTab = allowedTabs.includes(requestedTab as ProfileTab)
@@ -78,24 +78,25 @@ export const ProfilePage: React.FC = () => {
     : 'INFO';
 
   const cleanFullName = (name?: string) => {
-    if (!name) return 'Nguyễn Văn Định';
+    if (!name) return '';
     return name.replace(/\s*\([^)]*\)/g, '').trim();
   };
 
   // Form states for Personal / Store Info
   const [fullName, setFullName] = useState(() => cleanFullName(user?.fullName));
-  const [phone, setPhone] = useState(user?.phone || '0908112233');
+  const [phone, setPhone] = useState(user?.phone || '');
   const [deliveryAddress, setDeliveryAddress] = useState(
     user?.store?.address ||
       (user as any)?.customerProfile?.deliveryAddress ||
-      '45 Ung Văn Khiêm, Phường 25, Quận Bình Thạnh, TP. Hồ Chí Minh'
+      ''
   );
-  const [storeName, setStoreName] = useState(user?.store?.name || 'Đại lý Nước & Gas Gia Định');
-  const [storePhone, setStorePhone] = useState(user?.store?.phone || user?.phone || '0908112233');
-  const [storeCode] = useState(user?.store?.code || 'STORE-GD01');
+  const [storeName, setStoreName] = useState(user?.store?.name || '');
+  const [storePhone, setStorePhone] = useState(user?.store?.phone || user?.phone || '');
+  const [storeCode, setStoreCode] = useState(user?.store?.code || '');
   const [linkedStoreName, setLinkedStoreName] = useState(
-    user?.store?.name || 'Đại lý Nước & Gas Gia Định'
+    user?.store?.name || ''
   );
+  const [customerAddresses, setCustomerAddresses] = useState<any[]>([]);
   const [avatarPreview, setAvatarPreview] = useState<string | null>(() => {
     const uid = user?.id || 'store-owner';
     return localStorage.getItem(`sob_avatar_${uid}`) || (user as any)?.avatar || null;
@@ -148,10 +149,13 @@ export const ProfilePage: React.FC = () => {
   useEffect(() => {
     if (user) {
       setFullName(cleanFullName(user.fullName));
-      setPhone(user.phone || '0908112233');
+      setPhone(user.phone || '');
       if (user.store) {
-        setStoreName(user.store.name || 'Đại lý Nước & Gas Gia Định');
-        setStorePhone(user.store.phone || user.phone || '0908112233');
+        setStoreName(user.store.name || '');
+        setStorePhone(user.store.phone || user.phone || '');
+        if (user.store.code) {
+          setStoreCode(user.store.code);
+        }
         if (user.store.address) {
           setDeliveryAddress(user.store.address);
         }
@@ -164,26 +168,57 @@ export const ProfilePage: React.FC = () => {
     }
   }, [user]);
 
+  // Load latest store data for store owners from backend
+  useEffect(() => {
+    if (!isStoreOwner) return;
+    let active = true;
+    const loadStoreData = async () => {
+      try {
+        const res = await api.get('/stores/me');
+        if (active && res.data?.success && res.data?.data) {
+          const s = res.data.data;
+          if (s.name) setStoreName(s.name);
+          if (s.code) setStoreCode(s.code);
+          if (s.phone) setStorePhone(s.phone);
+          if (s.address) setDeliveryAddress(s.address);
+          if (s.owner?.fullName) setFullName(cleanFullName(s.owner.fullName));
+        }
+      } catch {
+        // Fallback to user context
+      }
+    };
+    loadStoreData();
+    return () => { active = false; };
+  }, [isStoreOwner]);
+
   // Sync tab with URL
   const handleTabChange = (tab: ProfileTab) => {
     setSearchParams({ tab });
   };
 
-  // Store operations live on their dedicated screens.
+  // Associated Data (Devices, Orders, Customer Addresses)
   useEffect(() => {
     if (isStoreOwner) return;
     const loadAssociatedData = async () => {
       setLoadingData(true);
       try {
-        const [devRes, ordRes] = await Promise.all([
+        const [devRes, ordRes, addrRes] = await Promise.all([
           isAdmin ? Promise.resolve({ data: { success: false, data: [] } }) : api.get('/devices').catch(() => ({ data: { success: false, data: [] } })),
           api.get('/orders').catch(() => ({ data: { success: false, data: [] } })),
+          isCustomer ? api.get('/customer-addresses').catch(() => ({ data: { success: false, data: [] } })) : Promise.resolve({ data: { success: false, data: [] } }),
         ]);
         if (devRes.data?.success && Array.isArray(devRes.data.data)) {
           setDevices(devRes.data.data);
         }
         if (ordRes.data?.success && Array.isArray(ordRes.data.data)) {
           setOrders(ordRes.data.data.map(normalizeOrder));
+        }
+        if (addrRes.data?.success && Array.isArray(addrRes.data.data)) {
+          setCustomerAddresses(addrRes.data.data);
+          const defaultAddr = addrRes.data.data.find((a: any) => a.isDefault) || addrRes.data.data[0];
+          if (defaultAddr?.addressDetail) {
+            setDeliveryAddress(defaultAddr.addressDetail);
+          }
         }
       } catch (_) {
         // Fallback gracefully
@@ -193,7 +228,7 @@ export const ProfilePage: React.FC = () => {
     };
 
     loadAssociatedData();
-  }, [isStoreOwner, isAdmin]);
+  }, [isStoreOwner, isAdmin, isCustomer]);
 
   // Avatar initial letter helper
   const getInitials = (name?: string) => {
@@ -243,29 +278,118 @@ export const ProfilePage: React.FC = () => {
     setErrorToast(null);
 
     try {
-      // PATCH /auth/profile only permits account-level fields. The API rejects
-      // store and address fields as a mass-assignment safeguard.
-      const payload = {
-        fullName: fullName.trim(),
-        phone: (isStoreOwner ? storePhone : phone).trim(),
-      };
+      if (isStoreOwner) {
+        // 1. Update Store Details (B2B)
+        // PATCH /api/v1/stores/me updates store name, hotline phone, and address in database
+        const storePayload: { name: string; phone?: string; address?: string } = {
+          name: storeName.trim(),
+        };
+        if (storePhone.trim()) {
+          storePayload.phone = storePhone.trim();
+        }
+        if (deliveryAddress.trim()) {
+          storePayload.address = deliveryAddress.trim();
+        }
 
-      const res = await api.patch('/auth/profile', payload);
-      if (res.data?.success) {
+        await api.patch('/stores/me', storePayload);
+
+        // 2. Update Owner Account Details (fullName) if changed
+        const trimmedName = fullName.trim();
+        if (trimmedName && trimmedName !== (user?.fullName || '').trim()) {
+          await api.patch('/auth/profile', { fullName: trimmedName });
+        }
+
+        // 3. Invalidate admin store cache so Admin dashboard immediately fetches fresh data
+        try {
+          if (typeof window !== 'undefined' && window.sessionStorage) {
+            window.sessionStorage.removeItem('sob_cached_admin_stores');
+          }
+        } catch {}
+
+        // 4. Notify other roles and open browser tabs
+        const changePayload = {
+          storeId: user?.store?.id || user?.store?.storeId,
+          name: storeName.trim(),
+          phone: storePhone.trim(),
+          address: deliveryAddress.trim(),
+          ownerName: trimmedName || user?.fullName,
+          timestamp: Date.now(),
+        };
+        try {
+          localStorage.setItem('smart_order_store_changed', JSON.stringify(changePayload));
+          localStorage.setItem('smart_order_catalog_changed', `${Date.now()}-${Math.random()}`);
+        } catch {}
+        window.dispatchEvent(new CustomEvent('store:updated', { detail: changePayload }));
+        window.dispatchEvent(new Event('catalog:changed'));
+
         await refreshUser();
-        setSuccessToast(
-          isStoreOwner
-            ? 'Đã cập nhật hồ sơ đại lý & chủ cửa hàng thành công!'
-            : 'Đã cập nhật thông tin cá nhân thành công!'
-        );
+        setSuccessToast('Đã cập nhật hồ sơ đại lý & chủ cửa hàng thành công! Thông tin đã được đồng bộ tới hệ thống quản trị.');
+        setTimeout(() => setSuccessToast(null), 4000);
+      } else {
+        // B2C Customer or Admin
+        const trimmedName = fullName.trim();
+        const trimmedPhone = phone.trim();
+        const phoneChanged = trimmedPhone && trimmedPhone !== (user?.phone || '').trim();
+
+        const profilePayload: any = {};
+        if (trimmedName && trimmedName !== (user?.fullName || '').trim()) {
+          profilePayload.fullName = trimmedName;
+        }
+        // Only include phone if the user actually typed a phone number different from current
+        if (phoneChanged) {
+          profilePayload.phone = trimmedPhone;
+        }
+
+        if (Object.keys(profilePayload).length > 0) {
+          await api.patch('/auth/profile', profilePayload);
+        }
+
+        // Save delivery address for Customer
+        const trimmedAddress = deliveryAddress.trim();
+        if (trimmedAddress && isCustomer) {
+          try {
+            const defaultAddr = customerAddresses.find((a: any) => a.isDefault) || customerAddresses[0];
+            if (defaultAddr && (defaultAddr.id || defaultAddr.addressId)) {
+              const addrId = defaultAddr.id || defaultAddr.addressId;
+              await api.patch(`/customer-addresses/${addrId}`, {
+                addressDetail: trimmedAddress,
+                recipientName: trimmedName || user?.fullName || 'Khách hàng',
+                phone: trimmedPhone || user?.phone || '0900000000',
+              });
+            } else {
+              const newAddrRes = await api.post('/customer-addresses', {
+                addressDetail: trimmedAddress,
+                recipientName: trimmedName || user?.fullName || 'Khách hàng',
+                phone: trimmedPhone || user?.phone || '0900000000',
+                isDefault: true,
+              });
+              if (newAddrRes.data?.data) {
+                setCustomerAddresses(prev => [newAddrRes.data.data, ...prev]);
+              }
+            }
+          } catch (addrErr) {
+            console.warn('Customer address sync non-blocking error:', addrErr);
+          }
+        }
+
+        try {
+          localStorage.setItem('smart_order_catalog_changed', `${Date.now()}-${Math.random()}`);
+        } catch {}
+        window.dispatchEvent(new Event('catalog:changed'));
+
+        await refreshUser();
+        setSuccessToast('Đã cập nhật thông tin cá nhân thành công!');
         setTimeout(() => setSuccessToast(null), 3500);
       }
     } catch (err: any) {
       const message = err?.response?.data?.message;
-      setErrorToast(
-        Array.isArray(message) ? message.join(' ') : message || 'Có lỗi xảy ra khi lưu thông tin.',
-      );
-      setTimeout(() => setErrorToast(null), 4000);
+      const errorText = Array.isArray(message)
+        ? message.join('. ')
+        : (message || (err?.response?.status === 500
+          ? 'Máy chủ phản hồi lỗi (500). Vui lòng kiểm tra lại thông tin nhập hoặc thử lại sau.'
+          : 'Có lỗi xảy ra khi lưu thông tin.'));
+      setErrorToast(errorText);
+      setTimeout(() => setErrorToast(null), 5000);
     } finally {
       setIsSaving(false);
     }
@@ -274,11 +398,11 @@ export const ProfilePage: React.FC = () => {
   // Revert changes
   const handleCancelChanges = () => {
     if (user) {
-      setFullName(user.fullName || '');
-      setPhone(user.phone || '0908776655');
+      setFullName(cleanFullName(user.fullName));
+      setPhone(user.phone || '');
       if (user.store) {
-        setStoreName(user.store.name || 'Đại lý Nước & Gas Gia Định');
-        setStorePhone(user.store.phone || user.phone || '0908776655');
+        setStoreName(user.store.name || '');
+        setStorePhone(user.store.phone || user.phone || '');
         if (user.store.address) {
           setDeliveryAddress(user.store.address);
         }
@@ -519,7 +643,7 @@ export const ProfilePage: React.FC = () => {
           label: 'Bảo mật & Đổi mật khẩu',
           icon: Key,
         },
-      ]).filter(item => !isAdmin || item.id !== 'DEVICES');
+      ]).filter(item => !isAdmin || item.id === 'INFO' || item.id === 'SECURITY');
 
   return (
     <motion.div
@@ -559,7 +683,7 @@ export const ProfilePage: React.FC = () => {
         {/* ================================================================= */}
         {/* LEFT SIDEBAR MENU                                                 */}
         {/* ================================================================= */}
-        {!isCustomer && !isAdmin && <aside className={`profile-navigation ${isStoreOwner ? 'lg:col-span-3' : 'lg:col-span-4'} bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-3 shadow-xs`}>
+        {!isCustomer && !isAdmin && !isStoreOwner && <aside className={`profile-navigation ${isStoreOwner ? 'lg:col-span-3' : 'lg:col-span-4'} bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-3 shadow-xs`}>
           <nav aria-label="Quản lý tài khoản" className="space-y-1">
             {menuItems.map((item) => {
               const Icon = item.icon;
@@ -622,7 +746,7 @@ export const ProfilePage: React.FC = () => {
         {/* ================================================================= */}
         {/* RIGHT CONTENT PANEL                                               */}
         {/* ================================================================= */}
-        <section className={`profile-panel min-w-0 ${isAdmin ? 'lg:col-span-12' : isStoreOwner ? 'lg:col-span-9' : 'lg:col-span-8'} space-y-6`}>
+        <section className={`profile-panel min-w-0 ${isAdmin || isStoreOwner ? 'lg:col-span-12' : 'lg:col-span-8'} space-y-6`}>
           {/* Header Title & Subtitle with Status Badge */}
           <div className="profile-heading">
             {isCustomer && activeTab !== 'INFO' && <p className="customer-eyebrow">{activeTab === 'SECURITY' ? 'Bảo mật tài khoản' : 'Tài khoản của bạn'}</p>}
@@ -810,7 +934,8 @@ export const ProfilePage: React.FC = () => {
                           <input
                             type="email"
                             disabled
-                            value={user?.email || 'dinh.nguyen@gmail.com'}
+                            value={user?.email || ''}
+                            placeholder="Chưa cập nhật email"
                             className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-slate-50 dark:bg-zinc-800/40 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-normal cursor-not-allowed"
                           />
                           <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
@@ -893,10 +1018,11 @@ export const ProfilePage: React.FC = () => {
                         </label>
                         <div className="relative">
                           <input
-                          id={isCustomer ? 'customer-profile-email' : undefined}
+                            id={isCustomer ? 'customer-profile-email' : undefined}
                             type="email"
                             disabled
-                            value={user?.email || 'an.nguyen@gmail.com'}
+                            value={user?.email || ''}
+                            placeholder="Chưa cập nhật email"
                             className="w-full px-3.5 py-2.5 text-sm rounded-lg bg-slate-50 dark:bg-zinc-800/40 border border-slate-200 dark:border-zinc-800 text-slate-700 dark:text-zinc-300 font-normal cursor-not-allowed"
                           />
                           <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2" />
