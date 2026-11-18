@@ -652,28 +652,44 @@ export const ProfilePage: React.FC = () => {
       transition={{ duration: 0.3, ease: 'easeOut' }}
       className={`${['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '') ? 'admin-ui admin-profile ' : ''}max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8 ${user?.role === 'CUSTOMER' ? `customer-ui customer-profile ${activeTab === 'SECURITY' ? 'customer-security' : ''}` : ''}`}
     >
-      {/* Toast Notifications */}
+      {/* Toast Notifications - Positioned at bottom right to avoid overlapping header */}
       <AnimatePresence>
         {successToast && (
           <motion.div
-            initial={{ opacity: 0, y: -15, scale: 0.95 }}
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -10, scale: 0.95 }}
-            className="fixed top-20 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-600 text-white text-xs font-semibold shadow-lg shadow-emerald-600/20"
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-6 right-4 sm:right-6 z-[9999] flex items-center gap-2.5 px-4 py-3 rounded-xl bg-emerald-600 text-white text-xs sm:text-sm font-semibold shadow-xl shadow-emerald-950/25 max-w-[calc(100vw-2rem)] sm:max-w-md"
           >
             <CheckCircle2 className="w-4 h-4 shrink-0" />
-            <span>{successToast}</span>
+            <span className="flex-1">{successToast}</span>
+            <button
+              type="button"
+              onClick={() => setSuccessToast(null)}
+              className="p-1 hover:bg-white/20 rounded-lg transition-colors cursor-pointer text-white/80 hover:text-white shrink-0 ml-1"
+              aria-label="Đóng thông báo"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </motion.div>
         )}
         {errorToast && (
           <motion.div
-            initial={{ opacity: 0, y: -15, scale: 0.95 }}
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: -10, scale: 0.95 }}
-            className="fixed top-20 right-6 z-50 flex items-center gap-2.5 px-4 py-3 rounded-xl bg-rose-600 text-white text-xs font-semibold shadow-lg shadow-rose-600/20"
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="fixed bottom-6 right-4 sm:right-6 z-[9999] flex items-center gap-2.5 px-4 py-3 rounded-xl bg-rose-600 text-white text-xs sm:text-sm font-semibold shadow-xl shadow-rose-950/25 max-w-[calc(100vw-2rem)] sm:max-w-md"
           >
             <AlertCircle className="w-4 h-4 shrink-0" />
-            <span>{errorToast}</span>
+            <span className="flex-1">{errorToast}</span>
+            <button
+              type="button"
+              onClick={() => setErrorToast(null)}
+              className="p-1 hover:bg-white/20 rounded-lg transition-colors cursor-pointer text-white/80 hover:text-white shrink-0 ml-1"
+              aria-label="Đóng thông báo"
+            >
+              <X className="w-3.5 h-3.5" />
+            </button>
           </motion.div>
         )}
       </AnimatePresence>
@@ -1065,7 +1081,7 @@ export const ProfilePage: React.FC = () => {
                 {isCustomer && <div className="account-dealer-line"><Store aria-hidden="true" className="h-4 w-4 shrink-0" />{user?.store?.name ? <><span>Đại lý phục vụ: <strong>{user.store.name}</strong></span>{user.store.status && <span className="account-dealer-status">{({ ACTIVE: 'Đang hoạt động', SUSPENDED: 'Tạm ngừng', PENDING_APPROVAL: 'Chờ duyệt', REJECTED: 'Chưa được duyệt' } as Record<string, string>)[user.store.status] || user.store.status}</span>}</> : <span>Chưa có thông tin đại lý phục vụ.</span>}</div>}
 
                 {/* Form Buttons */}
-                <div className={isCustomer ? 'account-form-actions flex items-center gap-3 pt-2' : 'flex items-center gap-3 pt-2'}>
+                <div className={isCustomer ? 'account-form-actions flex flex-wrap items-center gap-3 pt-2' : 'flex flex-wrap items-center gap-3 pt-2'}>
                   <button
                     type="submit"
                     disabled={isSaving}
@@ -1081,6 +1097,19 @@ export const ProfilePage: React.FC = () => {
                   >
                     Hủy
                   </button>
+
+                  {successToast && (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 font-semibold bg-emerald-50 dark:bg-emerald-950/30 px-3 py-1.5 rounded-lg border border-emerald-200 dark:border-emerald-800 animate-in fade-in duration-200">
+                      <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                      {successToast}
+                    </span>
+                  )}
+                  {errorToast && (
+                    <span className="inline-flex items-center gap-1.5 text-xs text-rose-600 dark:text-rose-400 font-semibold bg-rose-50 dark:bg-rose-950/30 px-3 py-1.5 rounded-lg border border-rose-200 dark:border-rose-800 animate-in fade-in duration-200">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      {errorToast}
+                    </span>
+                  )}
                 </div>
               </form>
             </motion.div>
