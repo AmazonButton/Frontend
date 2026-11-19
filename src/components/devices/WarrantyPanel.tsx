@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { ShieldCheck, AlertTriangle, RefreshCw, Lock, CheckCircle2, XCircle, Plus, Wrench, BellRing, BatteryWarning } from 'lucide-react';
 import { api } from '../../services/api';
 import { getSocket } from '../../services/socket';
@@ -6,18 +6,20 @@ import { toast } from '../../context/ToastContext';
 import {
   WARRANTY_GROUPS,
   calculateWarrantyDeduction,
-  fetchWarrantyTickets,
+  fetchWarrantyTicketById,
+  fetchWarrantyTicketsPaginated,
   createWarrantyTicketAsync,
   approveSwapTicketAsync,
   lockDeviceTicketAsync,
   resolveTicketAsync,
   rejectTicketAsync,
-  loadWarrantyTickets,
-  updateWarrantyTicket,
   type WarrantyFaultGroup,
   type WarrantyTicket,
   type WarrantyTicketStatus,
 } from '../../services/warranty';
+
+const isUncertainNetworkError = (err: any): boolean =>
+  !err?.response || err?.code === 'ECONNABORTED' || err?.response?.status === 504;
 
 interface DeviceFaultAlert {
   id: string;
@@ -32,7 +34,7 @@ interface DeviceFaultAlert {
 }
 
 interface WarrantyPanelProps {
-  mode: 'admin' | 'staff';
+  mode: 'admin' | 'system_staff' | 'store_owner' | 'staff';
   devices?: any[];
   stores?: any[];
   currentStoreId?: string;
@@ -71,7 +73,15 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
   currentUserRole,
   onRefreshDevices,
 }) => {
-  const [tickets, setTickets] = useState<WarrantyTicket[]>(() => loadWarrantyTickets());
+  const [tickets, setTickets] = useState<WarrantyTicket[]>([]);
+  const [ticketPage, setTicketPage] = useState(1);
+  const [ticketTotal, setTicketTotal] = useState(0);
+  const [ticketTotalPages, setTicketTotalPages] = useState(1);
+  const [ticketsLoading, setTicketsLoading] = useState(false);
+  const [ticketsError, setTicketsError] = useState('');
+  const [uncertainNotice, setUncertainNotice] = useState('');
+  const [deviceSearch, setDeviceSearch] = useState('');
+  const [storeFilter, setStoreFilter] = useState('ALL');
   const [showPolicy, setShowPolicy] = useState(false);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [statusFilter, setStatusFilter] = useState<'ALL' | WarrantyTicketStatus>('ALL');
@@ -80,21 +90,64 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
   const [realtimeAlerts, setRealtimeAlerts] = useState<DeviceFaultAlert[]>([]);
   const [dismissedAlertIds, setDismissedAlertIds] = useState<string[]>([]);
 
-  // Tải danh sách phiếu bảo hành từ Backend API
-  const refreshTickets = async () => {
-    try {
-      const list = await fetchWarrantyTickets(
-        mode === 'staff' && currentStoreId ? { storeId: currentStoreId } : undefined
-      );
-      setTickets(list);
-    } catch {
-      // Fallback local handled inside fetchWarrantyTickets
-    }
-  };
+  const isStoreScoped = mode === 'store_owner' || mode === 'staff';
+  const canTriage = mode === 'admin' || mode === 'system_staff';
+  const ticketsAbortRef = useRef<AbortController | null>(null);
+  const ticketsGenRef = useRef(0);
+
+  // Tải danh sách phiếu bảo hành phân trang + lọc phía Server (hủy request cũ khi tìm kiếm mới)
+  const refreshTickets = useCallback(
+    async (pageOverride?: number) => {
+      ticketsAbortRef.current?.abort();
+      const controller = new AbortController();
+      ticketsAbortRef.current = controller;
+      const gen = ++ticketsGenRef.current;
+
+      setTicketsLoading(true);
+      setTicketsError('');
+      try {
+        const res = await fetchWarrantyTicketsPaginated({
+          page: pageOverride ?? ticketPage,
+          pageSize: 20,
+          status: statusFilter !== 'ALL' ? statusFilter : undefined,
+          faultGroup: groupFilter !== 'ALL' ? groupFilter : undefined,
+          deviceId: deviceSearch.trim() || undefined,
+          storeId: isStoreScoped
+            ? currentStoreId
+            : storeFilter !== 'ALL'
+              ? storeFilter
+              : undefined,
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted || gen !== ticketsGenRef.current) return;
+        setTickets(res.items);
+        setTicketPage(res.pagination.page);
+        setTicketTotal(res.pagination.total);
+        setTicketTotalPages(res.pagination.totalPages);
+      } catch (err: any) {
+        if (controller.signal.aborted || err?.name === 'CanceledError' || err?.code === 'ERR_CANCELED' || gen !== ticketsGenRef.current) {
+          return;
+        }
+        setTicketsError(
+          err?.response?.data?.message ||
+            err?.message ||
+            'Không tải được danh sách phiếu bảo hành từ máy chủ.'
+        );
+      } finally {
+        if (gen === ticketsGenRef.current) {
+          setTicketsLoading(false);
+        }
+      }
+    },
+    [ticketPage, statusFilter, groupFilter, deviceSearch, isStoreScoped, currentStoreId, storeFilter]
+  );
 
   useEffect(() => {
-    refreshTickets();
-  }, [mode, currentStoreId]);
+    void refreshTickets();
+    return () => {
+      ticketsAbortRef.current?.abort();
+    };
+  }, [refreshTickets]);
 
   useEffect(() => {
     const socket = getSocket();
@@ -224,8 +277,13 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
         faultCode: alert.faultCode,
         title: `Cảnh báo thiết bị ${alert.deviceId}`,
         message: alert.message,
-      }).catch(() => null);
+      });
+      if (res?.data?.success === false) {
+        throw new Error(res.data?.message || 'Không thể gửi cảnh báo tới thiết bị.');
+      }
       toast.success(res?.data?.message || `Đã gửi cảnh báo tới tài khoản đang dùng nút ${alert.deviceId}.`);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Không thể gửi cảnh báo tới thiết bị.');
     } finally {
       setBusyId(null);
     }
@@ -249,6 +307,7 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
       matchedStore?.storeName;
 
     setBusyId('CREATE_NEW');
+    setUncertainNotice('');
     try {
       const created = await createWarrantyTicketAsync({
         deviceId: cleanId,
@@ -259,16 +318,46 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
         depositAmount,
         deductionPercent,
         inspectionNote,
-        reportedBy: currentUserName || (mode === 'admin' ? 'Admin' : 'Nhân viên cửa hàng'),
-        reportedRole: currentUserRole || (mode === 'admin' ? 'ADMIN' : 'STAFF'),
+        reportedBy: currentUserName || (mode === 'admin' ? 'Admin' : 'Nhân viên hệ thống'),
+        reportedRole: currentUserRole || (mode === 'admin' ? 'ADMIN' : 'SYSTEM_STAFF'),
       });
-      setTickets((prev) => [created, ...prev.filter((t) => t.id !== created.id)]);
       setShowCreateForm(false);
       setDeviceIdInput('');
       setInspectionNote('');
+      setTicketPage(1);
+      await refreshTickets(1);
       toast.success(`Đã lập phiếu bảo hành #${created.id} cho nút ${cleanId} (${activeGroup.shortLabel}).`);
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Không thể tạo phiếu bảo hành.');
+      if (isUncertainNetworkError(err)) {
+        try {
+          const recheck = await fetchWarrantyTicketsPaginated({
+            deviceId: cleanId,
+            page: 1,
+            pageSize: 5,
+            storeId: isStoreScoped ? currentStoreId : undefined,
+          });
+          const latest = recheck.items.find(
+            (t) =>
+              t.deviceId === cleanId &&
+              t.faultCode === faultCode &&
+              Date.now() - new Date(t.createdAt).getTime() < 120000
+          );
+          if (latest) {
+            await refreshTickets(1);
+            setShowCreateForm(false);
+            toast.info(`Đã đối soát lại từ máy chủ: phiếu #${latest.id} đã được tạo.`);
+            return;
+          }
+        } catch {
+          // Ignore secondary check failure and fall through to uncertain notice
+        }
+        const msg =
+          'Kết quả tạo phiếu bảo hành chưa xác định do hết thời gian chờ. Hãy tải lại danh sách từ máy chủ trước khi thử lại.';
+        setUncertainNotice(msg);
+        toast.warning(msg);
+      } else {
+        toast.error(err?.response?.data?.message || err?.message || 'Không thể tạo phiếu bảo hành.');
+      }
     } finally {
       setBusyId(null);
     }
@@ -279,6 +368,7 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
     action: 'APPROVE_SWAP' | 'LOCK_DEVICE' | 'EXTEND_WARRANTY' | 'CHILD_LOCK_2S' | 'SEND_WARNING' | 'RESOLVE' | 'REJECT'
   ) => {
     setBusyId(ticket.id);
+    setUncertainNotice('');
     const targetId = ticket.ticketId || ticket.id;
     try {
       const encodedId = encodeURIComponent(ticket.deviceId);
@@ -289,89 +379,73 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
           faultCode: ticket.faultCode,
           title: `Cảnh báo bảo hành nút ${ticket.deviceId}`,
           message: `${ticket.faultLabel}: ${ticket.inspectionNote}`,
-        }).catch(() => null);
-        const msg = res?.data?.message || `Đã ghi nhận gửi cảnh báo tới tài khoản đang dùng nút ${ticket.deviceId}.`;
-        setTickets(updateWarrantyTicket(ticket.id, { adminNote: msg }));
-        toast.success(msg);
+        });
+        toast.success(
+          res?.data?.message || `Đã gửi cảnh báo tới tài khoản đang dùng nút ${ticket.deviceId}.`
+        );
       } else if (action === 'APPROVE_SWAP') {
-        try {
-          const updated = await approveSwapTicketAsync(targetId, {
-            adminNote: 'Đã duyệt đổi mới 1-1 & thu hồi nút lỗi về kho.',
-          });
-          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
-        } catch {
-          await api.post(`/devices/${encodedId}/factory-reset`).catch(() => null);
-          setTickets(updateWarrantyTicket(ticket.id, { status: 'APPROVED_SWAP', adminNote: 'Đã duyệt đổi mới 1-1 & thu hồi nút lỗi về kho.' }));
-        }
+        const updated = await approveSwapTicketAsync(targetId, {
+          adminNote: 'Đã duyệt đổi mới 1-1 & thu hồi nút lỗi về kho.',
+        });
+        setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
         toast.success(`Đã duyệt đổi 1-1 cho nút ${ticket.deviceId}.`);
         onRefreshDevices?.();
       } else if (action === 'LOCK_DEVICE') {
-        try {
-          const updated = await lockDeviceTicketAsync(targetId, {
-            adminNote: 'Đã khóa nút hỏng/mất (DISABLED).',
-          });
-          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
-        } catch {
-          await api.patch(`/devices/${encodedId}`, { status: 'DISABLED' }).catch(() => null);
-          setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED', adminNote: 'Đã khóa nút hỏng/mất (DISABLED).' }));
-        }
-        toast.success(`Đã khóa nút ${ticket.deviceId} và chốt phiếu.`);
+        const updated = await lockDeviceTicketAsync(targetId, {
+          adminNote: 'Đã khóa nút hỏng/mất (DISABLED). Chuyển đề nghị hoàn cọc sang Admin tài chính.',
+        });
+        setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
+        toast.success(`Đã khóa nút ${ticket.deviceId} và ghi nhận đề nghị xử lý cọc.`);
         onRefreshDevices?.();
       } else if (action === 'EXTEND_WARRANTY') {
         await api.patch(`/devices/${encodedId}/extend-warranty`, { months: 6 });
-        try {
-          const updated = await resolveTicketAsync(targetId, { adminNote: 'Đã gia hạn bảo hành +6 tháng.' });
-          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
-        } catch {
-          setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED', adminNote: 'Đã gia hạn bảo hành +6 tháng.' }));
-        }
+        const updated = await resolveTicketAsync(targetId, { adminNote: 'Đã gia hạn bảo hành +6 tháng.' });
+        setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
         toast.success(`Đã gia hạn bảo hành +6 tháng cho nút ${ticket.deviceId}.`);
         onRefreshDevices?.();
       } else if (action === 'CHILD_LOCK_2S') {
-        await api.patch(`/devices/${encodedId}`, { holdDurationMs: 2000 }).catch(() => null);
-        try {
-          const updated = await resolveTicketAsync(targetId, { adminNote: 'Đã bật chế độ chống bấm nhầm (nhấn giữ 2s).' });
-          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
-        } catch {
-          setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED', adminNote: 'Đã bật chế độ chống bấm nhầm (nhấn giữ 2s).' }));
-        }
+        await api.patch(`/devices/${encodedId}`, { holdDurationMs: 2000 });
+        const updated = await resolveTicketAsync(targetId, {
+          adminNote: 'Đã bật chế độ chống bấm nhầm (nhấn giữ 2s).',
+        });
+        setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
         toast.success(`Đã bật giữ nút 2 giây chống trẻ em bấm phá cho ${ticket.deviceId}.`);
         onRefreshDevices?.();
       } else if (action === 'RESOLVE') {
-        try {
-          const updated = await resolveTicketAsync(targetId, { adminNote: 'Đã hoàn tất phiếu.' });
-          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
-        } catch {
-          setTickets(updateWarrantyTicket(ticket.id, { status: 'RESOLVED' }));
-        }
+        const updated = await resolveTicketAsync(targetId, { adminNote: 'Đã hoàn tất phiếu.' });
+        setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
         toast.success(`Đã hoàn tất phiếu ${ticket.id}.`);
       } else if (action === 'REJECT') {
-        try {
-          const updated = await rejectTicketAsync(targetId, { adminNote: 'Đã từ chối phiếu.' });
-          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
-        } catch {
-          setTickets(updateWarrantyTicket(ticket.id, { status: 'REJECTED' }));
-        }
+        const updated = await rejectTicketAsync(targetId, { adminNote: 'Đã từ chối phiếu.' });
+        setTickets((prev) => prev.map((t) => (t.id === ticket.id ? updated : t)));
         toast.info(`Đã từ chối phiếu ${ticket.id}.`);
       }
     } catch (err: any) {
-      toast.error(err?.response?.data?.message || 'Không thể thực hiện thao tác bảo hành.');
+      if (isUncertainNetworkError(err)) {
+        try {
+          const fresh = await fetchWarrantyTicketById(targetId);
+          setTickets((prev) => prev.map((t) => (t.id === ticket.id ? fresh : t)));
+          if (fresh.status !== ticket.status) {
+            toast.info(`Đã đọc lại từ máy chủ: phiếu #${ticket.id} hiện ở trạng thái ${STATUS_BADGE[fresh.status].label}.`);
+            onRefreshDevices?.();
+            return;
+          }
+        } catch {
+          // Fall through to uncertain status notice without faking local completion
+        }
+        const msg = `Trạng thái xử lý phiếu #${ticket.id} chưa xác định do hết thời gian chờ. Hệ thống giữ nguyên dữ liệu máy chủ, vui lòng tải lại để kiểm tra.`;
+        setUncertainNotice(msg);
+        toast.warning(msg);
+        await refreshTickets();
+      } else {
+        toast.error(err?.response?.data?.message || err?.message || 'Không thể thực hiện thao tác bảo hành.');
+      }
     } finally {
       setBusyId(null);
     }
   };
 
-  const visibleTickets = useMemo(() => {
-    return tickets
-      .filter((t) => {
-        if (mode === 'staff' && currentStoreId && t.storeId && String(t.storeId) !== String(currentStoreId)) {
-          return false;
-        }
-        if (statusFilter !== 'ALL' && t.status !== statusFilter) return false;
-        if (groupFilter !== 'ALL' && t.faultGroup !== groupFilter) return false;
-        return true;
-      });
-  }, [tickets, mode, currentStoreId, statusFilter, groupFilter]);
+  const visibleTickets = tickets;
 
   return (
     <div className="pt-6 border-t border-zinc-200 dark:border-zinc-800 space-y-4">
@@ -381,7 +455,7 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
             <ShieldCheck className="w-4 h-4 text-[#0E6BA8]" />
             <span>Bảo Hành & Đổi Trả 1-1 Thiết Bị</span>
             <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-sky-50 dark:bg-sky-950/40 text-[#0E6BA8] dark:text-sky-300 border border-sky-200 dark:border-sky-800">
-              {visibleTickets.length} phiếu
+              {ticketTotal} phiếu
             </span>
           </h3>
           <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
@@ -609,10 +683,40 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
         </form>
       )}
 
+      {(ticketsError || uncertainNotice) && (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-xs text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200">
+          <span>{uncertainNotice || ticketsError}</span>
+          <button
+            type="button"
+            onClick={() => {
+              setUncertainNotice('');
+              void refreshTickets();
+            }}
+            className="font-semibold underline underline-offset-2 cursor-pointer"
+          >
+            Tải lại từ máy chủ
+          </button>
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-2">
+        <input
+          type="text"
+          value={deviceSearch}
+          onChange={(e) => {
+            setDeviceSearch(e.target.value);
+            setTicketPage(1);
+          }}
+          placeholder="Tìm theo mã nút (VD: SOB-...)"
+          aria-label="Tìm phiếu theo mã nút"
+          className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
+        />
         <select
           value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value as 'ALL' | WarrantyTicketStatus)}
+          onChange={(e) => {
+            setStatusFilter(e.target.value as 'ALL' | WarrantyTicketStatus);
+            setTicketPage(1);
+          }}
           aria-label="Lọc theo trạng thái bảo hành"
           className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
         >
@@ -624,7 +728,10 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
         </select>
         <select
           value={groupFilter}
-          onChange={(e) => setGroupFilter(e.target.value as 'ALL' | WarrantyFaultGroup)}
+          onChange={(e) => {
+            setGroupFilter(e.target.value as 'ALL' | WarrantyFaultGroup);
+            setTicketPage(1);
+          }}
           aria-label="Lọc theo nhóm lỗi bảo hành"
           className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
         >
@@ -634,6 +741,36 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
           <option value="GROUP_C">Nhóm C · Vỡ vỏ nhẹ (30%)</option>
           <option value="GROUP_D">Nhóm D · Hỏng nặng/Mất (70-100%)</option>
         </select>
+        {!isStoreScoped && stores.length > 0 && (
+          <select
+            value={storeFilter}
+            onChange={(e) => {
+              setStoreFilter(e.target.value);
+              setTicketPage(1);
+            }}
+            aria-label="Lọc phiếu bảo hành theo cửa hàng"
+            className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 max-w-xs"
+          >
+            <option value="ALL">Tất cả cửa hàng</option>
+            {stores.map((s) => {
+              const sid = String(s.id || s.storeId);
+              return (
+                <option key={sid} value={sid}>
+                  {s.name || s.storeName}
+                </option>
+              );
+            })}
+          </select>
+        )}
+        <button
+          type="button"
+          onClick={() => void refreshTickets()}
+          disabled={ticketsLoading}
+          className="px-2.5 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 inline-flex items-center gap-1 cursor-pointer disabled:opacity-50"
+        >
+          <RefreshCw className={`w-3.5 h-3.5 ${ticketsLoading ? 'animate-spin' : ''}`} />
+          <span>Tải lại</span>
+        </button>
       </div>
 
       {visibleTickets.length === 0 ? (
@@ -677,6 +814,11 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
                       <div className="text-[11px] text-emerald-600 dark:text-emerald-400">
                         Còn: {ticket.refundAmount.toLocaleString('vi-VN')} ₫
                       </div>
+                      {mode === 'system_staff' && ticket.refundAmount > 0 && (
+                        <div className="text-[10px] text-zinc-500">
+                          Hoàn cọc do Admin tài chính duyệt
+                        </div>
+                      )}
                     </td>
                     <td className="py-2.5 px-3">
                       <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${st.cls}`}>
@@ -711,7 +853,7 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
                             <span>Gửi cảnh báo</span>
                           </button>
                         )}
-                        {mode === 'admin' && ticket.status === 'PENDING' && (
+                        {canTriage && ticket.status === 'PENDING' && (
                           <>
                             {(ticket.faultGroup === 'GROUP_A' || ticket.faultGroup === 'GROUP_C') && (
                               <button
@@ -755,7 +897,7 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
                             </button>
                           </>
                         )}
-                        {mode === 'admin' && ticket.status === 'APPROVED_SWAP' && (
+                        {canTriage && ticket.status === 'APPROVED_SWAP' && (
                           <button
                             type="button"
                             disabled={isBusy}
@@ -766,10 +908,10 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
                             <span>Hoàn tất</span>
                           </button>
                         )}
-                        {mode === 'staff' && ticket.status === 'PENDING' && (
+                        {!canTriage && ticket.status === 'PENDING' && (
                           <span className="inline-flex items-center gap-1 text-[11px] text-amber-600 dark:text-amber-400">
                             <AlertTriangle className="w-3 h-3" />
-                            <span>Chờ Admin duyệt</span>
+                            <span>Chờ xử lý kỹ thuật</span>
                           </span>
                         )}
                       </div>
@@ -779,6 +921,31 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
               })}
             </tbody>
           </table>
+        </div>
+      )}
+      {ticketTotalPages > 1 && (
+        <div className="flex items-center justify-between gap-2 pt-2 text-xs text-zinc-500">
+          <span>
+            Trang {ticketPage} / {ticketTotalPages} · Tổng {ticketTotal} phiếu
+          </span>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              disabled={ticketsLoading || ticketPage <= 1}
+              onClick={() => setTicketPage((p) => Math.max(1, p - 1))}
+              className="px-2.5 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40 cursor-pointer"
+            >
+              Trước
+            </button>
+            <button
+              type="button"
+              disabled={ticketsLoading || ticketPage >= ticketTotalPages}
+              onClick={() => setTicketPage((p) => Math.min(ticketTotalPages, p + 1))}
+              className="px-2.5 py-1 rounded border border-zinc-200 dark:border-zinc-700 hover:bg-zinc-50 dark:hover:bg-zinc-800 disabled:opacity-40 cursor-pointer"
+            >
+              Sau
+            </button>
+          </div>
         </div>
       )}
     </div>

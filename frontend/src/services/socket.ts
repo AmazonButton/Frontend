@@ -102,6 +102,17 @@ export function getSocket(): Socket {
       else connectionFailed();
     });
     socket.on('unauthorized', () => { void reconnectSocketWithFreshToken(true); });
+    socket.on('auth:revoked', (payload: any) => {
+      connecting = false;
+      clearRetry();
+      setSocketToken(null);
+      try {
+        socket?.disconnect();
+      } catch { }
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('sob_auth_revoked', { detail: payload || {} }));
+      }
+    });
     socket.on('error', (error: any) => {
       if (error?.code === 'UNAUTHORIZED' || /unauthorized|jwt|token expired|invalid token/i.test(error?.message || '')) void reconnectSocketWithFreshToken(true);
     });

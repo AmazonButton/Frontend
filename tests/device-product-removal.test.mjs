@@ -7,8 +7,8 @@ const selected = { id: '90071992547409931', deviceId: 'BTN-TEST', products: [{ p
 const deferred = () => { let resolve, reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 
 test('unassign capability follows exact backend controller roles', () => {
-  for (const role of ['STORE_OWNER', 'STORE_MANAGER', 'SUPER_ADMIN']) assert.equal(canRemoveDeviceProducts(role), true);
-  for (const role of ['SYSTEM_ADMIN', 'ADMIN', 'STAFF_BUTTON', 'CUSTOMER', '']) assert.equal(canRemoveDeviceProducts(role), false);
+  for (const role of ['STORE_OWNER', 'SYSTEM_STAFF', 'ADMIN', 'SYSTEM_ADMIN', 'SUPER_ADMIN']) assert.equal(canRemoveDeviceProducts(role), true);
+  for (const role of ['STORE_MANAGER', 'STAFF_BUTTON', 'CUSTOMER', '']) assert.equal(canRemoveDeviceProducts(role), false);
 });
 
 test('assignment detection supports canonical arrays and current legacy UI shapes', () => {

@@ -5,6 +5,7 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, LayoutGroup, AnimatePresence } from 'framer-motion';
 import {
   BarChart3,
+  Clock3,
   Cpu,
   Landmark,
   Layers,
@@ -12,6 +13,7 @@ import {
   Menu,
   Package,
   ReceiptText,
+  RotateCcw,
   ShieldCheck,
   ShoppingBag,
   ShoppingCart,
@@ -65,6 +67,14 @@ const adminLinks: NavigationItem[] = [
   { to: '/admin/profile', label: 'Tài khoản', icon: UserRound },
 ];
 
+const systemStaffLinks: NavigationItem[] = [
+  { to: '/system-staff/devices', label: 'Kho & cấp phát nút', icon: Cpu },
+  { to: '/system-staff/warranty', label: 'Bảo hành thiết bị', icon: ShieldCheck },
+  { to: '/system-staff/returns', label: 'Nhận nút trả', icon: RotateCcw },
+  { to: '/system-staff/templates', label: 'Mẫu cấu hình nút', icon: Layers },
+  { to: '/system-staff/profile', label: 'Tài khoản', icon: UserRound },
+];
+
 export const Sidebar: React.FC = () => {
   const { user } = useAuth();
   const location = useLocation();
@@ -80,21 +90,38 @@ export const Sidebar: React.FC = () => {
   const accountTab = new URLSearchParams(location.search).get('tab') || 'INFO';
   const selectedAccountTab = location.pathname === '/customer/become-store-owner' ? 'BECOME_STORE_OWNER' : location.pathname === '/customer/banking' ? 'BANKING' : location.pathname === '/customer/verification' ? 'VERIFICATION' : accountTab;
   const isAdmin = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '');
+  const isSystemStaff = user?.role === 'SYSTEM_STAFF';
+  const isStoreOwner = user?.role === 'STORE_OWNER';
   const links = isCustomer
     ? customerLinks
     : isAdmin
       ? adminLinks
-      : [
-          ...storeLinks.filter(link => !(user?.role === 'STORE_OWNER' && link.to === '/store/rentals')),
-          ...(['STORE_OWNER', 'STORE_MANAGER', 'STAFF_ORDER'].includes(user?.role || '') ? [{ to: '/driver/deliveries', label: 'Giao hàng', icon: Truck }] : []),
-          ...(['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role || '')
-            ? [{ to: '/store/finance', label: 'Gói & ngân hàng', icon: Landmark }]
-            : []),
-          { to: '/store/profile', label: 'Hồ sơ cửa hàng', icon: Store },
-        ];
-  const title = isCustomer ? 'Khách hàng' : isAdmin ? 'Quản trị hệ thống' : user?.store?.name || 'Đại lý Nước & Gas Gia Đình';
-  const subtitle = isCustomer ? 'Không gian mua sắm' : isAdmin ? 'Trung tâm điều hành' : 'Edge Broker Connected';
-  const icon = isCustomer ? UserRound : isAdmin ? ShieldCheck : Store;
+      : isSystemStaff
+        ? systemStaffLinks
+        : isStoreOwner
+          ? [
+              ...storeLinks.filter(link => link.to !== '/store/rentals'),
+              { to: '/driver/deliveries', label: 'Giao hàng & POD', icon: Truck },
+              { to: '/driver/shifts', label: 'Ca & đối soát COD', icon: Clock3 },
+              { to: '/store/finance', label: 'Gói & ngân hàng', icon: Landmark },
+              { to: '/store/profile', label: 'Hồ sơ cửa hàng', icon: Store },
+            ]
+          : [];
+  const title = isCustomer
+    ? 'Khách hàng'
+    : isAdmin
+      ? 'Quản trị hệ thống'
+      : isSystemStaff
+        ? 'Kỹ thuật hệ thống'
+        : user?.store?.name || 'Cửa hàng';
+  const subtitle = isCustomer
+    ? 'Không gian mua sắm'
+    : isAdmin
+      ? 'Trung tâm điều hành'
+      : isSystemStaff
+        ? 'Kho nút & bảo hành'
+        : 'Edge Broker Connected';
+  const icon = isCustomer ? UserRound : isAdmin || isSystemStaff ? ShieldCheck : Store;
   const HeaderIcon = icon;
 
   const isLinkActive = (path: string) => {
@@ -128,7 +155,7 @@ export const Sidebar: React.FC = () => {
         <span className="ml-auto shrink-0 text-xs text-zinc-500">Menu</span>
       </summary>
       <nav aria-label="Điều hướng trên điện thoại" className="grid gap-1 px-3 pb-3 sm:grid-cols-2">
-        {links.map(({ to, label, icon: Icon }) => to === '/admin/dashboard?section=ANALYTICS' ? <AdminRevenueNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/admin/profile' ? <AdminAccountNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/admin/dashboard?section=RENTALS' ? <AdminPackageNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/analytics' ? <StoreRevenueNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/profile' ? <StoreProfileNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/finance' ? <StoreFinanceNavigation key={to} mobile canRegister={user?.role === 'STORE_OWNER'} onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : isCustomer && to === '/customer/profile' ? <CustomerAccountNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : (
+        {links.map(({ to, label, icon: Icon }) => to === '/admin/dashboard?section=ANALYTICS' ? <AdminRevenueNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/admin/profile' || to === '/system-staff/profile' ? <AdminAccountNavigation key={to} profileBasePath={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/admin/dashboard?section=RENTALS' ? <AdminPackageNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/analytics' ? <StoreRevenueNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/profile' ? <StoreProfileNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/finance' ? <StoreFinanceNavigation key={to} mobile canRegister={user?.role === 'STORE_OWNER'} onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : isCustomer && to === '/customer/profile' ? <CustomerAccountNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : (
           <Link key={to} to={to} aria-current={isLinkActive(to) ? 'page' : undefined}
             onClick={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }}
             className={`flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm ${isLinkActive(to) ? 'bg-sky-50 font-semibold text-sky-700 dark:bg-sky-950 dark:text-sky-300' : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900'}`}>
@@ -185,7 +212,7 @@ export const Sidebar: React.FC = () => {
             {links.map((item) => {
               if (item.to === '/admin/dashboard?section=ANALYTICS') return <AdminRevenueNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
               if (item.to === '/store/profile') return <StoreProfileNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
-              if (item.to === '/admin/profile') return <AdminAccountNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
+              if (item.to === '/admin/profile' || item.to === '/system-staff/profile') return <AdminAccountNavigation key={item.to} profileBasePath={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
               if (item.to === '/admin/dashboard?section=RENTALS') return <AdminPackageNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
               if (item.to === '/store/analytics') return <StoreRevenueNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
               if (item.to === '/store/finance') return <StoreFinanceNavigation key={item.to} canRegister={user?.role === 'STORE_OWNER'} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;

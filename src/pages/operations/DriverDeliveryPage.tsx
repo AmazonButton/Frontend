@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { ArrowRight, Camera, Check, CheckCircle2, Clock3, Loader2, MapPin, Package, Phone, RefreshCw, Truck, Users } from 'lucide-react';
+import { ArrowRight, Camera, Check, CheckCircle2, Clock3, Loader2, MapPin, Package, Phone, RefreshCw, ShieldAlert, Truck, Users } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
-import { driversService, DriverDutyStatus, DriverShift, DeliveryFailureCode } from '../../services/drivers.service';
+import { driversService, DriverDutyStatus, DriverShift, DeliveryFailureCode, LegacyHandoverSummary } from '../../services/drivers.service';
 import { mediaService } from '../../services/media.service';
 import {
   buildDeliveryPayload,
@@ -141,6 +141,7 @@ export const DriverDeliveryPage: React.FC = () => {
   const [shift, setShift] = useState<DriverShift | null>(null);
   const [ready, setReady] = useState<any[]>([]);
   const [mine, setMine] = useState<any[]>([]);
+  const [legacySummary, setLegacySummary] = useState<LegacyHandoverSummary | null>(null);
   const [online, setOnline] = useState<DriverDutyStatus[]>([]);
   const [tab, setTab] = useState<'ready' | 'mine'>('ready');
   const [filter, setFilter] = useState('SHIPPING');
@@ -167,25 +168,28 @@ export const DriverDeliveryPage: React.FC = () => {
     const current = ++generation.current;
     const request = new AbortController(); controller.current = request;
     setLoading(true);
+    const isOwner = role === 'STORE_OWNER';
     const responses = await Promise.allSettled([
       driversService.getMyDuty(request.signal), driversService.getCurrentShift(request.signal), driversService.getReadyOrders(request.signal),
       driversService.getMyOrders({ status: filter || undefined, page, limit: 12, dateRange: 'all' }, request.signal),
+      ...(isOwner ? [driversService.getLegacyHandoverStatus(storeId, request.signal)] : []),
       ...(onlineOpen ? [driversService.getOnlineDrivers(storeId, request.signal)] : []),
     ]);
     if (!alive.current || request.signal.aborted || current !== generation.current) return;
     const nextErrors: Record<string, string> = {};
-    const names = ['duty', 'shift', 'ready', 'mine', 'online'];
+    const names = ['duty', 'shift', 'ready', 'mine', ...(isOwner ? ['legacy'] : []), ...(onlineOpen ? ['online'] : [])];
     responses.forEach((response, index) => {
       if (response.status === 'rejected') { nextErrors[names[index]] = driverError(response.reason); return; }
-      const data = response.value;
-      if (index === 0) setDuty(data?.data || null);
-      if (index === 1) setShift(data?.data || null);
-      if (index === 2) { setReady(data); setReadyPage(value => Math.min(value, Math.max(1, Math.ceil(data.length / 12)))); }
-      if (index === 3) { setMine(data.orders); setPages(Math.max(1, Number(data.pagination?.totalPages) || 1)); }
-      if (index === 4) setOnline(Array.isArray(data?.data) ? data.data : []);
+      const data = response.value as any;
+      if (names[index] === 'duty') setDuty(data?.data || null);
+      if (names[index] === 'shift') setShift(data?.data || null);
+      if (names[index] === 'ready') { setReady(data); setReadyPage(value => Math.min(value, Math.max(1, Math.ceil(data.length / 12)))); }
+      if (names[index] === 'mine') { setMine(data.orders); setPages(Math.max(1, Number(data.pagination?.totalPages) || 1)); }
+      if (names[index] === 'legacy') setLegacySummary(data || null);
+      if (names[index] === 'online') setOnline(Array.isArray(data?.data) ? data.data : []);
     });
     setErrors(nextErrors); setLoading(false);
-  }, [storeId, filter, page, onlineOpen]);
+  }, [storeId, role, filter, page, onlineOpen]);
   useEffect(() => { alive.current = true; void load(); return () => { alive.current = false; controller.current?.abort(); }; }, [load]);
   useEffect(() => {
     const refresh = () => { if (!document.hidden && !paused.current) void load(); };
@@ -205,18 +209,56 @@ export const DriverDeliveryPage: React.FC = () => {
   const readyCount = Math.max(1, Math.ceil(ready.length / 12));
   const orders = tab === 'ready' ? ready.slice((readyPage - 1) * 12, readyPage * 12) : mine;
   const dataError = errors[tab];
+  const isOwner = role === 'STORE_OWNER';
   return <main className="mx-auto max-w-6xl space-y-5 px-4 py-6 sm:px-6 sm:py-8">
-    <header className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-[#287DA8]">Vận hành cửa hàng</p><h1 className="mt-1 text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">Giao hàng</h1><p className="mt-2 text-sm text-zinc-500">Nhận đơn, giao hàng và cập nhật kết quả trong cùng một nơi.</p></div><Link to="/driver/shifts" className={driverSecondary}><Clock3 className="h-4 w-4" />Ca làm & bàn giao<ArrowRight className="h-4 w-4" /></Link></header>
-    {!storeId ? <DriverNotice>Tài khoản chưa được liên kết với cửa hàng để nhận và giao đơn. Liên hệ quản lý cửa hàng để được thiết lập.</DriverNotice> : <>
+    <header className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wider text-[#287DA8]">Vận hành cửa hàng</p><h1 className="mt-1 text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">Giao hàng & POD</h1><p className="mt-2 text-sm text-zinc-500">Chủ cửa hàng trực tiếp nhận đơn, giao hàng, tải ảnh POD và tiếp quản đơn cũ.</p></div><Link to="/driver/shifts" className={driverSecondary}><Clock3 className="h-4 w-4" />Ca & đối soát COD<ArrowRight className="h-4 w-4" /></Link></header>
+    {!storeId ? <DriverNotice>Tài khoản chưa được liên kết với cửa hàng để nhận và giao đơn.</DriverNotice> : <>
       {notice && <DriverNotice success>{notice}</DriverNotice>}
       {errors.action && <DriverNotice>{errors.action}</DriverNotice>}
+      {errors.legacy && <DriverNotice>{errors.legacy}</DriverNotice>}
       <DriverEntrance><section className={`${driverCard} flex flex-wrap items-center justify-between gap-4`}>
-        <div className="flex items-center gap-3"><div className="rounded-xl bg-sky-50 p-3 text-[#287DA8] dark:bg-sky-950/40"><Truck className="h-5 w-5" /></div><div><p className="text-sm font-semibold text-zinc-900 dark:text-white">{user?.fullName || 'Nhân viên giao hàng'}</p><div className="mt-1.5 flex flex-wrap items-center gap-2">{duty && <DriverStatus status={duty.status} />}<span className="text-xs text-zinc-500">{shift?.status === 'OPEN' ? `Ca #${shift.shiftId}` : 'Chưa mở ca làm'}</span></div></div></div>
+        <div className="flex items-center gap-3"><div className="rounded-xl bg-sky-50 p-3 text-[#287DA8] dark:bg-sky-950/40"><Truck className="h-5 w-5" /></div><div><p className="text-sm font-semibold text-zinc-900 dark:text-white">{user?.fullName || (isOwner ? 'Chủ cửa hàng giao nhận' : 'Quản lý giao hàng')}</p><div className="mt-1.5 flex flex-wrap items-center gap-2">{duty && <DriverStatus status={duty.status} />}<span className="text-xs text-zinc-500">{shift?.status === 'OPEN' ? `Ca #${shift.shiftId}` : 'Chưa mở ca làm'}</span></div></div></div>
         <div className="flex flex-wrap gap-2"><button onClick={() => void load()} disabled={loading || busy} className={driverSecondary}><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin motion-reduce:animate-none' : ''}`} />Tải lại</button><button className={duty?.status === 'ONLINE' ? driverSecondary : driverPrimary} disabled={busy || loading || Boolean(errors.duty) || (duty?.status !== 'ONLINE' && shift?.status !== 'OPEN')} onClick={() => void run(() => driversService.updateDuty(duty?.status === 'ONLINE' ? 'OFFLINE' : 'ONLINE'), duty?.status === 'ONLINE' ? 'Đã chuyển sang tạm nghỉ.' : 'Bạn đã sẵn sàng nhận đơn.')}>
           {busy && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />}{duty?.status === 'ONLINE' ? 'Tạm nghỉ nhận đơn' : 'Sẵn sàng nhận đơn'}</button></div>
         {(errors.duty || errors.shift) && <div className="w-full"><DriverNotice>{errors.duty || errors.shift}</DriverNotice></div>}
-        {!loading && !shift && !errors.shift && <p className="w-full text-sm text-zinc-500">Mở ca làm trước khi bật nhận đơn. <Link to="/driver/shifts" className="font-semibold text-[#287DA8] hover:underline">Đi đến ca làm</Link></p>}
+        {!loading && !shift && !errors.shift && <p className="w-full text-sm text-zinc-500">Mở ca làm trước khi bật nhận đơn. <Link to="/driver/shifts" className="font-semibold text-[#287DA8] hover:underline">Đi đến ca & đối soát</Link></p>}
       </section></DriverEntrance>
+      {isOwner && legacySummary && (legacySummary.inFlightShipperOrders.length > 0 || legacySummary.openShifts.length > 0 || legacySummary.pendingCodHandoverTotal > 0) && (
+        <section className="rounded-2xl border border-amber-200 bg-amber-50/70 p-4 dark:border-amber-900/40 dark:bg-amber-950/20 sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex items-start gap-2.5">
+              <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <div>
+                <h2 className="text-sm font-bold text-amber-950 dark:text-amber-100">Đơn & ca shipper cũ cần tiếp quản</h2>
+                <p className="mt-0.5 text-xs text-amber-800 dark:text-amber-300">
+                  {legacySummary.inFlightShipperOrders.length} đơn đang giao · {legacySummary.openShifts.length} ca chưa đóng · {money(legacySummary.pendingCodHandoverTotal)} COD chờ đối soát
+                </p>
+              </div>
+            </div>
+            <Link to="/driver/shifts" className={driverSecondary}>Đối soát ca & COD<ArrowRight className="h-4 w-4" /></Link>
+          </div>
+          {legacySummary.inFlightShipperOrders.length > 0 && (
+            <div className="mt-3 space-y-2">
+              {legacySummary.inFlightShipperOrders.map(item => (
+                <div key={item.orderId} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-200/80 bg-white p-3 dark:border-amber-900/40 dark:bg-zinc-900">
+                  <div className="min-w-0">
+                    <p className="text-sm font-bold text-zinc-900 dark:text-white">{item.orderCode}</p>
+                    <p className="text-xs text-zinc-500">{item.assignedDriverId ? `Shipper #${item.assignedDriverId}` : 'Shipper cũ'} · {item.paymentMethod} · {money(item.totalAmount)}</p>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy || loading}
+                    onClick={() => void run(() => driversService.takeoverLegacyDelivery(item.orderId), `Đã tiếp quản ${item.orderCode}. Mở "Đơn của tôi" để lưu POD.`).then(ok => { if (ok) { setTab('mine'); setFilter('SHIPPING'); setPage(1); } })}
+                    className={driverPrimary}
+                  >
+                    Tiếp quản giao hàng
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </section>
+      )}
       <section className={driverCard}>
         <div className="flex flex-wrap items-center justify-between gap-3"><nav aria-label="Danh sách giao hàng" className="flex flex-wrap gap-1 rounded-xl bg-zinc-100 p-1 dark:bg-zinc-800"><button onClick={() => setTab('ready')} aria-pressed={tab === 'ready'} className={`min-h-10 rounded-lg px-4 text-sm font-semibold ${tab === 'ready' ? 'bg-white text-[#287DA8] shadow-sm dark:bg-zinc-900' : 'text-zinc-500'}`}>Chờ nhận <span className="ml-1 text-xs">({ready.length})</span></button><button onClick={() => setTab('mine')} aria-pressed={tab === 'mine'} className={`min-h-10 rounded-lg px-4 text-sm font-semibold ${tab === 'mine' ? 'bg-white text-[#287DA8] shadow-sm dark:bg-zinc-900' : 'text-zinc-500'}`}>Đơn của tôi</button></nav>{tab === 'mine' && <label className="flex items-center gap-2 text-xs text-zinc-500">Hiển thị<select value={filter} onChange={event => { setFilter(event.target.value); setPage(1); }} className="min-h-10 rounded-lg border border-zinc-200 bg-white px-3 text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-white"><option value="SHIPPING">Đang giao</option><option value="DELIVERED">Đã giao</option><option value="DELIVERY_FAILED">Chưa giao được</option><option value="">Tất cả</option></select></label>}</div>
         <div className="mt-4 space-y-3">{dataError && <DriverNotice>{dataError}</DriverNotice>}{loading && !orders.length ? <DriverLoading /> : !orders.length ? <div className="py-12 text-center"><Package className="mx-auto h-9 w-9 text-zinc-300" /><h2 className="mt-4 text-sm font-semibold text-zinc-800 dark:text-zinc-200">{tab === 'ready' ? 'Chưa có đơn chờ nhận' : 'Chưa có đơn trong danh sách này'}</h2><p className="mt-2 text-sm text-zinc-500">Danh sách sẽ cập nhật khi có thay đổi.</p></div> : orders.map(order => <article key={order.id} className="rounded-xl border border-zinc-200 p-4 dark:border-zinc-800 sm:p-5"><div className="flex flex-wrap items-start justify-between gap-3"><div className="min-w-0"><p className="break-words text-sm font-bold text-zinc-900 dark:text-white">{order.orderNumber || `Đơn #${order.id}`}</p><p className="mt-1 text-sm text-zinc-600 dark:text-zinc-300">{order.customerName || 'Khách hàng'}</p></div><DriverStatus status={order.status} /></div><div className="mt-4 grid gap-3 sm:grid-cols-[1fr_auto]"><div className="min-w-0 space-y-2 text-sm text-zinc-500"><p className="flex items-start gap-2"><MapPin className="mt-0.5 h-4 w-4 shrink-0" /><span className="break-words">{order.deliveryAddress || 'Chưa có địa chỉ. Liên hệ cửa hàng trước khi nhận.'}</span></p>{order.customerPhone && <a href={`tel:${String(order.customerPhone).replace(/[^\d+]/g, '')}`} className="inline-flex min-h-8 items-center gap-2 font-medium text-[#287DA8]"><Phone className="h-4 w-4" />{order.customerPhone}</a>}<p>{(order.items || []).map((item: any) => `${item.productName || item.product?.name || 'Sản phẩm'} × ${item.quantity}`).join(' · ')}</p></div><div className="text-left sm:text-right"><p className="font-bold text-zinc-900 dark:text-white">{money(order.totalAmount)}</p><p className="mt-1 text-xs text-zinc-500">{paymentLabel(order)}{String(order.paymentStatus).toUpperCase() === 'PAID' ? ' · Đã thanh toán' : ''}</p></div></div><div className="mt-4 flex flex-wrap justify-end gap-2">{tab === 'ready' ? <button className={driverPrimary} disabled={busy || loading || Boolean(errors.duty || errors.shift || errors.ready) || !canClaimDelivery(order, duty, shift, storeId)} onClick={() => setClaim(order)}>Nhận giao đơn<ArrowRight className="h-4 w-4" /></button> : canRecordDelivery(order, userId, role) ? <><button disabled={busy || loading || Boolean(errors.mine)} onClick={() => setResult({ order, mode: 'failed' })} className={driverSecondary}>Chưa giao được</button><button disabled={busy || loading || Boolean(errors.mine)} onClick={() => setResult({ order, mode: 'delivered' })} className={driverPrimary}><CheckCircle2 className="h-4 w-4" />Đã giao hàng</button></> : <span className="text-xs text-zinc-500">{order.status === 'DELIVERY_FAILED' ? failureReasons.find(reason => reason.value === order.failureReasonCode)?.label || 'Cửa hàng đã nhận thông tin hỗ trợ.' : 'Kết quả đã được lưu.'}</span>}</div></article>)}</div>

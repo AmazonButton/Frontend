@@ -189,34 +189,84 @@ function mapApiTicketToFrontend(item: any): WarrantyTicket {
   };
 }
 
-/**
- * Tải danh sách phiếu bảo hành từ Backend API (kèm fallback LocalStorage)
- */
-export async function fetchWarrantyTickets(params?: {
+export interface WarrantyPagination {
+  page: number;
+  pageSize: number;
+  total: number;
+  totalPages: number;
+}
+
+export interface WarrantyTicketPage {
+  items: WarrantyTicket[];
+  pagination: WarrantyPagination;
+}
+
+export interface WarrantyQueryParams {
   status?: string;
   faultGroup?: string;
   storeId?: string;
   deviceId?: string;
   page?: number;
   pageSize?: number;
-}): Promise<WarrantyTicket[]> {
-  try {
-    const res = await api.get('/warranty/tickets', { params });
-    const payload = res.data;
-    const rawList = Array.isArray(payload?.data) ? payload.data : [];
-    const mapped = rawList.map(mapApiTicketToFrontend);
-    if (mapped.length > 0 || !params || Object.keys(params).length === 0) {
-      saveWarrantyTickets(mapped);
-    }
-    return mapped;
-  } catch (err) {
-    console.warn('[WarrantyService] Fetch tickets from backend failed, using local cache:', err);
-    return loadWarrantyTickets();
-  }
+  signal?: AbortSignal;
 }
 
 /**
- * Lập phiếu bảo hành mới qua Backend API (kèm fallback LocalStorage)
+ * Tải danh sách phiếu bảo hành có phân trang từ Backend API (không fallback dữ liệu giả)
+ */
+export async function fetchWarrantyTicketsPaginated(
+  params?: WarrantyQueryParams
+): Promise<WarrantyTicketPage> {
+  const cleanParams: Record<string, string | number> = {};
+  if (params?.status && params.status !== 'ALL') cleanParams.status = params.status;
+  if (params?.faultGroup && params.faultGroup !== 'ALL') cleanParams.faultGroup = params.faultGroup;
+  if (params?.storeId) cleanParams.storeId = params.storeId;
+  if (params?.deviceId?.trim()) cleanParams.deviceId = params.deviceId.trim().toUpperCase();
+  cleanParams.page = Math.max(1, Number(params?.page) || 1);
+  cleanParams.pageSize = Math.min(100, Math.max(1, Number(params?.pageSize) || 20));
+
+  const res = await api.get('/warranty/tickets', { params: cleanParams, signal: params?.signal });
+  const payload = res.data;
+  if (payload?.success === false) {
+    throw new Error(payload?.message || 'Không tải được danh sách phiếu bảo hành.');
+  }
+  const rawList = Array.isArray(payload?.data) ? payload.data : [];
+  const mapped = rawList.map(mapApiTicketToFrontend);
+  const p = payload?.pagination || {};
+  const page = Math.max(1, Number(p.page) || Number(cleanParams.page));
+  const pageSize = Math.max(1, Number(p.pageSize) || Number(cleanParams.pageSize));
+  const rawTotal = p.total ?? p.totalItems;
+  const total = rawTotal !== undefined && Number.isFinite(Number(rawTotal)) ? Number(rawTotal) : mapped.length;
+  const totalPages = Math.max(1, Number(p.totalPages) || Math.ceil(total / pageSize) || 1);
+
+  return {
+    items: mapped,
+    pagination: { page, pageSize, total, totalPages },
+  };
+}
+
+/**
+ * Tải danh sách phiếu bảo hành từ Backend API
+ */
+export async function fetchWarrantyTickets(params?: WarrantyQueryParams): Promise<WarrantyTicket[]> {
+  const res = await fetchWarrantyTicketsPaginated(params);
+  return res.items;
+}
+
+/**
+ * Đọc lại 1 phiếu bảo hành từ Backend để đối soát khi hết thời gian chờ
+ */
+export async function fetchWarrantyTicketById(ticketIdOrCode: string): Promise<WarrantyTicket> {
+  const res = await api.get(`/warranty/tickets/${encodeURIComponent(ticketIdOrCode)}`);
+  const payload = res.data;
+  if (payload?.success === false || !payload?.data) {
+    throw new Error(payload?.message || 'Không đọc được thông tin phiếu bảo hành.');
+  }
+  return mapApiTicketToFrontend(payload.data);
+}
+
+/**
+ * Lập phiếu bảo hành mới qua Backend API (bắt buộc xác nhận từ Backend)
  */
 export async function createWarrantyTicketAsync(input: {
   deviceId: string;
@@ -230,24 +280,21 @@ export async function createWarrantyTicketAsync(input: {
   reportedBy?: string;
   reportedRole?: string;
 }): Promise<WarrantyTicket> {
-  try {
-    const res = await api.post('/warranty/tickets', {
-      deviceId: input.deviceId.trim().toUpperCase(),
-      storeId: input.storeId,
-      faultGroup: input.faultGroup,
-      faultCode: input.faultCode,
-      depositAmount: input.depositAmount,
-      deductionPercent: input.deductionPercent,
-      inspectionNote: input.inspectionNote,
-    });
-    const created = mapApiTicketToFrontend(res.data?.data || res.data);
-    const current = loadWarrantyTickets();
-    saveWarrantyTickets([created, ...current.filter((t) => t.id !== created.id)]);
-    return created;
-  } catch (err) {
-    console.warn('[WarrantyService] Create ticket via API failed, creating local offline ticket:', err);
-    return createWarrantyTicket(input);
+  const res = await api.post('/warranty/tickets', {
+    deviceId: input.deviceId.trim().toUpperCase(),
+    storeId: input.storeId,
+    faultGroup: input.faultGroup,
+    faultCode: input.faultCode,
+    depositAmount: input.depositAmount,
+    deductionPercent: input.deductionPercent,
+    inspectionNote: input.inspectionNote,
+  });
+  const payload = res.data;
+  if (payload?.success === false) {
+    throw new Error(payload?.message || 'Không thể tạo phiếu bảo hành.');
   }
+  const created = mapApiTicketToFrontend(payload?.data || payload);
+  return created;
 }
 
 /**

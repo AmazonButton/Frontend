@@ -57,9 +57,10 @@ export const ProfilePage: React.FC = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
 
-  const isStoreOwner = user?.role === 'STORE_OWNER' || user?.role === 'STORE_MANAGER';
+  const isStoreOwner = user?.role === 'STORE_OWNER';
   const isCustomer = user?.role === 'CUSTOMER';
   const isAdmin = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '');
+  const isSystemStaff = user?.role === 'SYSTEM_STAFF';
   useEffect(() => {
     if (isCustomer && location.hash === '#customer-identity-verification') navigate('/customer/verification', { replace: true });
   }, [isCustomer, location.hash, navigate]);
@@ -70,7 +71,7 @@ export const ProfilePage: React.FC = () => {
   const requestedTab = searchParams.get('tab') || 'INFO';
   const allowedTabs: ProfileTab[] = isStoreOwner
     ? ['INFO', 'NOTIFICATIONS', 'SECURITY']
-    : isAdmin ? ['INFO', 'SECURITY']
+    : isAdmin || isSystemStaff ? ['INFO', 'SECURITY']
     : isCustomer ? ['INFO', 'DEVICES', 'ORDERS', 'SECURITY']
     : ['INFO', 'DEVICES', 'ORDERS', 'ADDRESSES', 'SECURITY'];
   const activeTab: ProfileTab = allowedTabs.includes(requestedTab as ProfileTab)
@@ -203,8 +204,12 @@ export const ProfilePage: React.FC = () => {
       setLoadingData(true);
       try {
         const [devRes, ordRes, addrRes] = await Promise.all([
-          isAdmin ? Promise.resolve({ data: { success: false, data: [] } }) : api.get('/devices').catch(() => ({ data: { success: false, data: [] } })),
-          api.get('/orders').catch(() => ({ data: { success: false, data: [] } })),
+          isAdmin || isSystemStaff
+            ? Promise.resolve({ data: { success: false, data: [] } })
+            : api.get('/devices').catch(() => ({ data: { success: false, data: [] } })),
+          isAdmin || isSystemStaff
+            ? Promise.resolve({ data: { success: false, data: [] } })
+            : api.get('/orders').catch(() => ({ data: { success: false, data: [] } })),
           isCustomer ? api.get('/customer-addresses').catch(() => ({ data: { success: false, data: [] } })) : Promise.resolve({ data: { success: false, data: [] } }),
         ]);
         if (devRes.data?.success && Array.isArray(devRes.data.data)) {
@@ -496,12 +501,13 @@ export const ProfilePage: React.FC = () => {
     switch (role) {
       case 'SUPER_ADMIN':
         return 'Quản trị viên Hệ Thống (Super Admin)';
+      case 'SYSTEM_ADMIN':
+      case 'ADMIN':
+        return 'Quản trị viên Hệ Thống';
+      case 'SYSTEM_STAFF':
+        return 'Kỹ thuật viên hệ thống (SYSTEM_STAFF)';
       case 'STORE_OWNER':
         return 'Chủ đại lý & Cửa hàng (Store Owner)';
-      case 'STORE_MANAGER':
-        return 'Quản lý cửa hàng (Store Manager)';
-      case 'STORE_STAFF':
-        return 'Nhân viên cửa hàng (Store Staff)';
       case 'CUSTOMER':
       default:
         return 'Khách hàng cá nhân';
@@ -511,10 +517,12 @@ export const ProfilePage: React.FC = () => {
   const getRoleBadge = (role?: string) => {
     switch (role) {
       case 'SUPER_ADMIN':
+      case 'SYSTEM_ADMIN':
+      case 'ADMIN':
         return { label: 'Admin Hub', color: 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300' };
+      case 'SYSTEM_STAFF':
+        return { label: 'Kỹ thuật hệ thống', color: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300' };
       case 'STORE_OWNER':
-      case 'STORE_MANAGER':
-      case 'STORE_STAFF':
         return { label: 'Chủ Cửa Hàng (Store Owner)', color: 'bg-blue-50 text-[#0E6BA8] border-blue-200 dark:bg-blue-950/40 dark:text-[#38a5da]' };
       case 'CUSTOMER':
       default:
@@ -699,7 +707,7 @@ export const ProfilePage: React.FC = () => {
         {/* ================================================================= */}
         {/* LEFT SIDEBAR MENU                                                 */}
         {/* ================================================================= */}
-        {!isCustomer && !isAdmin && !isStoreOwner && <aside className={`profile-navigation ${isStoreOwner ? 'lg:col-span-3' : 'lg:col-span-4'} bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-3 shadow-xs`}>
+        {!isCustomer && !isAdmin && !isStoreOwner && !isSystemStaff && <aside className="profile-navigation lg:col-span-4 bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-3 shadow-xs">
           <nav aria-label="Quản lý tài khoản" className="space-y-1">
             {menuItems.map((item) => {
               const Icon = item.icon;

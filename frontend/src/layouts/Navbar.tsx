@@ -9,6 +9,8 @@ import { HeaderNavigation } from '../components/common/HeaderNavigation';
 import { LogoutConfirmModal } from '../components/common/LogoutConfirmModal';
 import { NotificationBellPopover } from '../components/common/NotificationBellPopover';
 
+import { ROLE_BADGE_META } from '../utils/authority';
+
 const MotionLink = (motion.create || motion)(Link);
 
 export const Navbar: React.FC = () => {
@@ -24,7 +26,7 @@ export const Navbar: React.FC = () => {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const userMenuRef = useRef<HTMLDivElement>(null);
   const isCustomer = user?.role === 'CUSTOMER';
-  const isStoreUser = ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(user?.role || '');
+  const isStoreUser = user?.role === 'STORE_OWNER';
 
   useEffect(() => {
     setMobileMenuOpen(false);
@@ -99,27 +101,7 @@ export const Navbar: React.FC = () => {
   const isActive = (path: string) => location.pathname === path;
 
   const getRoleBadge = (role: string) => {
-    switch (role) {
-      case 'STAFF_DELIVERY':
-        return { label: 'Giao hàng', color: 'bg-sky-50 text-sky-700 border-sky-200' };
-      case 'STAFF_ORDER':
-        return { label: 'Xử lý đơn', color: 'bg-sky-50 text-sky-700 border-sky-200' };
-      case 'ADMIN':
-      case 'SYSTEM_ADMIN':
-        return { label: 'Quản trị viên', color: 'bg-violet-50 text-violet-700 border-violet-200' };
-      case 'SUPER_ADMIN':
-        return { label: 'Quản trị', color: 'bg-purple-500/10 text-purple-600 dark:text-purple-400 border-purple-500/20' };
-      case 'STORE_OWNER':
-        return { label: 'Chủ Cửa Hàng', color: 'bg-[#287DA8]/10 text-[#287DA8] dark:text-[#38a5da] border-[#287DA8]/25' };
-      case 'STORE_MANAGER':
-      case 'STORE_STAFF':
-        return { label: 'Nhân Viên Cửa Hàng', color: 'bg-sky-500/10 text-sky-600 dark:text-sky-400 border-sky-500/20' };
-      case 'TECHNICIAN':
-        return { label: 'Kỹ Thuật Viên', color: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20' };
-      case 'CUSTOMER':
-      default:
-        return { label: 'Khách Hàng', color: 'bg-emerald-500/10 text-emerald-600 dark:text-emerald-400 border-emerald-500/20' };
-    }
+    return ROLE_BADGE_META[role] || ROLE_BADGE_META.CUSTOMER;
   };
 
   const getDisplayName = (name?: string) => {
@@ -130,7 +112,8 @@ export const Navbar: React.FC = () => {
 
   const getProfileRoute = (role?: string) => {
     if (role === 'CUSTOMER') return '/customer/profile';
-    if (['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(role || '')) return '/store/profile';
+    if (role === 'STORE_OWNER') return '/store/profile';
+    if (role === 'SYSTEM_STAFF') return '/system-staff/profile';
     if (['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(role || '')) return '/admin/profile';
     return '/profile';
   };
