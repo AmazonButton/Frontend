@@ -426,7 +426,7 @@ test('customer banking route is lazy, customer-scoped and both frontend defaults
     while (parent) { if (ts.isJsxElement(parent) && parent.openingElement.tagName.getText(source) === 'Route' && parent.openingElement.getText(source).includes("allowedRoles={['CUSTOMER']}")) guarded = true; parent = parent.parent; }
     assert.equal(guarded, true);
   }
-  for (const name of ['../vercel.json', '../frontend/vercel.json']) assert.equal(JSON.parse(readFileSync(new URL(name, import.meta.url))).rewrites[0].destination, 'https://backend-fae8.onrender.com/api/v1/:path*');
+  for (const name of ['../vercel.json', '../frontend/vercel.json']) assert.equal(JSON.parse(readFileSync(new URL(name, import.meta.url))).rewrites[0].destination, 'https://fragrant-mode-3a41.ptt24032004.workers.dev/api/v1/:path*');
 });
 
 
