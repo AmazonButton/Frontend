@@ -57,6 +57,12 @@ function screen(prefix, file, exported, { role = 'STORE_OWNER', tab = '', sectio
       if (name.endsWith('/AdminAccountNavigation')) return { AdminAccountNavigation: 'admin-account-navigation' };
       if (name.endsWith('/AdminRevenueNavigation')) return { AdminRevenueNavigation: 'admin-revenue-navigation' };
       if (name.endsWith('/LogoutConfirmModal')) return { LogoutConfirmModal: 'logout-confirm-modal' };
+      if (name.endsWith('/utils/authority')) {
+        const authExports = {};
+        const authCompiled = ts.transpileModule(readFileSync(new URL(`${prefix}utils/authority.ts`, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText;
+        vm.runInNewContext(authCompiled, { exports: authExports, Object, Array, Set, Map, String, Boolean });
+        return authExports;
+      }
       if (name.endsWith('/api') || name.endsWith('/services')) return { api: { get: async path => { requests.push(path); return { data: { success: true, data: [] } }; } } };
       if (name.endsWith('/order-events')) return { normalizeOrder: value => value };
       if (name.endsWith('.css')) return {};
@@ -107,9 +113,9 @@ for (const prefix of ['../src/', '../frontend/src/']) {
     assert.equal(profile.nodes.find(node => node.type === 'a').props['aria-current'], 'page'); assert.deepEqual(profile.requests, []);
   });
   test(`${prefix}all admin account sections live in the sidebar and logout retains confirmation`, () => {
-    for (const tab of ['INFO', 'ORDERS', 'ADDRESSES', 'SECURITY']) {
+    for (const tab of ['INFO', 'SECURITY']) {
       const app = screen(prefix, 'components/admin/AdminAccountNavigation.tsx', 'AdminAccountNavigation', { role: 'ADMIN', pathname: '/admin/profile', tab });
-      assert.equal(app.nodes.filter(node => node.type === 'a').length, 4);
+      assert.equal(app.nodes.filter(node => node.type === 'a').length, 2);
       assert.equal(app.nodes.find(node => node.type === 'a' && node.props['aria-current']).props.to, '/admin/profile?tab=' + tab);
       const profile = screen(prefix, 'pages/profile/ProfilePage.tsx', 'ProfilePage', { role: 'ADMIN', pathname: '/admin/profile', tab });
       assert.equal(profile.nodes.some(node => node.type === 'nav' && node.props['aria-label'] === 'Quản lý tài khoản'), false);
@@ -165,12 +171,14 @@ for (const prefix of ['../src/', '../frontend/src/']) {
     collapsed.nodes.find(node => node.type === 'button').props.onClick(); assert.equal(expanded, 1);
     assert.equal(collapsed.nodes.some(node => node.type === 'a'), false);
   });
-  test(`${prefix}owner opens service plans while other roles keep their IoT rental navigation`, () => {
+  test(`${prefix}owner opens service plans, system staff gets device workspace, and customer keeps IoT rental navigation`, () => {
     const owner = screen(prefix, 'layouts/Sidebar.tsx', 'Sidebar', { role: 'STORE_OWNER', pathname: '/store/service-plans' });
     assert.equal(owner.nodes.filter(node => node.type === 'store-finance-navigation' && node.props.canRegister).length, 2);
     assert.equal(owner.nodes.some(node => node.type === 'a' && node.props.to === '/store/rentals'), false);
-    const manager = screen(prefix, 'layouts/Sidebar.tsx', 'Sidebar', { role: 'STORE_MANAGER' });
-    assert.ok(manager.nodes.some(node => node.type === 'a' && node.props.to === '/store/rentals'));
+    const systemStaff = screen(prefix, 'layouts/Sidebar.tsx', 'Sidebar', { role: 'SYSTEM_STAFF', pathname: '/system-staff/devices' });
+    assert.ok(systemStaff.nodes.some(node => node.type === 'a' && node.props.to === '/system-staff/devices'));
+    assert.ok(systemStaff.nodes.some(node => node.type === 'a' && node.props.to === '/system-staff/warranty'));
+    assert.equal(systemStaff.nodes.some(node => node.type === 'a' && node.props.to.startsWith('/admin')), false);
     const customer = screen(prefix, 'layouts/Sidebar.tsx', 'Sidebar', { role: 'CUSTOMER' });
     assert.ok(customer.nodes.some(node => node.type === 'a' && node.props.to === '/customer/rentals'));
     assert.equal(customer.nodes.some(node => node.type === 'a' && node.props.to === '/store/service-plans'), false);
@@ -221,36 +229,34 @@ for (const prefix of ['../src/', '../frontend/src/']) {
     assert.equal(exports.route.type, 'verification-screen');
   });
 
-  test(`${prefix}store sidebar exposes one revenue entry and no duplicate operations`, () => {
+  test(`${prefix}store sidebar exposes one revenue entry plus consolidated delivery and shift operations`, () => {
     const app = screen(prefix, 'layouts/Sidebar.tsx', 'Sidebar');
     const links = app.nodes.filter(node => node.type === 'a').map(node => node.props.to);
-    for (const removed of ['/store/device-templates', '/store/wallet', '/driver/shifts', '/store/profile?tab=SECURITY']) assert.ok(!links.includes(removed));
-    for (const kept of ['/store/dashboard', '/store/devices', '/store/products', '/driver/deliveries']) assert.ok(links.includes(kept));
+    for (const removed of ['/store/device-templates', '/store/wallet', '/store/rentals', '/store/profile?tab=SECURITY']) assert.ok(!links.includes(removed));
+    for (const kept of ['/store/dashboard', '/store/devices', '/store/products', '/driver/deliveries', '/driver/shifts']) assert.ok(links.includes(kept));
     assert.equal(app.nodes.filter(node => node.type === 'store-finance-navigation').length, 2);
     assert.equal(app.nodes.filter(node => node.type === 'store-revenue-navigation').length, 2);
   });
 
   test(`${prefix}profile keeps password changes and avoids duplicate store data requests`, () => {
-    for (const role of ['STORE_OWNER', 'STORE_MANAGER']) {
+    for (const role of ['STORE_OWNER']) {
       const app = screen(prefix, 'pages/profile/ProfilePage.tsx', 'ProfilePage', { role });
       app.runEffects();
-      assert.deepEqual(app.requests, []);
+      assert.deepEqual(app.requests, ['/stores/me']);
       for (const removed of ['Thiết bị đã cấp phát', 'Đơn hàng từ nút bấm', 'Kho bãi & Điểm bán']) assert.ok(!app.text.includes(removed));
-      app.nodes.find(node => node.type === 'button' && node.props.children?.some?.(child => JSON.stringify(child).includes('Bảo mật & Đổi mật khẩu')))?.props.onClick();
-      assert.equal(app.search.get('tab'), 'SECURITY');
-      app.render();
-      assert.equal(app.nodes.filter(node => node.type === 'input' && node.props.type === 'password').length, 3);
+      const sec = screen(prefix, 'pages/profile/ProfilePage.tsx', 'ProfilePage', { role, tab: 'SECURITY' });
+      assert.equal(sec.nodes.filter(node => node.type === 'input' && node.props.type === 'password').length, 3);
     }
   });
 
   test(`${prefix}admin profiles omit personal devices and old device tabs return to information`, () => {
-    for (const role of ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN']) {
+    for (const role of ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN', 'SYSTEM_STAFF']) {
       const app = screen(prefix, 'pages/profile/ProfilePage.tsx', 'ProfilePage', { role, tab: 'DEVICES' });
       app.runEffects();
       assert.ok(!app.text.includes('Nút bấm của tôi'));
       assert.equal(app.search.get('tab'), 'INFO');
       assert.ok(!app.requests.includes('/devices'));
-      assert.ok(app.requests.includes('/orders'));
+      assert.ok(!app.requests.includes('/orders'));
     }
   });
 
@@ -267,7 +273,7 @@ for (const prefix of ['../src/', '../frontend/src/']) {
     const customer = screen(prefix, 'pages/profile/ProfilePage.tsx', 'ProfilePage', { role: 'CUSTOMER', tab: 'DEVICES' });
     customer.runEffects();
     assert.ok(customer.text.includes('Nút bấm của tôi'));
-    assert.deepEqual(customer.requests, ['/devices', '/orders']);
+    assert.deepEqual(customer.requests, ['/devices', '/orders', '/customer-addresses']);
   });
 
   test(`${prefix}sound and theme controls work beside notifications without opening account menu`, () => {

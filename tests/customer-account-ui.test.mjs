@@ -28,6 +28,7 @@ function harness(prefix, { component = 'profile', user = customer, pathname = '/
     exports, URLSearchParams,
     setTimeout(fn, delay) { timeouts.push({ fn, delay }); return timeouts.length; },
     FileReader: class { constructor() { counts.reader++; } readAsDataURL() { this.result = 'data:image/png;base64,fixture'; this.onloadend(); } },
+    Event: class { constructor(type) { this.type = type; } },
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail; } },
     localStorage: { getItem: key => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value), removeItem: key => storage.delete(key) },
     window: { location, scrollY: 0, addEventListener() {}, removeEventListener() {}, dispatchEvent: event => events.push(event) },
@@ -43,6 +44,12 @@ function harness(prefix, { component = 'profile', user = customer, pathname = '/
       if (name.endsWith('/OrderSoundContext')) return { useSound: () => ({ isSoundEnabled: true }) };
       if (name.endsWith('/ThemeContext')) return { useTheme: () => ({ theme: 'light' }) };
       if (name.endsWith('/api')) return { api: { get: async path => { calls.push({ method: 'GET', path }); return { data: { success: true, data: [] } }; }, patch: async (path, body) => { calls.push({ method: 'PATCH', path, body }); return patch ? patch(path, body) : { data: { success: true } }; }, post: async (path, body) => { calls.push({ method: 'POST', path, body }); return { data: { success: true } }; } } };
+      if (name.endsWith('/utils/authority')) {
+        const authExports = {};
+        const authCompiled = ts.transpileModule(readFileSync(new URL(`${prefix}utils/authority.ts`, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText;
+        vm.runInNewContext(authCompiled, { exports: authExports, Object, Array, Set, Map, String, Boolean });
+        return authExports;
+      }
       if (name.endsWith('/order-events')) return { normalizeOrder: value => value };
       if (name.endsWith('.css')) return {};
       if (name.includes('/components/')) return new Proxy({}, { get: (_, key) => `component.${String(key)}` });
@@ -170,7 +177,7 @@ for (const prefix of ['../src/', '../frontend/src/']) {
 
   test(`${prefix}save failure still displays backend feedback and restores the save control`, async () => {
     const app = harness(prefix, { patch: async () => { throw { response: { data: { message: ['Không thể lưu thông tin'] } } }; } });
-    await app.flush(); await app.submit(); assert.match(app.text, /Không thể lưu thông tin/); assert.equal(app.find('button', 'Lưu thay đổi').props.disabled, false); app.unmount();
+    await app.flush(); await app.input('customer-profile-name', 'Tên thử lỗi'); await app.submit(); assert.match(app.text, /Không thể lưu thông tin/); assert.equal(app.find('button', 'Lưu thay đổi').props.disabled, false); app.unmount();
   });
 
   test(`${prefix}avatar upload/remove preserve file limit, preview, storage and header sync event`, async () => {
@@ -208,11 +215,11 @@ for (const prefix of ['../src/', '../frontend/src/']) {
     assert.equal(app.counts.logout, 1); assert.equal(app.navigation.at(-1).to, '/login'); app.unmount();
   });
 
-  test(`${prefix}store profile navigation is retained while admin navigation moves to the sidebar`, async () => {
-    for (const role of ['STORE_OWNER', 'STORE_MANAGER', 'SUPER_ADMIN']) {
+  test(`${prefix}store and system-staff profile navigation uses sidebar navigation while customer sidebar keeps eKYC group`, async () => {
+    for (const role of ['STORE_OWNER', 'SYSTEM_STAFF', 'SUPER_ADMIN']) {
       const app = harness(prefix, { user: { ...customer, role } }); await app.flush();
-      assert.equal(app.nodes.some(node => node.props?.['aria-label'] === 'Quản lý tài khoản'), !['ADMIN', 'SYSTEM_ADMIN', 'SUPER_ADMIN'].includes(role));
-      assert.equal(app.nodes.some(node => node.type === 'button' && textOf(node).includes('Đăng xuất')), !['ADMIN', 'SYSTEM_ADMIN', 'SUPER_ADMIN'].includes(role));
+      assert.equal(app.nodes.some(node => node.props?.['aria-label'] === 'Quản lý tài khoản'), false);
+      assert.equal(app.nodes.some(node => node.type === 'button' && textOf(node).includes('Đăng xuất')), false);
       assert.ok(!app.nodes.some(node => node.props?.className === 'profile-avatar account-profile-card'));
       app.unmount();
     }

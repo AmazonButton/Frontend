@@ -20,8 +20,8 @@ test('phone registration uses trusted Firebase credential, exact customer DTO an
   assert.equal(result.user.id,'9007199254740999'); assert.equal(result.token,'backend-jwt');
 });
 test('phone login reads nested auth response without creating arbitrary profile fields', async () => {
-  const result = await exchangePhoneCredential({post:async(path,data)=>{assert.equal(path,'/auth/login-by-phone');assert.deepEqual(Object.keys(data),['firebaseIdToken']);return{data:{success:true,data:{accessToken:'jwt',user:{id:'12',role:'STAFF_DELIVERY'}}}};}},'login',token);
-  assert.equal(result.user.id,'12'); assert.equal(roleHome(result.user.role),'/driver/deliveries');
+  const result = await exchangePhoneCredential({post:async(path,data)=>{assert.equal(path,'/auth/login-by-phone');assert.deepEqual(Object.keys(data),['firebaseIdToken']);return{data:{success:true,data:{accessToken:'jwt',user:{id:'12',role:'STORE_OWNER',platformRole:'STORE_OWNER'}}}};}},'login',token);
+  assert.equal(result.user.id,'12'); assert.equal(result.user.platformRole,'STORE_OWNER'); assert.equal(roleHome(result.user.role),'/store/dashboard');
 });
 test('existing-account phone verification calls only protected verify endpoint', async () => {
   const result=await exchangePhoneCredential({post:async(path,data)=>{assert.equal(path,'/auth/phone/verify');assert.deepEqual(data,{firebaseIdToken:token});return{data:{success:true,data:{phoneNumber:'+84912345678'}}};}},'verify',token);
@@ -37,12 +37,12 @@ test('validates credential and registration name before any backend request',asy
   await assert.rejects(exchangePhoneCredential(api,'register',token,{fullName:'A'}));
   assert.equal(calls,0);
 });
-test('every phone-login destination is accessible to its role',()=>{
+test('every phone-login destination is accessible to its active role and rejects legacy roles',()=>{
   assert.equal(roleHome('CUSTOMER'),'/shop');
   for(const role of ['SUPER_ADMIN','SYSTEM_ADMIN','ADMIN'])assert.equal(roleHome(role),'/admin/dashboard');
-  for(const role of ['STORE_OWNER','STORE_MANAGER','STORE_STAFF'])assert.equal(roleHome(role),'/store/dashboard');
-  for(const role of ['STAFF_ORDER','STAFF_DELIVERY'])assert.equal(roleHome(role),'/driver/deliveries');
-  for(const role of ['STAFF_INVENTORY','STAFF_BUTTON','TECHNICIAN'])assert.equal(roleHome(role),'/profile');
+  assert.equal(roleHome('SYSTEM_STAFF'),'/system-staff/devices');
+  assert.equal(roleHome('STORE_OWNER'),'/store/dashboard');
+  for(const legacy of ['STORE_MANAGER','STORE_STAFF','STAFF_ORDER','STAFF_DELIVERY','STAFF_INVENTORY','STAFF_BUTTON','TECHNICIAN'])assert.equal(roleHome(legacy),'/');
 });
 test('phone verification remains authenticated and refreshable while phone login/register remain public',()=>{
   const require=createRequire(import.meta.url);const ts=require('typescript');

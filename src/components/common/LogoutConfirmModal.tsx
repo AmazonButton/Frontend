@@ -85,9 +85,13 @@ export const LogoutConfirmModal: React.FC<LogoutConfirmModalProps> = ({
     switch (role) {
       case 'SUPER_ADMIN':
         return 'Super Admin';
+      case 'SYSTEM_ADMIN':
+        return 'Quản trị hệ thống';
+      case 'ADMIN':
+        return 'Quản trị viên';
+      case 'SYSTEM_STAFF':
+        return 'Kỹ thuật hệ thống';
       case 'STORE_OWNER':
-      case 'STORE_MANAGER':
-      case 'STORE_STAFF':
         return 'Chủ Cửa Hàng';
       case 'CUSTOMER':
       default:

@@ -195,11 +195,16 @@ for (const prefix of ['../src/', '../frontend/src/']) {
     await blocked.flush(); await blocked.amount('50000'); await blocked.submit(); await blocked.flush();
     assert.equal(blocked.posts.length, 0); assert.match(blocked.text, /Chưa lưu được mã yêu cầu/); blocked.unmount();
   });
-  test(`${prefix}manager wallet operations retain backend permissions without claiming to manage owner banks`, async () => {
-    const app = walletScreen(prefix, { role: 'STORE_MANAGER' }); await app.flush(); await app.amount('50000');
-    await app.submit(); await app.flush(); assert.equal(app.posts.length, 1);
-    assert.equal(app.calls.some(call => call.startsWith('accounts:')), false);
-    assert.equal(app.nodes.some(n => n.type === 'a' && n.props.to === '/store/finance#store-bank-accounts'), false); app.unmount();
+  test(`${prefix}deprecated manager role cannot withdraw or claim owner banks while store owner can`, async () => {
+    const managerApp = walletScreen(prefix, { role: 'STORE_MANAGER' }); await managerApp.flush(); await managerApp.amount('50000');
+    assert.equal(managerApp.nodes.find(n => n.type === 'button' && n.props.type === 'submit').props.disabled, true);
+    await managerApp.submit(); await managerApp.flush(); assert.equal(managerApp.posts.length, 0);
+    assert.equal(managerApp.calls.some(call => call.startsWith('accounts:')), false);
+    assert.equal(managerApp.nodes.some(n => n.type === 'a' && n.props.to === '/store/finance#store-bank-accounts'), false); managerApp.unmount();
+
+    const ownerApp = walletScreen(prefix, { role: 'STORE_OWNER', accounts: [verifiedAccount] }); await ownerApp.flush(); await ownerApp.amount('50000');
+    assert.equal(ownerApp.nodes.find(n => n.type === 'button' && n.props.type === 'submit').props.disabled, false);
+    await ownerApp.submit(); await ownerApp.flush(); assert.equal(ownerApp.posts.length, 1); ownerApp.unmount();
   });
   test(`${prefix}wallet service uses the real wallet response and deployed history pagination`, async () => {
     const calls = [];

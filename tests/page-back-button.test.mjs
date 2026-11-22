@@ -155,7 +155,7 @@ test('the actual shared and standalone layouts show one back control for the int
     if (!React.isValidElement(node)) return 0;
     return (node.type === BackControl ? 1 : 0) + React.Children.toArray(node.props.children).reduce((sum, child) => sum + countControls(child), 0);
   };
-  for (const role of ['CUSTOMER', 'STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN', 'STAFF_DELIVERY', undefined]) {
+  for (const role of ['CUSTOMER', 'STORE_OWNER', 'SYSTEM_STAFF', 'SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN', 'STORE_MANAGER', 'STAFF_DELIVERY', undefined]) {
     const context = {
       require, exports: {}, useAuth: () => ({ user: role ? { role } : null }),
       Sidebar: 'sidebar', PageBackButton: BackControl, Suspense: React.Suspense,
@@ -164,7 +164,7 @@ test('the actual shared and standalone layouts show one back control for the int
     const evaluate = callback => vm.runInNewContext(ts.transpileModule(`(${callback})`, {
       compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, jsx: ts.JsxEmit.ReactJSX },
     }).outputText, { ...context });
-    const managedRole = ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(role);
+    const managedRole = ['STORE_OWNER', 'SYSTEM_STAFF', 'SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(role);
     assert.equal(countControls(evaluate(layouts.AppShellLayout)({})), managedRole || role === 'CUSTOMER' ? 1 : 0);
     assert.equal(countControls(evaluate(layouts.StandaloneProfileBackNavigation)()), managedRole ? 1 : 0);
   }

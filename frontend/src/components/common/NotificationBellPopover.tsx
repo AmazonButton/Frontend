@@ -95,7 +95,7 @@ export const NotificationBellPopover: React.FC = () => {
   const [activeTab, setActiveTab] = useState<string>('ALL');
 
   const isAdmin = Boolean(user && ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user.role));
-  const isStore = Boolean(user && ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'STAFF_ORDER', 'STAFF_INVENTORY', 'STAFF_BUTTON', 'STAFF_DELIVERY'].includes(user.role));
+  const isStore = Boolean(user && user.role === 'STORE_OWNER');
   const isCustomer = Boolean(user && user.role === 'CUSTOMER');
   const storeId = getUserStoreId(user);
 

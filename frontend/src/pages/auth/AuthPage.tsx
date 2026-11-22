@@ -147,18 +147,14 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
         const user = res.data.user || res.data.data?.user;
 
         login(token, user, refreshToken);
-
-        if (['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(user.role)) {
-          navigate('/store/dashboard', { replace: true });
-        } else if (['STAFF_DELIVERY', 'STAFF_ORDER'].includes(user.role)) {
-          navigate('/driver/deliveries', { replace: true });
-        } else if (user.role === 'CUSTOMER') {
-          navigate('/shop', { replace: true });
-        } else if (['SUPER_ADMIN', 'ADMIN', 'SYSTEM_ADMIN'].includes(user.role)) {
-          navigate('/admin/dashboard', { replace: true });
-        } else {
-          navigate('/', { replace: true });
-        }
+        const targetHome = (() => {
+          if (['STORE_OWNER'].includes(user.role)) return '/store/dashboard';
+          if (user.role === 'SYSTEM_STAFF') return '/system-staff/devices';
+          if (user.role === 'CUSTOMER') return '/shop';
+          if (['SUPER_ADMIN', 'ADMIN', 'SYSTEM_ADMIN'].includes(user.role)) return '/admin/dashboard';
+          return '/';
+        })();
+        navigate(targetHome, { replace: true });
       }
     } catch (err: any) {
       const msg =
@@ -272,10 +268,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
 
           if (['SUPER_ADMIN', 'ADMIN', 'SYSTEM_ADMIN'].includes(user?.role)) {
             navigate('/admin/dashboard');
-          } else if (['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role)) {
+          } else if (user?.role === 'SYSTEM_STAFF') {
+            navigate('/system-staff/devices');
+          } else if (user?.role === 'STORE_OWNER') {
             navigate('/store/dashboard');
           } else {
-            navigate(user?.role === 'CUSTOMER' ? '/shop' : '/customer/home');
+            navigate(user?.role === 'CUSTOMER' ? '/shop' : '/');
           }
           return;
         }
@@ -1013,10 +1011,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
                             setIsEnteringDashboard(false);
                             if (token && user) {
                               login(token, user, refreshToken);
-                              if (['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role)) {
+                              if (user?.role === 'STORE_OWNER') {
                                 navigate('/store/dashboard', { replace: true });
+                              } else if (user?.role === 'SYSTEM_STAFF') {
+                                navigate('/system-staff/devices', { replace: true });
                               } else {
-                                navigate(user?.role === 'CUSTOMER' ? '/shop' : '/customer/home', { replace: true });
+                                navigate(user?.role === 'CUSTOMER' ? '/shop' : '/', { replace: true });
                               }
                             } else {
                               setIdentifier(username.trim() || registerEmail.trim());

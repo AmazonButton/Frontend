@@ -8,7 +8,7 @@ export interface ProductRemovalDevice {
 }
 
 export function canRemoveDeviceProducts(role: string) {
-  return ['STORE_OWNER', 'STORE_MANAGER', 'SUPER_ADMIN'].includes(role);
+  return ['STORE_OWNER', 'SYSTEM_STAFF', 'ADMIN', 'SYSTEM_ADMIN', 'SUPER_ADMIN'].includes(role);
 }
 
 export function hasDeviceProducts(device: ProductRemovalDevice) {

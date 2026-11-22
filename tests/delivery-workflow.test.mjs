@@ -136,12 +136,13 @@ test('evidence rejects oversized/non-image files, unsafe hosts and another store
   assert.equal(cloudinaryEvidenceUrl('http://res.cloudinary.com/test/image/upload/stores/9/pod/x'), false);
 });
 
-test('STAFF_DELIVERY can report only their own SHIPPING order', () => {
+test('STORE_OWNER and platform admins can report SHIPPING orders while legacy driver/staff roles cannot', () => {
   const shipping = { ...order, status: 'SHIPPING', assignedDriverId: '21' };
-  assert.equal(canRecordDelivery(shipping, '21', 'STAFF_DELIVERY'), true);
-  assert.equal(canRecordDelivery(shipping, '22', 'STAFF_DELIVERY'), false);
+  assert.equal(canRecordDelivery(shipping, '21', 'STORE_OWNER'), true);
+  assert.equal(canRecordDelivery(shipping, '22', 'STORE_OWNER'), true);
+  assert.equal(canRecordDelivery(shipping, '21', 'STAFF_DELIVERY'), false);
   assert.equal(canRecordDelivery(shipping, '22', 'CUSTOMER'), false);
-  assert.equal(canRecordDelivery({ ...shipping, status: 'DELIVERED' }, '21', 'STAFF_DELIVERY'), false);
+  assert.equal(canRecordDelivery({ ...shipping, status: 'DELIVERED' }, '21', 'STORE_OWNER'), false);
 });
 
 test('closing a shift checks fresh assigned orders and matching current shift', () => {
@@ -151,12 +152,15 @@ test('closing a shift checks fresh assigned orders and matching current shift', 
   assert.throws(() => assertShiftCanClose('8', current, { pagination: { total: 0 } }));
 });
 
-test('handover confirmation is available only for returned CLOSED shifts and cashier roles', async () => {
+test('handover confirmation is available only for returned CLOSED shifts and STORE_OWNER/platform admin roles', async () => {
   const closed = { shiftId: '7', status: 'CLOSED' };
-  assert.equal(canConfirmHandover(closed, 'STORE_MANAGER'), true);
+  assert.equal(canConfirmHandover(closed, 'STORE_OWNER'), true);
+  assert.equal(canConfirmHandover(closed, 'SUPER_ADMIN'), true);
+  assert.equal(canConfirmHandover(closed, 'SYSTEM_STAFF'), false);
   assert.equal(canConfirmHandover(closed, 'STAFF_DELIVERY'), false);
-  assert.equal(canConfirmHandover({ ...closed, status: 'OPEN' }, 'STORE_MANAGER'), false);
-  assert.equal(canConfirmHandover({ ...closed, status: 'HANDED_OVER' }, 'STORE_MANAGER'), false);
+  assert.equal(canConfirmHandover(closed, 'STORE_MANAGER'), false);
+  assert.equal(canConfirmHandover({ ...closed, status: 'OPEN' }, 'STORE_OWNER'), false);
+  assert.equal(canConfirmHandover({ ...closed, status: 'HANDED_OVER' }, 'STORE_OWNER'), false);
   const app = harness({ post: () => ({ success: true, data: { shiftId: '7', status: 'HANDED_OVER' } }) });
   await app.service.confirmHandover('7', ' Counted cash ');
   assert.equal(app.requests[0].path, '/driver-shifts/7/confirm-handover');

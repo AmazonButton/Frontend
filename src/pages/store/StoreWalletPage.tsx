@@ -43,7 +43,7 @@ export const StoreWalletWorkspace: React.FC = () => {
   const { user } = useAuth();
   const storeId = financeStoreId(user);
   const canManageBanks = user?.role === 'STORE_OWNER';
-  const canWithdraw = canManageBanks || user?.role === 'STORE_MANAGER';
+  const canWithdraw = canManageBanks;
   const mounted = useRef(true);
   const refreshRequest = useRef(0);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; refreshRequest.current++; }; }, []);

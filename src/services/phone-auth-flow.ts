@@ -1,3 +1,5 @@
+import { getRoleHomePath, normalizeAuthUser } from '../utils/authority';
+
 export function normalizePhoneNumber(raw: string) {
   let phone = raw.trim().replace(/[\s().-]/g, '');
   if (/^0\d{9}$/.test(phone)) phone = `+84${phone.slice(1)}`;
@@ -6,10 +8,7 @@ export function normalizePhoneNumber(raw: string) {
 }
 
 export function roleHome(role?: string) {
-  if (['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(role || '')) return '/admin/dashboard';
-  if (['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(role || '')) return '/store/dashboard';
-  if (['STAFF_DELIVERY', 'STAFF_ORDER'].includes(role || '')) return '/driver/deliveries';
-  return role === 'CUSTOMER' ? '/shop' : '/profile';
+  return getRoleHomePath(role);
 }
 
 export async function exchangePhoneCredential(transport: { post: (path: string, body: any) => Promise<any> }, mode: 'login' | 'register' | 'verify', firebaseIdToken: string, profile?: { fullName: string; email?: string }) {
@@ -29,7 +28,7 @@ export async function exchangePhoneCredential(transport: { post: (path: string, 
   const token = envelope.accessToken || envelope.data?.accessToken || envelope.token;
   const refreshToken = envelope.refreshToken || envelope.data?.refreshToken;
   const rawUser = envelope.user || envelope.data?.user;
-  const user = rawUser ? { ...rawUser, id: String(rawUser.id || rawUser.userId || '') } : null;
+  const user = rawUser ? normalizeAuthUser(rawUser) : null;
   if (!token || !user?.id || !user?.role) throw new Error('Phản hồi đăng nhập chưa đầy đủ. Vui lòng thử lại.');
   return { token, refreshToken, user };
 }

@@ -32,7 +32,7 @@ export function assertDeviceScope(raw: any, user: any): any {
   deviceId(raw?.deviceId);
   if (user?.role === 'CUSTOMER') {
     if (!user.customerProfileId || String(raw.customerId || '') !== String(user.customerProfileId)) throw new Error('Thiết bị chưa được ghép nối với tài khoản của bạn. Hãy dùng mã ghép nối do cửa hàng cấp.');
-  } else if (['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'STAFF_BUTTON'].includes(user?.role)) {
+  } else if (['STORE_OWNER', 'SYSTEM_STAFF'].includes(user?.role)) {
     const storeId = user.storeId || user.store?.storeId || user.store?.id || user.ownedStores?.[0]?.storeId;
     if (!storeId || String(raw.storeId || '') !== String(storeId)) throw new Error('Thiết bị không thuộc lô nút đã phân bổ cho cửa hàng này.');
   } else throw new Error('Tài khoản chưa có quyền kết nối thiết bị.');

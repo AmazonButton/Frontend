@@ -17,9 +17,8 @@ export function deliveryPaymentMethod(order: any): 'COD' | 'VIETQR' | 'PAYOS' | 
 export function canClaimDelivery(order: any, duty: any, shift: any, storeId: string): boolean {
   return Boolean(storeId && String(order?.storeId) === storeId && order?.status === 'READY_FOR_DELIVERY' && !order?.assignedDriverId && duty?.status === 'ONLINE' && shift?.status === 'OPEN');
 }
-export function canRecordDelivery(order: any, userId: string, role: string): boolean {
-  if (!['STAFF_DELIVERY', 'STORE_OWNER', 'STORE_MANAGER', 'STAFF_ORDER', 'SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(role) || order?.status !== 'SHIPPING') return false;
-  return role !== 'STAFF_DELIVERY' || String(order?.assignedDriverId || '') === userId;
+export function canRecordDelivery(order: any, _userId: string, role: string): boolean {
+  return ['STORE_OWNER', 'SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(role) && order?.status === 'SHIPPING';
 }
 export function evidenceFileError(file: { size: number; type: string } | null): string {
   if (!file) return 'Vui lòng chọn ảnh giao hàng.';
@@ -193,7 +192,7 @@ export async function getDriverCoordinates(): Promise<{ latitude: number; longit
     );
   });
 }
-export const handoverRoles = ['STORE_OWNER', 'STORE_MANAGER', 'STAFF_ORDER', 'SUPER_ADMIN', 'SYSTEM_ADMIN'];
+export const handoverRoles = ['STORE_OWNER', 'SUPER_ADMIN', 'SYSTEM_ADMIN'];
 export function canConfirmHandover(shift: any, role: string) {
   return handoverRoles.includes(role) && shift?.status === 'CLOSED' && /^\d+$/.test(String(shift?.shiftId || ''));
 }
