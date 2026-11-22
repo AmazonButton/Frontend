@@ -242,30 +242,36 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
   };
 
   return (
-    <div className="w-full space-y-5 text-slate-900 dark:text-slate-100">
-      {/* ── Page Header (Sits directly on canvas with 1px border) ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
+    <div className="max-w-7xl mx-auto w-full space-y-5 text-slate-900 dark:text-slate-100">
+      {/* ── Page Header (Consistent Executive Card) ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-slate-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-2xs">
         <div>
-          <h1 className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-100">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 dark:bg-sky-950/50 px-2.5 py-0.5 text-[11px] font-semibold text-[#0E6BA8] dark:text-sky-300 border border-sky-200/80 dark:border-sky-800">
+              <Layers className="w-3 h-3" />
+              Cấu hình chuẩn hóa
+            </span>
+          </div>
+          <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
             Mẫu Cấu Hình Thiết Bị
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Chuẩn hóa kịch bản nút bấm, sản phẩm mặc định và triển khai hàng loạt cho 10–100 thiết bị
+            Chuẩn hóa kịch bản nút bấm, sản phẩm mặc định và triển khai hàng loạt cho tối đa 100 thiết bị mỗi đợt
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={handleOpenCreate}
-            className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
           >
             <Plus className="w-4 h-4" strokeWidth={2} />
             <span>Tạo Mẫu Thiết Bị Mới</span>
           </button>
           <Link
             to={backToDevicesPath}
-            className="px-3.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/80 text-xs font-medium transition-colors cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold transition-colors cursor-pointer"
           >
             Quay lại Danh Sách Nút
           </Link>

@@ -30,6 +30,7 @@ import {
   BarChart3,
   MousePointerClick,
   Sparkles,
+  Wrench,
 } from 'lucide-react';
 import {
   checkPasswordCriteria,
@@ -673,32 +674,48 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
                       </p>
                     </div>
 
-                    {/* Subtle Demo Accounts Quick Chips */}
-                    <div className="flex items-center justify-center gap-1.5 py-0.5 text-[11px] text-slate-500 font-medium">
-                      <span className="text-slate-400">Tài khoản mẫu:</span>
-                      {[
-                        { label: 'Chủ Quán', id: 'store@smartorder.local' },
-                        { label: 'Khách Hàng', id: 'customer@smartorder.local' },
-                        { label: 'Admin', id: 'admin@smartorder.local' },
-                      ].map((demo, idx) => (
-                        <React.Fragment key={demo.id}>
-                          {idx > 0 && <span className="text-slate-300">•</span>}
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setIdentifier(demo.id);
-                              setLoginPassword('Password123!');
-                              setIdentifierTouched(false);
-                              setPasswordTouched(false);
-                            }}
-                            className={`cursor-pointer hover:underline transition-colors ${
-                              identifier === demo.id ? 'font-bold text-[#0284c7]' : 'text-slate-600 hover:text-slate-900'
-                            }`}
-                          >
-                            {demo.label}
-                          </button>
-                        </React.Fragment>
-                      ))}
+                    {/* Quick Role Demo Accounts Selector */}
+                    <div className="rounded-xl border border-slate-200/80 bg-slate-50/80 p-2.5 space-y-2">
+                      <div className="flex items-center justify-between px-0.5">
+                        <span className="text-[11px] font-semibold text-slate-600">
+                          Chọn nhanh tài khoản theo vai trò
+                        </span>
+                        <span className="text-[10px] font-medium text-slate-400">
+                          MK: Password123!
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                        {[
+                          { label: 'Khách Hàng', id: 'customer@smartorder.local', icon: User },
+                          { label: 'Chủ Quán', id: 'store@smartorder.local', icon: Store },
+                          { label: 'Nhân Viên', id: 'staff@smartorder.local', icon: Wrench },
+                          { label: 'Admin', id: 'admin@smartorder.local', icon: ShieldCheck },
+                        ].map((demo) => {
+                          const DemoIcon = demo.icon;
+                          const selected = identifier.trim().toLowerCase() === demo.id;
+                          return (
+                            <button
+                              key={demo.id}
+                              type="button"
+                              onClick={() => {
+                                setIdentifier(demo.id);
+                                setLoginPassword('Password123!');
+                                setIdentifierTouched(false);
+                                setPasswordTouched(false);
+                                setLoginError(null);
+                              }}
+                              className={`flex items-center justify-center gap-1.5 rounded-lg border px-2 py-2 text-[11.5px] font-semibold transition-all cursor-pointer ${
+                                selected
+                                  ? 'border-[#0E6BA8] bg-[#0E6BA8] text-white shadow-xs'
+                                  : 'border-slate-200 bg-white text-slate-700 hover:border-sky-300 hover:bg-sky-50/60 hover:text-[#0E6BA8]'
+                              }`}
+                            >
+                              <DemoIcon className="w-3.5 h-3.5 shrink-0" />
+                              <span className="truncate">{demo.label}</span>
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
 
                     {/* Success Notice */}

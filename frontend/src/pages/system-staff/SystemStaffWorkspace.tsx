@@ -1,11 +1,28 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Cpu, RefreshCw, RotateCcw, ShieldAlert, ShieldCheck } from 'lucide-react';
+import {
+  BatteryWarning,
+  Boxes,
+  Cpu,
+  Layers,
+  RefreshCw,
+  RotateCcw,
+  ShieldAlert,
+  ShieldCheck,
+  Wifi,
+} from 'lucide-react';
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { PlatformDevicesWorkspace } from '../../components/devices/PlatformDevicesWorkspace';
 import { WarrantyPanel } from '../../components/devices/WarrantyPanel';
 import { ReturnInspectionPanel } from '../../components/devices/ReturnInspectionPanel';
+
+interface FleetStatsSummary {
+  total: number;
+  unassigned: number;
+  online: number;
+  lowBattery: number;
+}
 
 export const SystemStaffWorkspace: React.FC<{ section: 'DEVICES' | 'WARRANTY' | 'RETURNS' }> = ({
   section,
@@ -14,6 +31,7 @@ export const SystemStaffWorkspace: React.FC<{ section: 'DEVICES' | 'WARRANTY' | 
   const [unassignedDevices, setUnassignedDevices] = useState<any[]>([]);
   const [allDevices, setAllDevices] = useState<any[]>([]);
   const [stores, setStores] = useState<any[]>([]);
+  const [fleetStats, setFleetStats] = useState<FleetStatsSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
@@ -21,9 +39,10 @@ export const SystemStaffWorkspace: React.FC<{ section: 'DEVICES' | 'WARRANTY' | 
     setLoading(true);
     setLoadError('');
     try {
-      const [devicesRes, storesRes] = await Promise.all([
+      const [devicesRes, storesRes, statsRes] = await Promise.all([
         api.get('/devices?page=1&pageSize=20'),
         api.get('/stores?page=1&pageSize=20').catch(() => ({ data: { success: false, data: [] } })),
+        api.get('/devices/fleet/stats').catch(() => ({ data: { success: false, data: null } })),
       ]);
 
       if (devicesRes.data?.success && Array.isArray(devicesRes.data.data)) {
@@ -31,6 +50,15 @@ export const SystemStaffWorkspace: React.FC<{ section: 'DEVICES' | 'WARRANTY' | 
       }
       if (storesRes.data?.success && Array.isArray(storesRes.data.data)) {
         setStores(storesRes.data.data);
+      }
+      const rawStats = statsRes.data?.data;
+      if (rawStats && typeof rawStats === 'object') {
+        setFleetStats({
+          total: Number(rawStats.total ?? rawStats.totalDevices ?? rawStats.totalButtons ?? 0),
+          unassigned: Number(rawStats.unassigned ?? rawStats.inWarehouse ?? rawStats.available ?? 0),
+          online: Number(rawStats.online ?? rawStats.active ?? rawStats.onlineDevices ?? 0),
+          lowBattery: Number(rawStats.lowBattery ?? rawStats.lowBatteryCount ?? 0),
+        });
       }
       setUnassignedDevices([]);
     } catch (err: any) {
@@ -46,70 +74,121 @@ export const SystemStaffWorkspace: React.FC<{ section: 'DEVICES' | 'WARRANTY' | 
     void fetchHardwareData();
   }, [fetchHardwareData]);
 
+  const sectionMeta =
+    section === 'DEVICES'
+      ? {
+          title: 'Kho nút bấm & Cấp phát thiết bị',
+          desc: 'Quản lý kho trung tâm, tạo lô mới, nhập CSV, cấp phát về kho đại lý và vận hành phần cứng.',
+        }
+      : section === 'WARRANTY'
+        ? {
+            title: 'Bảo hành kỹ thuật & Đổi nút 1-1',
+            desc: 'Tiếp nhận sự cố, duyệt đổi nút 1-1 kế thừa hợp đồng thuê hoặc khóa nút lỗi chuyển hoàn cọc chờ Admin duyệt.',
+          }
+        : {
+            title: 'Nhận nút trả & Kiểm tra thu hồi',
+            desc: 'Kiểm tra ngoại quan nút bấm khách hoàn trả và xác nhận nhập lại kho hệ thống.',
+          };
+
   return (
     <div className="max-w-7xl mx-auto space-y-5">
-      <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-4 shadow-2xs">
-        <div>
-          <div className="flex items-center gap-2">
-            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 dark:bg-amber-950/50 px-2.5 py-0.5 text-[11px] font-semibold text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
-              SYSTEM_STAFF · Kỹ thuật hệ thống
-            </span>
+      {/* Executive Header Card */}
+      <header className="rounded-2xl border border-slate-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-2xs space-y-4">
+        <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="space-y-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 dark:bg-sky-950/50 px-2.5 py-0.5 text-[11px] font-semibold text-[#0E6BA8] dark:text-sky-300 border border-sky-200/80 dark:border-sky-800">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                Kỹ thuật hệ thống · SYSTEM_STAFF
+              </span>
+            </div>
+            <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-white">
+              {sectionMeta.title}
+            </h1>
+            <p className="text-xs text-slate-500 dark:text-zinc-400 max-w-2xl">
+              {sectionMeta.desc}
+            </p>
           </div>
-          <h1 className="mt-1.5 text-lg font-bold text-zinc-900 dark:text-white">
-            {section === 'DEVICES'
-              ? 'Kho nút bấm & Cấp phát thiết bị'
-              : section === 'WARRANTY'
-                ? 'Xử lý bảo hành & Đổi thiết bị 1-1'
-                : 'Tiếp nhận & Kiểm tra Nút Khách trả'}
-          </h1>
-          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
-            Phạm vi kỹ thuật: quản lý kho nút, cấp phát, khôi phục xuất xưởng và bảo hành kỹ thuật (không bao gồm duyệt hoàn cọc tài chính, chi trả hay quản trị cửa hàng).
-          </p>
+
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <Link
+              to="/system-staff/templates"
+              className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50/70 dark:bg-zinc-800/70 px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-zinc-200 hover:bg-slate-100 dark:hover:bg-zinc-800 transition-colors"
+            >
+              <Layers className="w-3.5 h-3.5 text-[#0E6BA8]" />
+              <span>Mẫu cấu hình nút</span>
+            </Link>
+            <button
+              type="button"
+              onClick={() => void fetchHardwareData()}
+              disabled={loading}
+              className="inline-flex items-center gap-1.5 rounded-xl bg-[#0E6BA8] hover:bg-[#0B5586] px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              <span>Tải lại dữ liệu</span>
+            </button>
+          </div>
         </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <Link
-            to="/system-staff/devices"
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold border transition-colors ${
-              section === 'DEVICES'
-                ? 'bg-[#0E6BA8] text-white border-[#0E6BA8]'
-                : 'border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800'
-            }`}
-          >
-            <Cpu className="w-3.5 h-3.5" />
-            <span>Kho nút bấm</span>
-          </Link>
-          <Link
-            to="/system-staff/warranty"
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold border transition-colors ${
-              section === 'WARRANTY'
-                ? 'bg-[#0E6BA8] text-white border-[#0E6BA8]'
-                : 'border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800'
-            }`}
-          >
-            <ShieldCheck className="w-3.5 h-3.5" />
-            <span>Bảo hành</span>
-          </Link>
-          <Link
-            to="/system-staff/returns"
-            className={`inline-flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-semibold border transition-colors ${
-              section === 'RETURNS'
-                ? 'bg-[#0E6BA8] text-white border-[#0E6BA8]'
-                : 'border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800'
-            }`}
-          >
-            <RotateCcw className="w-3.5 h-3.5" />
-            <span>Nhận nút trả</span>
-          </Link>
-          <button
-            type="button"
-            onClick={() => void fetchHardwareData()}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 cursor-pointer disabled:opacity-50"
-          >
-            <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-            <span>Tải lại</span>
-          </button>
+        {/* Clean Segmented Module Switcher + Live Fleet KPIs */}
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pt-3 border-t border-slate-100 dark:border-zinc-800">
+          <nav aria-label="Phân hệ kỹ thuật" className="inline-flex flex-wrap items-center gap-1.5 rounded-xl bg-slate-100/80 dark:bg-zinc-800/70 p-1">
+            {[
+              { to: '/system-staff/devices', key: 'DEVICES', label: 'Kho & cấp phát nút', icon: Cpu },
+              { to: '/system-staff/warranty', key: 'WARRANTY', label: 'Bảo hành thiết bị', icon: ShieldCheck },
+              { to: '/system-staff/returns', key: 'RETURNS', label: 'Nhận nút trả', icon: RotateCcw },
+            ].map((item) => {
+              const Icon = item.icon;
+              const active = section === item.key;
+              return (
+                <Link
+                  key={item.key}
+                  to={item.to}
+                  className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all ${
+                    active
+                      ? 'bg-white dark:bg-zinc-900 text-[#0E6BA8] dark:text-sky-400 shadow-xs'
+                      : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{item.label}</span>
+                </Link>
+              );
+            })}
+          </nav>
+
+          {fleetStats && (
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200/70 dark:border-zinc-800 bg-slate-50/60 dark:bg-zinc-800/40 px-3 py-1.5">
+                <Cpu className="w-3.5 h-3.5 text-[#0E6BA8] shrink-0" />
+                <div>
+                  <p className="text-[10px] text-slate-500 leading-none">Tổng kho</p>
+                  <p className="text-xs font-bold text-slate-900 dark:text-white tabular-nums mt-0.5">{fleetStats.total}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200/70 dark:border-zinc-800 bg-slate-50/60 dark:bg-zinc-800/40 px-3 py-1.5">
+                <Boxes className="w-3.5 h-3.5 text-indigo-600 shrink-0" />
+                <div>
+                  <p className="text-[10px] text-slate-500 leading-none">Chưa cấp phát</p>
+                  <p className="text-xs font-bold text-slate-900 dark:text-white tabular-nums mt-0.5">{fleetStats.unassigned}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200/70 dark:border-zinc-800 bg-slate-50/60 dark:bg-zinc-800/40 px-3 py-1.5">
+                <Wifi className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                <div>
+                  <p className="text-[10px] text-slate-500 leading-none">Đang online</p>
+                  <p className="text-xs font-bold text-slate-900 dark:text-white tabular-nums mt-0.5">{fleetStats.online}</p>
+                </div>
+              </div>
+              <div className="flex items-center gap-2 rounded-xl border border-slate-200/70 dark:border-zinc-800 bg-slate-50/60 dark:bg-zinc-800/40 px-3 py-1.5">
+                <BatteryWarning className="w-3.5 h-3.5 text-amber-600 shrink-0" />
+                <div>
+                  <p className="text-[10px] text-slate-500 leading-none">Pin yếu</p>
+                  <p className="text-xs font-bold text-slate-900 dark:text-white tabular-nums mt-0.5">{fleetStats.lowBattery}</p>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       </header>
 
