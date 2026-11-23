@@ -4,7 +4,6 @@ import { Link, useLocation } from 'react-router-dom';
 import { motion, LayoutGroup, AnimatePresence } from 'framer-motion';
 import {
   BarChart3,
-  Clock3,
   Cpu,
   Landmark,
   Layers,
@@ -19,7 +18,6 @@ import {
   Smartphone,
   Store,
   UserRound,
-  Truck,
   Wrench,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -96,8 +94,6 @@ export const Sidebar: React.FC = () => {
         : isStoreOwner
           ? [
               ...storeLinks.filter(link => link.to !== '/store/rentals'),
-              { to: '/driver/deliveries', label: 'Giao hàng & POD', icon: Truck },
-              { to: '/driver/shifts', label: 'Ca & đối soát COD', icon: Clock3 },
               { to: '/store/finance', label: 'Gói & ngân hàng', icon: Landmark },
               { to: '/store/profile', label: 'Tài khoản', icon: UserRound },
             ]

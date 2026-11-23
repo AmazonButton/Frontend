@@ -229,11 +229,11 @@ for (const prefix of ['../src/', '../frontend/src/']) {
     assert.equal(exports.route.type, 'verification-screen');
   });
 
-  test(`${prefix}store sidebar exposes one revenue entry plus consolidated delivery and shift operations`, () => {
+  test(`${prefix}store sidebar exposes core operations without removed delivery and shift links`, () => {
     const app = screen(prefix, 'layouts/Sidebar.tsx', 'Sidebar');
     const links = app.nodes.filter(node => node.type === 'a').map(node => node.props.to);
-    for (const removed of ['/store/device-templates', '/store/wallet', '/store/rentals', '/store/profile?tab=SECURITY']) assert.ok(!links.includes(removed));
-    for (const kept of ['/store/dashboard', '/store/devices', '/store/products', '/driver/deliveries', '/driver/shifts']) assert.ok(links.includes(kept));
+    for (const removed of ['/store/device-templates', '/store/wallet', '/store/rentals', '/store/profile?tab=SECURITY', '/driver/deliveries', '/driver/shifts']) assert.ok(!links.includes(removed));
+    for (const kept of ['/store/dashboard', '/store/devices', '/store/products']) assert.ok(links.includes(kept));
     assert.equal(app.nodes.filter(node => node.type === 'store-finance-navigation').length, 2);
     assert.equal(app.nodes.filter(node => node.type === 'store-revenue-navigation').length, 2);
   });
