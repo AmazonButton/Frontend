@@ -268,6 +268,15 @@ export const PlatformDevicesWorkspace: React.FC<PlatformDevicesWorkspaceProps> =
   const allocatedGenRef = useRef(0);
   const storesAbortRef = useRef<AbortController | null>(null);
   const storesGenRef = useRef(0);
+  const storeLoadedOnceRef = useRef(storeLoadedOnce);
+  storeLoadedOnceRef.current = storeLoadedOnce;
+  const initialStoresRef = useRef(initialStores);
+  initialStoresRef.current = initialStores;
+  const storeBucketsCacheRef = useRef<{
+    allocated: any[];
+    stores: any[];
+    value: { storeId: string; storeName: string; storeCode: string; devices: any[] }[];
+  } | null>(null);
 
   const loadUnassigned = useCallback(async () => {
     unassignedAbortRef.current?.abort();
@@ -383,15 +392,15 @@ export const PlatformDevicesWorkspace: React.FC<PlatformDevicesWorkspaceProps> =
       setStoresError(
         err?.response?.data?.message || err?.message || 'Không tải được danh sách cửa hàng.'
       );
-      if (!storeLoadedOnce && !storeSearchQuery.trim() && initialStores.length > 0) {
-        setServerStores(initialStores);
+      if (!storeLoadedOnceRef.current && !storeSearchQuery.trim() && initialStoresRef.current.length > 0) {
+        setServerStores(initialStoresRef.current);
       }
     } finally {
       if (gen === storesGenRef.current) {
         setLoadingStores(false);
       }
     }
-  }, [storePage, storeSearchQuery, storeLoadedOnce, initialStores]);
+  }, [storePage, storeSearchQuery]);
 
   useEffect(() => {
     void loadUnassigned();
@@ -673,6 +682,10 @@ export const PlatformDevicesWorkspace: React.FC<PlatformDevicesWorkspaceProps> =
   };
 
   const storeBuckets = (() => {
+    const cached = storeBucketsCacheRef.current;
+    if (cached && cached.allocated === allocatedDevices && cached.stores === stores) {
+      return cached.value;
+    }
     const map = new Map<
       string,
       { storeId: string; storeName: string; storeCode: string; devices: any[] }
@@ -685,7 +698,9 @@ export const PlatformDevicesWorkspace: React.FC<PlatformDevicesWorkspaceProps> =
       }
       map.get(sid)!.devices.push(d);
     }
-    return Array.from(map.values());
+    const nextValue = Array.from(map.values());
+    storeBucketsCacheRef.current = { allocated: allocatedDevices, stores, value: nextValue };
+    return nextValue;
   })();
 
   const visibleAllocated = allocatedDevices;

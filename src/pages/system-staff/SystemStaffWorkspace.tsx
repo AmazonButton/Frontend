@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { motion } from 'framer-motion';
 import {
   BatteryWarning,
   Boxes,
@@ -35,14 +36,20 @@ export const SystemStaffWorkspace: React.FC<{ section: 'DEVICES' | 'WARRANTY' | 
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState('');
 
-  const fetchHardwareData = useCallback(async () => {
+  const fetchHardwareData = useCallback(async (forceRefresh = false) => {
     setLoading(true);
     setLoadError('');
     try {
-      const [devicesRes, storesRes, statsRes] = await Promise.all([
-        api.get('/devices?page=1&pageSize=20'),
-        api.get('/stores?page=1&pageSize=20').catch(() => ({ data: { success: false, data: [] } })),
-        api.get('/devices/fleet/stats').catch(() => ({ data: { success: false, data: null } })),
+      const reqConfig = forceRefresh ? { headers: { 'x-no-cache': '1' } } : undefined;
+      const needsWarrantyContext = section === 'WARRANTY';
+      const [statsRes, devicesRes, storesRes] = await Promise.all([
+        api.get('/devices/fleet/stats', reqConfig).catch(() => ({ data: { success: false, data: null } })),
+        needsWarrantyContext
+          ? api.get('/devices?page=1&pageSize=20', reqConfig)
+          : Promise.resolve({ data: { success: false, data: null } }),
+        needsWarrantyContext
+          ? api.get('/stores?page=1&pageSize=20', reqConfig).catch(() => ({ data: { success: false, data: [] } }))
+          : Promise.resolve({ data: { success: false, data: null } }),
       ]);
 
       if (devicesRes.data?.success && Array.isArray(devicesRes.data.data)) {
@@ -68,7 +75,7 @@ export const SystemStaffWorkspace: React.FC<{ section: 'DEVICES' | 'WARRANTY' | 
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [section]);
 
   useEffect(() => {
     void fetchHardwareData();
@@ -120,7 +127,7 @@ export const SystemStaffWorkspace: React.FC<{ section: 'DEVICES' | 'WARRANTY' | 
             </Link>
             <button
               type="button"
-              onClick={() => void fetchHardwareData()}
+              onClick={() => void fetchHardwareData(true)}
               disabled={loading}
               className="inline-flex items-center gap-1.5 rounded-xl bg-[#0E6BA8] hover:bg-[#0B5586] px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition-colors cursor-pointer disabled:opacity-50"
             >
@@ -144,14 +151,21 @@ export const SystemStaffWorkspace: React.FC<{ section: 'DEVICES' | 'WARRANTY' | 
                 <Link
                   key={item.key}
                   to={item.to}
-                  className={`inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-all ${
+                  className={`relative inline-flex items-center gap-1.5 rounded-lg px-3.5 py-1.5 text-xs font-semibold transition-[color,transform] duration-150 active:scale-[0.97] ${
                     active
-                      ? 'bg-white dark:bg-zinc-900 text-[#0E6BA8] dark:text-sky-400 shadow-xs'
+                      ? 'text-[#0E6BA8] dark:text-sky-400'
                       : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white'
                   }`}
                 >
-                  <Icon className="w-3.5 h-3.5" />
-                  <span>{item.label}</span>
+                  {active && (
+                    <motion.span
+                      layoutId="staff-module-pill"
+                      transition={{ type: 'spring', stiffness: 460, damping: 34, mass: 0.8 }}
+                      className="absolute inset-0 rounded-lg bg-white dark:bg-zinc-900 shadow-xs pointer-events-none"
+                    />
+                  )}
+                  <Icon className="w-3.5 h-3.5 relative z-10" />
+                  <span className="relative z-10">{item.label}</span>
                 </Link>
               );
             })}
@@ -202,27 +216,29 @@ export const SystemStaffWorkspace: React.FC<{ section: 'DEVICES' | 'WARRANTY' | 
         </div>
       )}
 
-      {section === 'DEVICES' ? (
-        <PlatformDevicesWorkspace
-          unassignedDevices={unassignedDevices}
-          allDevices={allDevices}
-          stores={stores}
-          onRefresh={fetchHardwareData}
-        />
-      ) : section === 'RETURNS' ? (
-        <ReturnInspectionPanel onConfirmed={fetchHardwareData} />
-      ) : (
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-2xs">
-          <WarrantyPanel
-            mode="system_staff"
-            devices={allDevices}
+      <div key={section} className="motion-view-enter">
+        {section === 'DEVICES' ? (
+          <PlatformDevicesWorkspace
+            unassignedDevices={unassignedDevices}
+            allDevices={allDevices}
             stores={stores}
-            currentUserName={user?.fullName}
-            currentUserRole={user?.role}
-            onRefreshDevices={fetchHardwareData}
+            onRefresh={fetchHardwareData}
           />
-        </div>
-      )}
+        ) : section === 'RETURNS' ? (
+          <ReturnInspectionPanel onConfirmed={fetchHardwareData} />
+        ) : (
+          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-5 shadow-2xs">
+            <WarrantyPanel
+              mode="system_staff"
+              devices={allDevices}
+              stores={stores}
+              currentUserName={user?.fullName}
+              currentUserRole={user?.role}
+              onRefreshDevices={fetchHardwareData}
+            />
+          </div>
+        )}
+      </div>
     </div>
   );
 };

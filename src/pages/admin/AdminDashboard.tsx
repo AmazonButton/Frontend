@@ -17,32 +17,32 @@ const modalBackdropVariants: Variants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { duration: 0.24, ease: [0.16, 1, 0.3, 1] },
+    transition: { duration: 0.18, ease: [0.23, 1, 0.32, 1] },
   },
   exit: {
     opacity: 0,
-    transition: { duration: 0.18, ease: 'easeOut' },
+    transition: { duration: 0.13, ease: [0.23, 1, 0.32, 1] },
   },
 };
 
 const modalDialogVariants: Variants = {
-  hidden: { opacity: 0, scale: 0.93, y: 20 },
+  hidden: { opacity: 0, scale: 0.96, y: 10 },
   visible: {
     opacity: 1,
     scale: 1,
     y: 0,
     transition: {
       type: 'spring',
-      damping: 28,
-      stiffness: 320,
-      mass: 0.8,
+      damping: 32,
+      stiffness: 380,
+      mass: 1,
     },
   },
   exit: {
     opacity: 0,
-    scale: 0.94,
-    y: 14,
-    transition: { duration: 0.18, ease: 'easeOut' },
+    scale: 0.97,
+    y: 6,
+    transition: { duration: 0.13, ease: [0.23, 1, 0.32, 1] },
   },
 };
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
@@ -104,18 +104,18 @@ const tableBodyVariants: Variants = {
   visible: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.03,
+      duration: 0.12,
     },
   },
 };
 
 const tableRowVariants: Variants = {
-  hidden: { opacity: 0, y: 10 },
+  hidden: { opacity: 0, y: 6 },
   visible: {
     opacity: 1,
     y: 0,
     transition: {
-      duration: 0.2,
+      duration: 0.12,
       ease: 'easeOut',
     },
   },
@@ -196,15 +196,30 @@ const DEFAULT_AUDIT_LOGS: AuditLog[] = [
   },
 ];
 
+const parsedAuditValueCache = new Map<string, any>();
+
+const parseAuditJsonCached = (raw: string): any => {
+  if (parsedAuditValueCache.has(raw)) {
+    return parsedAuditValueCache.get(raw);
+  }
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+  if (parsedAuditValueCache.size > 300) {
+    parsedAuditValueCache.clear();
+  }
+  parsedAuditValueCache.set(raw, parsed);
+  return parsed;
+};
+
 const renderAuditLogDetails = (log: AuditLog) => {
   let parsed: any = null;
   const raw = log.newValues || log.oldValues;
   if (typeof raw === 'string') {
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = null;
-    }
+    parsed = parseAuditJsonCached(raw);
   } else if (typeof raw === 'object' && raw !== null) {
     parsed = raw;
   }
@@ -779,6 +794,7 @@ export const AdminDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchAdminData();
+    let lastFocusRefresh = Date.now();
 
     const handleStoreChange = () => {
       try {
@@ -786,6 +802,13 @@ export const AdminDashboard: React.FC = () => {
           window.sessionStorage.removeItem('sob_cached_admin_stores');
         }
       } catch {}
+      lastFocusRefresh = Date.now();
+      fetchAdminData();
+    };
+
+    const handleWindowFocus = () => {
+      if (Date.now() - lastFocusRefresh < 15000) return;
+      lastFocusRefresh = Date.now();
       fetchAdminData();
     };
 
@@ -798,13 +821,13 @@ export const AdminDashboard: React.FC = () => {
     window.addEventListener('store:updated', handleStoreChange);
     window.addEventListener('catalog:changed', handleStoreChange);
     window.addEventListener('storage', handleStorage);
-    window.addEventListener('focus', handleStoreChange);
+    window.addEventListener('focus', handleWindowFocus);
 
     return () => {
       window.removeEventListener('store:updated', handleStoreChange);
       window.removeEventListener('catalog:changed', handleStoreChange);
       window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('focus', handleStoreChange);
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, []);
 

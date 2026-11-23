@@ -44,12 +44,13 @@ interface DeviceCardUIProps {
   onSimulate: (id: string) => void;
   onConfigOpen: (dev: Device) => void;
   onWifiOpen: (dev: Device) => void;
+  onUnclaim: (dev: Device) => void;
 }
 
 const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
   dev, productImg, name, productDesc, priceStr, runtime, error, battery, rssi,
   isPressing, simulatingId,
-  onOrder, onSimulate, onConfigOpen, onWifiOpen,
+  onOrder, onSimulate, onConfigOpen, onWifiOpen, onUnclaim,
 }) => {
   const [expanded, setExpanded] = React.useState(false);
   const cfg = dev.configuration;
@@ -192,33 +193,43 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
                 </div>
 
                 {/* Technical actions styled as minimalist outline tags */}
-                <div className="flex items-center gap-1.5 pt-0.5">
+                <div className="grid grid-cols-2 sm:flex sm:items-center gap-1.5 pt-0.5">
                   <button
                     type="button"
                     onClick={() => onSimulate(dev.deviceId)}
                     disabled={simulatingId === dev.deviceId || !runtime.canOrder}
-                    className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors"
+                    className="sm:flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-slate-300 text-slate-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors disabled:opacity-50"
                   >
-                    <Radio className={`w-3 h-3 text-slate-400 ${simulatingId === dev.deviceId ? 'animate-spin' : ''}`} />
-                    <span>Thử đặt trên web</span>
+                    <Radio className={`w-3 h-3 text-slate-400 shrink-0 ${simulatingId === dev.deviceId ? 'animate-spin' : ''}`} />
+                    <span className="truncate">Thử đặt trên web</span>
                   </button>
                   <motion.button
                     whileTap={{ scale: 0.94 }}
                     type="button"
                     onClick={() => onConfigOpen(dev)}
-                    className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-[#0E6BA8]/50 hover:text-[#0E6BA8] text-slate-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs group"
+                    className="sm:flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-[#0E6BA8]/50 hover:text-[#0E6BA8] text-slate-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs group"
                   >
-                    <Sliders className="w-3 h-3 text-slate-400 group-hover:text-[#0E6BA8] transition-colors" />
+                    <Sliders className="w-3 h-3 text-slate-400 group-hover:text-[#0E6BA8] transition-colors shrink-0" />
                     <span>Cấu hình</span>
                   </motion.button>
                   <motion.button
                     whileTap={{ scale: 0.94 }}
                     type="button"
                     onClick={() => onWifiOpen(dev)}
-                    className="flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-[#0E6BA8]/50 hover:text-[#0E6BA8] text-slate-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs group"
+                    className="sm:flex-1 px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-[#0E6BA8]/50 hover:text-[#0E6BA8] text-slate-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs group"
                   >
-                    <Wifi className="w-3 h-3 text-slate-400 group-hover:text-[#0E6BA8] transition-colors" />
+                    <Wifi className="w-3 h-3 text-slate-400 group-hover:text-[#0E6BA8] transition-colors shrink-0" />
                     <span>Wi-Fi</span>
+                  </motion.button>
+                  <motion.button
+                    whileTap={{ scale: 0.94 }}
+                    type="button"
+                    onClick={() => onUnclaim(dev)}
+                    title="Gỡ liên kết nút bấm khỏi tài khoản"
+                    className="px-2.5 py-1.5 rounded-lg border border-rose-200/90 bg-rose-50/40 hover:bg-rose-50 hover:border-rose-300 text-rose-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors cursor-pointer shadow-2xs shrink-0"
+                  >
+                    <Trash2 className="w-3 h-3 shrink-0" />
+                    <span>Xóa</span>
                   </motion.button>
                 </div>
               </div>
@@ -801,11 +812,20 @@ const CustomerHomeWorkspace: React.FC = () => {
   // Unclaim device (Gỡ / Hủy liên kết nút bấm khỏi tài khoản cá nhân)
   const handleUnclaimSubmit = async () => {
     if (!unclaimingDevice) return;
+    const removedDeviceId = unclaimingDevice.deviceId;
+    const removedLabel = unclaimingDevice.customName || removedDeviceId;
     setUnclaimLoading(true);
     try {
-      const res = await api.post(`/devices/${unclaimingDevice.deviceId}/unclaim`);
+      const res = await api.post(`/devices/${removedDeviceId}/unclaim`);
       if (res.data?.success) {
-        toast.success(`Đã hủy liên kết nút ${unclaimingDevice.customName || unclaimingDevice.deviceId} thành công!`);
+        setDevices((prev) => {
+          const next = prev.filter((d) => d.deviceId !== removedDeviceId);
+          try {
+            saveDeviceCache(sessionStorage, user, next);
+          } catch {}
+          return next;
+        });
+        toast.success(`Đã hủy liên kết nút ${removedLabel} thành công!`);
         setUnclaimingDevice(null);
         setConfigModalDevice(null);
         await fetchData();
@@ -1167,6 +1187,7 @@ const CustomerHomeWorkspace: React.FC = () => {
                   onSimulate={handleSimulatePress}
                   onConfigOpen={openConfigModal}
                   onWifiOpen={setChangeWifiDevice}
+                  onUnclaim={setUnclaimingDevice}
                 />
               );
             })}

@@ -1,13 +1,12 @@
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { BadgeCheck, KeyRound, Landmark, Store, UserRound } from 'lucide-react';
+import { BadgeCheck, KeyRound, Landmark, UserRound } from 'lucide-react';
 
 export const CUSTOMER_ACCOUNT_LINKS = [
   { to: '/customer/profile?tab=INFO', tab: 'INFO', label: 'Thông tin tài khoản', icon: UserRound },
   { to: '/customer/verification', tab: 'VERIFICATION', label: 'Xác minh eKYC', icon: BadgeCheck },
   { to: '/customer/banking', tab: 'BANKING', label: 'Ngân hàng & hoàn tiền', icon: Landmark },
   { to: '/customer/profile?tab=SECURITY', tab: 'SECURITY', label: 'Thay đổi mật khẩu', icon: KeyRound },
-  { to: '/customer/become-store-owner', tab: 'BECOME_STORE_OWNER', label: 'Trở thành chủ cửa hàng', icon: Store },
 ];
 
 export const CustomerAccountNavigation: React.FC<{

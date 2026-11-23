@@ -641,7 +641,6 @@ export const ProfilePage: React.FC = () => {
           { kind: 'tab' as const, id: 'ADDRESSES' as ProfileTab, label: 'Địa chỉ giao hàng', icon: MapPin },
           { kind: 'link' as const, to: '/customer/verification', label: 'Xác minh danh tính (eKYC)', icon: BadgeCheck },
           { kind: 'link' as const, to: '/customer/banking', label: 'Ngân hàng & hoàn tiền', icon: Landmark },
-          { kind: 'link' as const, to: '/customer/become-store-owner', label: 'Trở thành chủ cửa hàng', icon: Store },
         ]
       : isStoreOwner
         ? [
@@ -754,14 +753,18 @@ export const ProfilePage: React.FC = () => {
                     type="button"
                     onClick={() => handleTabChange(row.id)}
                     aria-current={isActive ? 'page' : undefined}
-                    className={`relative w-full flex items-center justify-between px-4 py-3.5 text-left text-[13.5px] transition-colors cursor-pointer ${
+                    className={`relative w-full flex items-center justify-between px-4 py-3.5 text-left text-[13.5px] transition-[background-color,color,transform] duration-150 active:scale-[0.99] cursor-pointer ${
                       isActive
                         ? 'bg-sky-50/80 text-[#0E6BA8] font-semibold dark:bg-sky-950/30 dark:text-sky-300'
                         : 'text-slate-700 dark:text-zinc-300 font-medium hover:bg-slate-50 dark:hover:bg-zinc-800/60'
                     }`}
                   >
                     {isActive && (
-                      <span className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-[#0E6BA8]" />
+                      <motion.span
+                        layoutId="profile-active-indicator"
+                        transition={{ type: 'spring', stiffness: 480, damping: 36, mass: 0.8 }}
+                        className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-[#0E6BA8]"
+                      />
                     )}
                     <span className="flex items-center gap-3 min-w-0">
                       <Icon className={`w-[18px] h-[18px] shrink-0 ${isActive ? 'text-[#0E6BA8] dark:text-sky-400' : 'text-[#2563EB] dark:text-sky-400'}`} strokeWidth={1.75} />
@@ -804,7 +807,7 @@ export const ProfilePage: React.FC = () => {
         {/* ================================================================= */}
         {/* RIGHT CONTENT PANEL                                               */}
         {/* ================================================================= */}
-        <section className="profile-panel min-w-0 lg:col-span-8 space-y-6">
+        <section key={activeTab} className="profile-panel motion-view-enter min-w-0 lg:col-span-8 space-y-6">
           {/* Header Title & Subtitle with Status Badge */}
           <div className="profile-heading">
             {isCustomer && activeTab !== 'INFO' && <p className="customer-eyebrow">{activeTab === 'SECURITY' ? 'Bảo mật tài khoản' : 'Tài khoản của bạn'}</p>}

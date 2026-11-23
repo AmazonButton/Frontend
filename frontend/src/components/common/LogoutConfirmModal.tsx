@@ -106,19 +106,27 @@ export const LogoutConfirmModal: React.FC<LogoutConfirmModalProps> = ({
           {/* Backdrop blur */}
           <motion.div
             initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            transition={{ duration: 0.2 }}
+            animate={{ opacity: 1, transition: { duration: 0.18, ease: [0.23, 1, 0.32, 1] } }}
+            exit={{ opacity: 0, transition: { duration: 0.13, ease: [0.23, 1, 0.32, 1] } }}
             className="fixed inset-0 bg-slate-950/50 backdrop-blur-sm cursor-pointer"
             onClick={() => !isLoggingOut && onClose()}
           />
 
           {/* Modal Content */}
           <motion.div
-            initial={{ opacity: 0, scale: 0.95, y: 8 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.95, y: 8 }}
-            transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
+            initial={{ opacity: 0, scale: 0.96, y: 10 }}
+            animate={{
+              opacity: 1,
+              scale: 1,
+              y: 0,
+              transition: { type: 'spring', stiffness: 380, damping: 32, mass: 1 },
+            }}
+            exit={{
+              opacity: 0,
+              scale: 0.97,
+              y: 6,
+              transition: { duration: 0.13, ease: [0.23, 1, 0.32, 1] },
+            }}
             className="relative z-10 w-full max-w-md bg-white dark:bg-zinc-900 rounded-2xl p-6 shadow-2xl border border-slate-200/80 dark:border-zinc-800"
           >
             {/* Header: Title + Close button */}
@@ -185,7 +193,7 @@ export const LogoutConfirmModal: React.FC<LogoutConfirmModalProps> = ({
                 type="button"
                 onClick={handleConfirmLogout}
                 disabled={isLoggingOut}
-                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 shadow-xs transition-all active:scale-[0.98] disabled:opacity-60 cursor-pointer flex items-center gap-1.5"
+                className="px-4 py-2 rounded-lg text-sm font-medium text-white bg-rose-600 hover:bg-rose-700 shadow-xs transition-[background-color,transform] duration-150 active:scale-[0.97] disabled:opacity-60 cursor-pointer flex items-center gap-1.5"
               >
                 {isLoggingOut ? (
                   <>

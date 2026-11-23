@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { User } from '../types';
 import { api, apiSessionMarker, isTokenExpired, getOrRefreshValidToken } from '../services/api';
 import { apiCooldownError, getApiRetryUntil } from '../services/request-backoff';
@@ -201,10 +201,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           updateSocketAuth(null);
           return;
         }
-        setUser(normalizedUser);
-        localStorage.setItem('smart_order_user', JSON.stringify(normalizedUser));
+        const serializedUser = JSON.stringify(normalizedUser);
+        const previousSerialized = localStorage.getItem('smart_order_user');
+        if (previousSerialized !== serializedUser) {
+          localStorage.setItem('smart_order_user', serializedUser);
+          setUser(normalizedUser);
+        } else {
+          setUser((prev) => (prev ? prev : normalizedUser));
+        }
 
-        setToken(validToken);
+        setToken((prev) => (prev === validToken ? prev : validToken));
         api.defaults.headers.common['Authorization'] = `Bearer ${validToken}`;
         updateSocketAuth(validToken);
       }
@@ -251,7 +257,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     return () => window.removeEventListener('sob_auth_revoked', handleAuthRevoked);
   }, []);
 
-  const login = (newToken: string, userData: User, newRefreshToken?: string) => {
+  const login = useCallback((newToken: string, userData: User, newRefreshToken?: string) => {
     setSessionError(null);
     const normalizedUser = normalizeAuthUser(userData);
     const previousPushOwner = readPushOwner();
@@ -274,24 +280,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(normalizedUser);
     setIsLoading(false);
     updateSocketAuth(newToken);
-  };
+  }, []);
 
   const isAuthenticated = Boolean(user && token);
 
+  const contextValue = useMemo(
+    () => ({
+      user,
+      token,
+      refreshToken,
+      isLoading,
+      isAuthenticated,
+      sessionError,
+      login,
+      logout,
+      refreshUser,
+    }),
+    [user, token, refreshToken, isLoading, isAuthenticated, sessionError, login, logout, refreshUser]
+  );
+
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        token,
-        refreshToken,
-        isLoading,
-        isAuthenticated,
-        sessionError,
-        login,
-        logout,
-        refreshUser,
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

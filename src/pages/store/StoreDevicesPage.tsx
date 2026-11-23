@@ -77,17 +77,17 @@ const tableContainerVariants: Variants = {
   show: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.05,
+      duration: 0.12,
     },
   },
 };
 
 const tableRowVariants: Variants = {
-  hidden: { opacity: 0, y: 10 },
+  hidden: { opacity: 0, y: 6 },
   show: {
     opacity: 1,
     y: 0,
-    transition: { duration: 0.2, ease: 'easeOut' },
+    transition: { duration: 0.12, ease: 'easeOut' },
   },
 };
 
@@ -2542,7 +2542,7 @@ const StoreDevicesWorkspace: React.FC = () => {
             {bulkErrors.length > 0 && (
               <div className="p-3 bg-rose-50 dark:bg-rose-500/10 border border-rose-200 dark:border-rose-500/20 text-rose-600 dark:text-rose-400 rounded-xl text-xs font-semibold space-y-1 max-h-32 overflow-y-auto">
                 {bulkErrors.map((err, idx) => (
-                  <p key={idx} className="flex items-center gap-1.5">
+                  <p key={`${err}-${idx}`} className="flex items-center gap-1.5">
                     <AlertCircle className="w-3.5 h-3.5 shrink-0 text-rose-500" />
                     <span>{err}</span>
                   </p>
@@ -2574,7 +2574,7 @@ const StoreDevicesWorkspace: React.FC = () => {
                     </thead>
                     <tbody className="divide-y divide-slate-100 dark:divide-white/5">
                       {bulkPreview.map((r, i) => (
-                        <tr key={i}>
+                        <tr key={r.deviceId || `bulk-row-${i}`}>
                           <td className="p-2 font-bold text-slate-900 dark:text-white">{r.deviceId}</td>
                           <td className="p-2 text-slate-500">{r.macAddress || '-'}</td>
                           <td className="p-2 text-slate-700 dark:text-slate-300">{r.customName || '-'}</td>

@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'react-router-dom';
 import { motion, useReducedMotion } from 'framer-motion';
@@ -41,14 +41,18 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   const confirmationSent = useRef(false);
   useBodyScrollLock(isOpen);
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || typeof window === 'undefined' || typeof window.addEventListener !== 'function') return;
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !busy) {
         onClose();
       }
     };
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
+    return () => {
+      if (typeof window.removeEventListener === 'function') {
+        window.removeEventListener('keydown', handleKeyDown);
+      }
+    };
   }, [isOpen, busy, onClose]);
   useEffect(() => {
     alive.current = isOpen; generation.current++;

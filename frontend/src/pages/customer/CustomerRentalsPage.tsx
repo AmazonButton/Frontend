@@ -270,7 +270,7 @@ export const CustomerRentalsPage: React.FC = () => {
             <p className="text-sm font-medium">Đang tải các gói thuê nút bấm…</p>
           </div>
           <div aria-hidden="true" className="grid gap-6 md:grid-cols-3 motion-safe:animate-pulse">
-            {[0, 1, 2].map(index => <div key={index} className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
+            {[0, 1, 2].map(index => <div key={`rental-skeleton-${index}`} className="space-y-6 rounded-3xl border border-slate-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
               <div className="h-12 w-12 rounded-2xl bg-slate-100 dark:bg-zinc-800" />
               <div className="h-5 w-2/3 rounded bg-slate-100 dark:bg-zinc-800" />
               <div className="h-9 w-1/2 rounded bg-slate-100 dark:bg-zinc-800" />

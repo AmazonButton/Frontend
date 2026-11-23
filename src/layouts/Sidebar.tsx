@@ -168,7 +168,7 @@ export const Sidebar: React.FC = () => {
     <motion.aside
       initial={false}
       animate={{ width: isSidebarOpen ? 256 : 68 }}
-      transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+      transition={{ duration: 0.26, ease: [0.23, 1, 0.32, 1] }}
       className={`${isAdmin ? 'admin-navigation ' : ''}min-h-[calc(100vh-4rem)] border-r border-zinc-200 dark:border-zinc-800 flex-col justify-between shrink-0 overflow-hidden bg-[#FBFBFC] dark:bg-zinc-950 select-none z-20 hidden lg:flex`}
     >
       <div>
@@ -223,8 +223,8 @@ export const Sidebar: React.FC = () => {
                   {isAccount && (
                     <div className="my-2 border-t border-zinc-200/80 dark:border-zinc-800/80" />
                   )}
-                  <Link to={item.to} aria-current={isActive ? 'page' : undefined} title={item.label} onClick={() => setHoveredItem(null)} onMouseEnter={(event) => { if (!isSidebarOpen) { const rect = event.currentTarget.getBoundingClientRect(); setHoveredItem({ label: item.label, top: rect.top + rect.height / 2 }); } }} onMouseLeave={() => setHoveredItem(null)} className={`relative flex items-center h-10 rounded-lg text-xs font-medium transition-colors group select-none cursor-pointer ${isActive ? 'text-[#287DA8] dark:text-[#38a5da] font-semibold' : 'text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/40'}`}>
-                    {isActive && <motion.div layoutId="sidebar-active-pill" className="absolute inset-0 bg-[#287DA8]/10 dark:bg-[#287DA8]/15 rounded-lg border-l-[3px] border-[#287DA8] dark:border-[#38a5da] pointer-events-none" transition={{ type: 'spring', stiffness: 420, damping: 34 }} />}
+                  <Link to={item.to} aria-current={isActive ? 'page' : undefined} title={item.label} onClick={() => setHoveredItem(null)} onMouseEnter={(event) => { if (!isSidebarOpen) { const rect = event.currentTarget.getBoundingClientRect(); setHoveredItem({ label: item.label, top: rect.top + rect.height / 2 }); } }} onMouseLeave={() => setHoveredItem(null)} className={`relative flex items-center h-10 rounded-lg text-xs font-medium transition-[color,background-color,transform] duration-150 active:scale-[0.985] group select-none cursor-pointer ${isActive ? 'text-[#287DA8] dark:text-[#38a5da] font-semibold' : 'text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/40'}`}>
+                    {isActive && <motion.div layoutId="sidebar-active-pill" className="absolute inset-0 bg-[#287DA8]/10 dark:bg-[#287DA8]/15 rounded-lg border-l-[3px] border-[#287DA8] dark:border-[#38a5da] pointer-events-none" transition={{ type: 'spring', stiffness: 460, damping: 36, mass: 0.8 }} />}
                     <div className="w-[40px] h-[40px] flex items-center justify-center shrink-0 relative z-10 pointer-events-none"><Icon size={18} strokeWidth={1.5} className={isActive ? 'text-[#287DA8] dark:text-[#38a5da]' : 'text-zinc-400 dark:text-zinc-500 group-hover:text-[#287DA8] dark:group-hover:text-[#38a5da]'} /></div>
                     <motion.span initial={false} animate={{ opacity: isSidebarOpen ? 1 : 0, width: isSidebarOpen ? 'auto' : 0 }} transition={{ duration: 0.2 }} className="relative z-10 overflow-hidden whitespace-nowrap pl-1 text-[13px] pointer-events-none">{item.label}</motion.span>
                   </Link>
@@ -236,7 +236,7 @@ export const Sidebar: React.FC = () => {
       </div>
 
       <div className="p-3 border-t border-zinc-200/80 dark:border-zinc-800/80">
-        <div className={`flex items-center rounded-lg bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200/60 dark:border-zinc-800 h-9 transition-all ${isSidebarOpen ? 'px-2 justify-between' : 'justify-center px-0'}`}>
+        <div className={`flex items-center rounded-lg bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200/60 dark:border-zinc-800 h-9 transition-[padding] duration-200 ${isSidebarOpen ? 'px-2 justify-between' : 'justify-center px-0'}`}>
           <div className="flex items-center gap-1.5 min-w-0"><ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" strokeWidth={1.5} /><motion.span initial={false} animate={{ opacity: isSidebarOpen ? 1 : 0, width: isSidebarOpen ? 'auto' : 0 }} transition={{ duration: 0.2 }} className="text-[10px] font-medium text-zinc-600 dark:text-zinc-400 truncate overflow-hidden whitespace-nowrap">Đang hoạt động</motion.span></div>
         </div>
       </div>

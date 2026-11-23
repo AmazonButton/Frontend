@@ -1,4 +1,5 @@
 import React, { Suspense } from 'react';
+import { MotionConfig } from 'framer-motion';
 import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
 import { Navbar } from './layouts/Navbar';
 import { Sidebar } from './layouts/Sidebar';
@@ -147,6 +148,7 @@ export const App: React.FC = () => {
   const showFooter = !isDashboard && !isAuth;
 
   return (
+    <MotionConfig reducedMotion="user" transition={{ ease: [0.23, 1, 0.32, 1], duration: 0.2 }}>
     <div className={`min-h-screen bg-surface-bg dark:bg-cyber-bg text-navy-900 dark:text-slate-100 flex flex-col transition-colors duration-200 relative overflow-x-hidden ${location.pathname === '/' ? 'landing-route' : ''}`}>
       {/* 36. Animated Background — Premium 3D Atmosphere */}
       <Atmosphere3DBackground variant={getAtmosphereVariant()} />
@@ -271,5 +273,6 @@ export const App: React.FC = () => {
       </div>
       {showFooter && <Footer />}
     </div>
+    </MotionConfig>
   );
 };

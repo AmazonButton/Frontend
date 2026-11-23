@@ -979,7 +979,7 @@ export const NotificationBellPopover: React.FC = () => {
       <button
         type="button"
         onClick={() => setIsOpen((prev) => !prev)}
-        className={`p-2 rounded-lg transition-all relative group cursor-pointer ${
+        className={`p-2 rounded-lg transition-[background-color,color,transform] duration-150 active:scale-95 relative group cursor-pointer ${
           isOpen
             ? 'bg-slate-100 text-slate-900 dark:bg-zinc-800 dark:text-white'
             : 'text-slate-500 hover:text-slate-900 dark:text-zinc-400 dark:hover:text-white hover:bg-slate-100 dark:hover:bg-zinc-800'
@@ -988,9 +988,9 @@ export const NotificationBellPopover: React.FC = () => {
         aria-label="Thông báo"
       >
         <Bell
-          className={`w-4 h-4 transition-transform ${
+          className={`w-4 h-4 transition-transform duration-150 ${
             unreadCount > 0 ? 'text-slate-700 dark:text-zinc-200' : ''
-          } group-hover:scale-110`}
+          } group-hover:scale-105`}
         />
 
         {/* Unread Counter Badge */}
@@ -1001,15 +1001,24 @@ export const NotificationBellPopover: React.FC = () => {
         )}
       </button>
 
-      {/* 2. POPOVER PANEL */}
+      {/* 2. POPOVER PANEL (Origin-aware scale from trigger per Emil Kowalski craft) */}
       <AnimatePresence>
         {isOpen && (
           <motion.div
-            initial={{ opacity: 0, y: 6 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 6 }}
-            transition={{ duration: 0.15, ease: 'easeOut' }}
-            className="fixed right-4 top-16 mt-2 sm:absolute sm:right-0 sm:top-full w-[390px] max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-5rem)] z-[90] bg-white dark:bg-[#0c121e] border border-slate-200/90 dark:border-zinc-800 rounded-xl shadow-xl overflow-hidden flex flex-col"
+            initial={{ opacity: 0, scale: 0.96, y: -4 }}
+            animate={{
+              opacity: 1,
+              scale: 1,
+              y: 0,
+              transition: { duration: 0.16, ease: [0.23, 1, 0.32, 1] },
+            }}
+            exit={{
+              opacity: 0,
+              scale: 0.97,
+              y: -3,
+              transition: { duration: 0.11, ease: [0.23, 1, 0.32, 1] },
+            }}
+            className="origin-top-right fixed right-4 top-16 mt-2 sm:absolute sm:right-0 sm:top-full w-[390px] max-w-[calc(100vw-2rem)] max-h-[calc(100dvh-5rem)] z-[90] bg-white dark:bg-[#0c121e] border border-slate-200/90 dark:border-zinc-800 rounded-xl shadow-xl overflow-hidden flex flex-col"
           >
             {/* Header: Row 1 */}
             <div className="px-4 pt-3.5 pb-2.5 flex items-center justify-between border-b border-slate-100 dark:border-zinc-800/80">

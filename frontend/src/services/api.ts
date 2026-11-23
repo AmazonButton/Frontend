@@ -1,32 +1,51 @@
 import axios from 'axios';
 import { apiCooldownError, deferApiRequests, getApiRetryUntil, recordRateLimit, throwIfApiCoolingDown } from './request-backoff';
 
+let cachedApiUrlKey = '';
+let cachedApiUrlValue = '';
+
 export const resolveApiUrl = (): string => {
   if (typeof window !== 'undefined') {
     try {
-      const urlParams = new URLSearchParams(window.location.search);
-      const queryApi = urlParams.get('api') || urlParams.get('apiUrl') || urlParams.get('backend');
-      if (queryApi) {
-        const clean = queryApi.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '').replace(/\/api$/, '');
-        localStorage.setItem('smart_order_api_url', clean);
-        return clean;
+      const host = window.location.hostname;
+      const search = window.location.search;
+      const stored = localStorage.getItem('smart_order_api_url') || '';
+      const cacheKey = `${host}|${search}|${stored}`;
+      if (cacheKey === cachedApiUrlKey) {
+        return cachedApiUrlValue;
+      }
+
+      if (search && (search.includes('api=') || search.includes('apiUrl=') || search.includes('backend='))) {
+        const urlParams = new URLSearchParams(search);
+        const queryApi = urlParams.get('api') || urlParams.get('apiUrl') || urlParams.get('backend');
+        if (queryApi) {
+          const clean = queryApi.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '').replace(/\/api$/, '');
+          localStorage.setItem('smart_order_api_url', clean);
+          cachedApiUrlKey = `${host}|${search}|${clean}`;
+          cachedApiUrlValue = clean;
+          return clean;
+        }
       }
       // When hosted on Vercel or running locally with Vite proxy, route requests
       // through the same-origin proxy (/api/v1/*) to completely eliminate CORS preflight restrictions.
       const isProxyableHost =
-        window.location.hostname.includes('vercel.app') ||
-        window.location.hostname === 'localhost' ||
-        window.location.hostname === '127.0.0.1';
+        host.includes('vercel.app') ||
+        host === 'localhost' ||
+        host === '127.0.0.1';
 
       if (isProxyableHost) {
+        cachedApiUrlKey = cacheKey;
+        cachedApiUrlValue = '';
         return '';
       }
 
-      const stored = localStorage.getItem('smart_order_api_url');
       if (stored && (stored.includes('produces-accurately') || stored.includes('trycloudflare.com') || stored.includes('workers.dev'))) {
         localStorage.removeItem('smart_order_api_url');
       } else if (stored) {
-        return stored.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '').replace(/\/api$/, '');
+        const clean = stored.trim().replace(/\/+$/, '').replace(/\/api\/v1$/, '').replace(/\/api$/, '');
+        cachedApiUrlKey = cacheKey;
+        cachedApiUrlValue = clean;
+        return clean;
       }
     } catch {
       // Ignore localStorage read errors in restricted contexts
@@ -49,14 +68,29 @@ export const api = axios.create({
   timeout: 25000,
 });
 
+// Cache decoded JWT exp per token string to avoid atob + decodeURIComponent + JSON.parse on every request
+let cachedJwtToken: string | null = null;
+let cachedJwtExpMs: number | null = null;
+let cachedJwtInvalid = false;
+
 /**
  * Check if a JWT is expired or about to expire in the next 30 seconds
  */
 export function isTokenExpired(token: string | null): boolean {
   if (!token) return true;
+  if (token === cachedJwtToken) {
+    if (cachedJwtInvalid) return true;
+    if (cachedJwtExpMs === null) return false;
+    return Date.now() >= cachedJwtExpMs - 30000;
+  }
   try {
     const parts = token.split('.');
-    if (parts.length !== 3) return true;
+    if (parts.length !== 3) {
+      cachedJwtToken = token;
+      cachedJwtExpMs = null;
+      cachedJwtInvalid = true;
+      return true;
+    }
     const base64Url = parts[1];
     const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
     const jsonPayload = decodeURIComponent(
@@ -66,10 +100,16 @@ export function isTokenExpired(token: string | null): boolean {
         .join('')
     );
     const parsed = JSON.parse(jsonPayload);
-    if (!parsed.exp) return false;
+    cachedJwtToken = token;
+    cachedJwtInvalid = false;
+    cachedJwtExpMs = parsed.exp ? Number(parsed.exp) * 1000 : null;
+    if (cachedJwtExpMs === null) return false;
     // Buffer of 30 seconds: refresh before actual expiration to prevent 401 on in-flight requests
-    return Date.now() >= parsed.exp * 1000 - 30000;
+    return Date.now() >= cachedJwtExpMs - 30000;
   } catch {
+    cachedJwtToken = token;
+    cachedJwtExpMs = null;
+    cachedJwtInvalid = true;
     return true;
   }
 }
@@ -93,12 +133,116 @@ export const isPublicAuthEndpoint = (url?: string): boolean => {
 
 let activeRefreshPromise: Promise<string | null> | null = null;
 
+// Cache parsed session marker to avoid JSON.parse(localStorage) on every request
+let cachedSessionUserRaw: string | null = null;
+let cachedSessionPushRaw: string | null = null;
+let cachedSessionMarker = '';
+
 export function apiSessionMarker(): string {
-  try { const user = JSON.parse(localStorage.getItem('smart_order_user') || '{}'); return String(user.id || user.userId || '') + ':' + (localStorage.getItem('smart_order_push_session') || ''); } catch { return ''; }
+  try {
+    const userRaw = localStorage.getItem('smart_order_user') || '{}';
+    const pushRaw = localStorage.getItem('smart_order_push_session') || '';
+    if (userRaw === cachedSessionUserRaw && pushRaw === cachedSessionPushRaw) {
+      return cachedSessionMarker;
+    }
+    const user = JSON.parse(userRaw);
+    cachedSessionUserRaw = userRaw;
+    cachedSessionPushRaw = pushRaw;
+    cachedSessionMarker = String(user.id || user.userId || '') + ':' + pushRaw;
+    return cachedSessionMarker;
+  } catch {
+    return '';
+  }
 }
+
+// Short-TTL in-memory GET deduplication & response cache for heavy read endpoints.
+// Cleared immediately on any mutating request (POST/PUT/PATCH/DELETE) or session switch.
+const READ_CACHE_TTL_MS = 4000;
+const CACHEABLE_READ_PREFIXES = [
+  '/devices',
+  '/stores',
+  '/products/storefront',
+  '/device-templates',
+  '/warranty/tickets',
+  '/rentals/returns',
+  '/admin/stats',
+  '/admin/stores',
+  '/admin/audit-logs',
+  '/admin/users',
+  '/admin/plans',
+  '/analytics',
+];
+
+const readResponseCache = new Map<string, { expiresAt: number; response: any }>();
+const inFlightReadCache = new Map<string, Promise<any>>();
+let readCacheSession = '';
+
+function invalidateApiReadCache() {
+  readResponseCache.clear();
+  inFlightReadCache.clear();
+}
+
+function isCacheableReadUrl(url: string): boolean {
+  const path = String(url || '').split('?')[0];
+  if (!path || path.includes('/discounts') || path === '/admin/stores/pending') return false;
+  return CACHEABLE_READ_PREFIXES.some((prefix) => path === prefix || path.startsWith(`${prefix}/`));
+}
+
+function buildReadCacheKey(url: string, params?: Record<string, any>): string {
+  const session = apiSessionMarker();
+  if (session !== readCacheSession) {
+    readCacheSession = session;
+    invalidateApiReadCache();
+  }
+  let query = '';
+  if (params && typeof params === 'object') {
+    const entries = Object.keys(params)
+      .filter((k) => params[k] !== undefined && params[k] !== null && params[k] !== '')
+      .sort()
+      .map((k) => `${k}=${String(params[k])}`);
+    if (entries.length) query = `?${entries.join('&')}`;
+  }
+  return `${session}|${url}${query}`;
+}
+
+const rawApiGet = api.get.bind(api);
+api.get = ((url: string, config?: any) => {
+  const noCache = Boolean(config?.headers?.['x-no-cache'] || config?.headers?.['X-No-Cache']);
+  if (!noCache && isCacheableReadUrl(url)) {
+    const key = buildReadCacheKey(url, config?.params);
+    const cached = readResponseCache.get(key);
+    if (cached && cached.expiresAt > Date.now() && !config?.signal?.aborted) {
+      return Promise.resolve(cached.response);
+    }
+    if (!config?.signal) {
+      const existing = inFlightReadCache.get(key);
+      if (existing) return existing;
+      const promise = rawApiGet(url, config)
+        .then((res: any) => {
+          readResponseCache.set(key, { expiresAt: Date.now() + READ_CACHE_TTL_MS, response: res });
+          if (readResponseCache.size > 80) {
+            const oldestKey = readResponseCache.keys().next().value;
+            if (oldestKey) readResponseCache.delete(oldestKey);
+          }
+          return res;
+        })
+        .finally(() => {
+          inFlightReadCache.delete(key);
+        });
+      inFlightReadCache.set(key, promise);
+      return promise;
+    }
+    return rawApiGet(url, config).then((res: any) => {
+      readResponseCache.set(key, { expiresAt: Date.now() + READ_CACHE_TTL_MS, response: res });
+      return res;
+    });
+  }
+  return rawApiGet(url, config);
+}) as typeof api.get;
 
 function clearRejectedSession(refreshToken: string | null) {
   if (localStorage.getItem('smart_order_refresh_token') !== refreshToken) return;
+  invalidateApiReadCache();
   localStorage.removeItem('smart_order_token');
   localStorage.removeItem('smart_order_refresh_token');
   localStorage.removeItem('smart_order_user');
@@ -152,7 +296,7 @@ export function isTransientConnectionError(error: any): boolean {
 
 api.interceptors.request.use(async (config) => {
   throwIfApiCoolingDown(config);
-  if (isRecoverableRead(config)) {
+  if (typeof isRecoverableRead === 'function' && isRecoverableRead(config)) {
     const scoped = config as any;
     if (scoped._readSessionMarker == null) scoped._readSessionMarker = apiSessionMarker();
     if (scoped._readSessionMarker !== apiSessionMarker()) throw new axios.CanceledError('Tài khoản đã thay đổi.');
@@ -178,6 +322,7 @@ api.interceptors.request.use(async (config) => {
   // Auto-generate x-idempotency-key for state-mutating requests (POST, PUT, PATCH, DELETE)
   const method = (config.method || 'get').toUpperCase();
   if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(method)) {
+    if (typeof invalidateApiReadCache === 'function') invalidateApiReadCache();
     const headers = config.headers as any;
     const existingKey =
       headers?.['x-idempotency-key'] ||
@@ -250,7 +395,12 @@ api.interceptors.response.use(
       return api(originalRequest);
     }
     const isAuthEndpoint = isPublicAuthEndpoint(originalRequest.url);
-    if (error.response?.status === 404 && !originalRequest._prefixRetried && originalRequest.url) {
+    const isMissingRoute404 =
+      error.response?.status === 404 &&
+      (!error.response?.data ||
+        typeof error.response.data === 'string' ||
+        String(error.response.data?.message || '').startsWith('Cannot '));
+    if (isMissingRoute404 && !originalRequest._prefixRetried && originalRequest.url) {
       originalRequest._prefixRetried = true;
       const currentBase = originalRequest.baseURL || `${API_URL}${API_PREFIX}`;
       if (currentBase.includes('/api/v1')) { originalRequest.baseURL = currentBase.replace('/api/v1','/api'); return axios(originalRequest); }

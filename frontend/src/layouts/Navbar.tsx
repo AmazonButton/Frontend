@@ -111,13 +111,13 @@ export const Navbar: React.FC = () => {
   return (
     <header
       data-navbar="true"
-      className={`fixed top-0 left-0 w-full z-50 transition-[background-color,border-color,box-shadow] duration-200 ease-in-out ${
+      className={`fixed top-0 left-0 w-full z-50 transition-[background-color,border-color,box-shadow] duration-200 ease-[cubic-bezier(0.23,1,0.32,1)] ${
         isCustomer || isStoreUser || isScrolled
           ? 'bg-white/95 dark:bg-slate-900/95 backdrop-blur-md shadow-md border-b border-slate-200/80 dark:border-zinc-800'
           : 'bg-transparent border-b border-transparent backdrop-blur-sm'
       }`}
     >
-      <div className={`h-16 flex items-center justify-between gap-2 sm:gap-4 transition-all duration-200 ${
+      <div className={`h-16 flex items-center justify-between gap-2 sm:gap-4 transition-[padding] duration-200 ${
         user ? 'w-full px-4 sm:px-6 lg:px-8' : 'max-w-7xl mx-auto px-4 sm:px-6 lg:px-8'
       }`}>
 

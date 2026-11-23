@@ -74,9 +74,9 @@ export const PasswordStrengthMeter: React.FC<{ password: string; showCriteria?: 
       {/* Criteria Checklist */}
       {showCriteria && (
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1.5">
-          {checklistItems.map((item, idx) => (
+          {checklistItems.map((item) => (
             <div
-              key={idx}
+              key={item.label}
               className={`flex items-center gap-1.5 text-[11px] transition-colors ${
                 item.met
                   ? 'text-emerald-600 dark:text-emerald-400 font-medium'

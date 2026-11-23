@@ -1,7 +1,7 @@
 // @refresh reset
 import './StoreDashboard.css';
 import { deliveryMapUrl } from '../../services/delivery-location';
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useMemo, useRef } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
@@ -57,6 +57,38 @@ import { StoreCatalogItem, getStoreCatalog, saveStoreCatalog } from '../../data/
 const AnalyticsChart = React.lazy(() => import('../../components/AnalyticsChart').then((module) => ({ default: module.AnalyticsChart })));
 const DeliveryResultDialog = React.lazy(() => import('../operations/DriverDeliveryPage').then((module) => ({ default: module.DeliveryResultDialog })));
 
+const viDayMonthFormatter = new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: '2-digit' });
+
+const ORDER_PRIORITY_MAP: Record<string, number> = {
+  PENDING: 1,
+  CONFIRMED: 2,
+  PREPARING: 3,
+  OUT_FOR_DELIVERY: 4,
+  SHIPPING: 4,
+  READY_FOR_DELIVERY: 4,
+  COMPLETED: 5,
+  DELIVERED: 5,
+  CANCELLED: 6,
+  REJECTED: 7,
+};
+
+const STORE_TABLE_CONTAINER_VARIANTS: Variants = {
+  hidden: { opacity: 0 },
+  show: {
+    opacity: 1,
+    transition: { duration: 0.12 },
+  },
+};
+
+const STORE_TABLE_ROW_VARIANTS: Variants = {
+  hidden: { opacity: 0, y: 6 },
+  show: {
+    opacity: 1,
+    y: 0,
+    transition: { duration: 0.12, ease: 'easeOut' },
+  },
+};
+
 const buildChartDataFromOrders = (orders: Order[]) => {
   const byDay = new Map<string, { date: string; rawDate: Date; revenue: number }>();
 
@@ -66,7 +98,7 @@ const buildChartDataFromOrders = (orders: Order[]) => {
     if (Number.isNaN(rawDate.getTime())) return;
     const key = rawDate.toISOString().slice(0, 10);
     const current = byDay.get(key) || {
-      date: new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: '2-digit' }).format(rawDate),
+      date: viDayMonthFormatter.format(rawDate),
       rawDate,
       revenue: 0,
     };
@@ -665,45 +697,47 @@ export const StoreDashboard: React.FC = () => {
     showToast(`Đã thêm sản phẩm "${newProduct.name}" vào kho hàng!`);
   };
 
-  // Filtered inventory list
-  const filteredInventory = inventoryList.filter((item) => {
-    const matchCategory = inventoryCategory === 'Tất cả' || item.category === inventoryCategory;
-    const matchSearch =
-      !inventorySearch.trim() ||
-      item.name.toLowerCase().includes(inventorySearch.toLowerCase()) ||
-      item.brand.toLowerCase().includes(inventorySearch.toLowerCase()) ||
-      item.category.toLowerCase().includes(inventorySearch.toLowerCase());
-    return matchCategory && matchSearch;
-  });
+  // Filtered inventory list (memoized)
+  const filteredInventory = useMemo(() => {
+    const q = inventorySearch.toLowerCase().trim();
+    return inventoryList.filter((item) => {
+      const matchCategory = inventoryCategory === 'Tất cả' || item.category === inventoryCategory;
+      const matchSearch =
+        !q ||
+        item.name.toLowerCase().includes(q) ||
+        item.brand.toLowerCase().includes(q) ||
+        item.category.toLowerCase().includes(q);
+      return matchCategory && matchSearch;
+    });
+  }, [inventoryList, inventoryCategory, inventorySearch]);
 
-  // Metrics calculations
-  const totalRevenue = orderDashboardMetrics(orders).provisionalSales;
+  // Metrics calculations (memoized single-pass)
+  const { totalRevenue, pendingCount, inProgressCount, completedCount } = useMemo(() => {
+    let pending = 0;
+    let inProgress = 0;
+    let completed = 0;
+    for (const o of orders) {
+      const st = o.status as string;
+      if (st === 'PENDING') pending += 1;
+      else if (st === 'CONFIRMED' || st === 'PREPARING' || st === 'OUT_FOR_DELIVERY' || st === 'SHIPPING' || st === 'READY_FOR_DELIVERY') inProgress += 1;
+      else if (st === 'COMPLETED' || st === 'DELIVERED') completed += 1;
+    }
+    return {
+      totalRevenue: orderDashboardMetrics(orders).provisionalSales,
+      pendingCount: pending,
+      inProgressCount: inProgress,
+      completedCount: completed,
+    };
+  }, [orders]);
 
-  const pendingCount = orders.filter((o) => o.status === 'PENDING').length;
-  const inProgressCount = orders.filter((o) => ['CONFIRMED', 'PREPARING', 'OUT_FOR_DELIVERY', 'SHIPPING', 'READY_FOR_DELIVERY'].includes(o.status)).length;
-  const completedCount = orders.filter((o) => ['COMPLETED', 'DELIVERED'].includes(o.status as string)).length;
-
-  const priorityMap: Record<string, number> = {
-    PENDING: 1,
-    CONFIRMED: 2,
-    PREPARING: 3,
-    OUT_FOR_DELIVERY: 4,
-    SHIPPING: 4,
-    READY_FOR_DELIVERY: 4,
-    COMPLETED: 5,
-    DELIVERED: 5,
-    CANCELLED: 6,
-    REJECTED: 7,
-  };
-
-  const filteredOrders = orders
-    .filter((o) => {
+  const filteredOrders = useMemo(() => {
+    const q = searchQuery.toLowerCase().trim();
+    const matched = orders.filter((o) => {
       const matchStatus =
         statusFilter === 'ALL' ||
         o.status === statusFilter ||
         (statusFilter === 'COMPLETED' && (o.status as string) === 'DELIVERED') ||
         (statusFilter === 'OUT_FOR_DELIVERY' && ['SHIPPING', 'READY_FOR_DELIVERY'].includes(o.status as string));
-      const q = searchQuery.toLowerCase().trim();
       const matchSearch =
         !q ||
         (o.orderNumber && o.orderNumber.toLowerCase().includes(q)) ||
@@ -712,19 +746,24 @@ export const StoreDashboard: React.FC = () => {
         (o.deliveryAddress && o.deliveryAddress.toLowerCase().includes(q)) ||
         (Array.isArray(o.items) && o.items.some((it) => it.productName?.toLowerCase().includes(q)));
       return matchStatus && matchSearch;
-    })
-    .sort((a, b) => {
+    });
+    const timestamps = new Map<Order, number>();
+    for (const o of matched) {
+      timestamps.set(o, Date.parse(o.createdAt) || 0);
+    }
+    return matched.sort((a, b) => {
       if (sortBy === 'PRIORITY') {
-        const pA = priorityMap[a.status] || 99;
-        const pB = priorityMap[b.status] || 99;
+        const pA = ORDER_PRIORITY_MAP[a.status] || 99;
+        const pB = ORDER_PRIORITY_MAP[b.status] || 99;
         if (pA !== pB) return pA - pB;
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return (timestamps.get(b) || 0) - (timestamps.get(a) || 0);
       }
       if (sortBy === 'NEWEST') {
-        return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
+        return (timestamps.get(b) || 0) - (timestamps.get(a) || 0);
       }
-      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+      return (timestamps.get(a) || 0) - (timestamps.get(b) || 0);
     });
+  }, [orders, statusFilter, searchQuery, sortBy]);
 
   // Reset pagination to page 1 on filter or search changes
   useEffect(() => {
@@ -741,7 +780,10 @@ export const StoreDashboard: React.FC = () => {
 
   const startIndex = (currentPage - 1) * PAGE_SIZE;
   const endIndex = Math.min(startIndex + PAGE_SIZE, filteredOrders.length);
-  const paginatedOrders = filteredOrders.slice(startIndex, startIndex + PAGE_SIZE);
+  const paginatedOrders = useMemo(
+    () => filteredOrders.slice(startIndex, startIndex + PAGE_SIZE),
+    [filteredOrders, startIndex]
+  );
 
   const handlePageChange = (newPage: number) => {
     if (newPage < 1 || newPage > totalPages || newPage === currentPage) return;
@@ -842,25 +884,9 @@ export const StoreDashboard: React.FC = () => {
     }
   };
 
-  // Motion physics for table rows
-  const tableContainerVariants: Variants = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: {
-        staggerChildren: 0.05,
-      },
-    },
-  };
-
-  const tableRowVariants: Variants = {
-    hidden: { opacity: 0, y: 10 },
-    show: {
-      opacity: 1,
-      y: 0,
-      transition: { duration: 0.2, ease: 'easeOut' },
-    },
-  };
+  // Hoisted motion physics for table rows (zero per-row stagger delay)
+  const tableContainerVariants = STORE_TABLE_CONTAINER_VARIANTS;
+  const tableRowVariants = STORE_TABLE_ROW_VARIANTS;
 
   const getOrderShortCode = (num?: string | null): string => {
     if (!num) return '';
@@ -1059,8 +1085,8 @@ export const StoreDashboard: React.FC = () => {
               urgent: false,
               valueColor: 'text-zinc-900 dark:text-zinc-100',
             },
-          ].map((m, i) => (
-            <div key={i} className="store-orders-metric">
+          ].map((m) => (
+            <div key={m.label} className="store-orders-metric">
               <div className="store-orders-metric-label-row">
                 <span className="store-orders-metric-label">
                   {m.label}

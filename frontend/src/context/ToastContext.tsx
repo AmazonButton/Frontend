@@ -1,6 +1,7 @@
-import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { CheckCircle2, AlertCircle, AlertTriangle, Info, X } from 'lucide-react';
+import { EASE_OUT } from '../utils/motion-presets';
 
 export type ToastType = 'success' | 'error' | 'warning' | 'info';
 
@@ -62,7 +63,7 @@ function dispatchGlobalToast(type: ToastType, message: string, options?: ToastOp
   listeners.forEach((fn) => fn(item));
 }
 
-// Single Toast Card Component
+// Single Toast Card Component (Sonner-grade: GPU scaleX progress bar, 0 re-renders/frame, pause on hover)
 const ToastCard = React.forwardRef<
   HTMLDivElement,
   {
@@ -70,22 +71,23 @@ const ToastCard = React.forwardRef<
     onClose: (id: string) => void;
   }
 >(({ item, onClose }, ref) => {
-  const [progress, setProgress] = useState(100);
+  const [paused, setPaused] = useState(false);
+  const remainingRef = useRef(item.duration);
+  const startedAtRef = useRef(Date.now());
 
   useEffect(() => {
-    const startTime = Date.now();
-    const timeout = setTimeout(() => onClose(item.id), item.duration);
-    const interval = setInterval(() => {
-      const elapsed = Date.now() - startTime;
-      const remaining = Math.max(0, 100 - (elapsed / item.duration) * 100);
-      setProgress(remaining);
-      if (remaining <= 0) {
-        clearInterval(interval);
-      }
-    }, 25);
+    remainingRef.current = item.duration;
+  }, [item.id, item.duration]);
 
-    return () => { clearInterval(interval); clearTimeout(timeout); };
-  }, [item, onClose]);
+  useEffect(() => {
+    if (paused) return;
+    startedAtRef.current = Date.now();
+    const timeout = window.setTimeout(() => onClose(item.id), Math.max(0, remainingRef.current));
+    return () => {
+      window.clearTimeout(timeout);
+      remainingRef.current = Math.max(0, remainingRef.current - (Date.now() - startedAtRef.current));
+    };
+  }, [item.id, onClose, paused]);
 
   const config = {
     success: {
@@ -118,14 +120,20 @@ const ToastCard = React.forwardRef<
     <motion.div
       ref={ref}
       layout
-      initial={{ opacity: 0, x: 48, y: 12, scale: 0.94, filter: 'blur(4px)' }}
-      animate={{ opacity: 1, x: 0, y: 0, scale: 1, filter: 'blur(0px)' }}
-      exit={{ opacity: 0, x: 36, scale: 0.94, filter: 'blur(2px)' }}
-      transition={{
-        type: 'spring',
-        damping: 28,
-        stiffness: 340,
-        mass: 0.8,
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+      initial={{ opacity: 0, y: 18, scale: 0.96 }}
+      animate={{
+        opacity: 1,
+        y: 0,
+        scale: 1,
+        transition: { duration: 0.22, ease: EASE_OUT },
+      }}
+      exit={{
+        opacity: 0,
+        y: 12,
+        scale: 0.96,
+        transition: { duration: 0.14, ease: EASE_OUT },
       }}
       className="pointer-events-auto relative w-full max-w-sm sm:max-w-md bg-white/95 dark:bg-[#121216]/95 backdrop-blur-xl border border-slate-200/80 dark:border-zinc-800 shadow-[0_20px_50px_-10px_rgba(0,0,0,0.18)] rounded-2xl p-4 overflow-hidden"
     >
@@ -152,17 +160,21 @@ const ToastCard = React.forwardRef<
         <button
           type="button"
           onClick={() => onClose(item.id)}
-          className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800/60 transition-colors cursor-pointer shrink-0 -mr-1 -mt-1"
+          className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg hover:bg-slate-100 dark:hover:bg-zinc-800/60 transition-[background-color,color,transform] duration-150 active:scale-95 cursor-pointer shrink-0 -mr-1 -mt-1"
         >
           <X className="w-4 h-4" />
         </button>
       </div>
 
-      {/* Thin Animated Duration Progress Bar */}
+      {/* Pure GPU-composited scaleX countdown bar (0 layout / 0 React re-renders) */}
       <div className="absolute bottom-0 left-0 right-0 h-0.5 bg-slate-100 dark:bg-zinc-800/80 overflow-hidden">
         <div
-          className={`h-full transition-all duration-75 ease-linear ${config.progressBar}`}
-          style={{ width: `${progress}%` }}
+          key={item.id}
+          className={`h-full w-full motion-toast-progress ${config.progressBar}`}
+          style={{
+            animationDuration: `${item.duration}ms`,
+            animationPlayState: paused ? 'paused' : 'running',
+          }}
         />
       </div>
     </motion.div>
@@ -227,7 +239,7 @@ export const ToastProvider: React.FC<{ children: React.ReactNode }> = ({ childre
 
       {/* Floating single status message. Full event history belongs in the notification bell. */}
       <div className="fixed bottom-5 right-5 z-[9999] flex flex-col-reverse items-end gap-2.5 pointer-events-none w-full max-w-sm sm:max-w-md px-4 sm:px-0">
-        <AnimatePresence mode="wait">
+        <AnimatePresence mode="popLayout">
           {toasts.map((item) => (
             <ToastCard key={item.id} item={item} onClose={removeToast} />
           ))}

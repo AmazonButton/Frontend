@@ -114,24 +114,28 @@ const rootElement = document.getElementById('root') as HTMLElement;
 const root = (window as any).__reactRoot || ReactDOM.createRoot(rootElement);
 (window as any).__reactRoot = root;
 
+const appTree = (
+  <ErrorBoundary>
+    <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
+        <ThemeProvider>
+          <AuthProvider>
+            <SoundProvider>
+              <SidebarProvider>
+                <ToastProvider>
+                  <App />
+                </ToastProvider>
+              </SidebarProvider>
+            </SoundProvider>
+          </AuthProvider>
+        </ThemeProvider>
+      </BrowserRouter>
+    </GoogleOAuthProvider>
+  </ErrorBoundary>
+);
+
+// Only enable StrictMode double-effect checks when explicitly opted in via VITE_STRICT_MODE=true,
+// preventing duplicated API calls and double-mount latency during local development.
 root.render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
-        <BrowserRouter future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <ThemeProvider>
-            <AuthProvider>
-              <SoundProvider>
-                <SidebarProvider>
-                  <ToastProvider>
-                    <App />
-                  </ToastProvider>
-                </SidebarProvider>
-              </SoundProvider>
-            </AuthProvider>
-          </ThemeProvider>
-        </BrowserRouter>
-      </GoogleOAuthProvider>
-    </ErrorBoundary>
-  </React.StrictMode>
+  import.meta.env.VITE_STRICT_MODE === 'true' ? <React.StrictMode>{appTree}</React.StrictMode> : appTree
 );

@@ -55,8 +55,15 @@ const isActiveOrder = isActiveDashboardOrder;
 
 const formatPrice = (value: number) => `${(value || 0).toLocaleString('vi-VN')} ₫`;
 
-const formatDate = (value: string) =>
-  new Intl.DateTimeFormat('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }).format(new Date(value));
+const viOrderDateTimeFormatter = new Intl.DateTimeFormat('vi-VN', {
+  day: '2-digit',
+  month: '2-digit',
+  year: 'numeric',
+  hour: '2-digit',
+  minute: '2-digit',
+});
+
+const formatDate = (value: string) => viOrderDateTimeFormatter.format(new Date(value));
 
 export const CustomerOrdersPage: React.FC = () => {
   const { playOrderChime } = useSound();
