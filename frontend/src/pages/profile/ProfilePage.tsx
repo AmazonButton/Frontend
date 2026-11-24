@@ -42,6 +42,15 @@ import {
   EyeOff,
   Check,
   X,
+  BadgeCheck,
+  BookOpen,
+  FileText,
+  KeyRound,
+  Landmark,
+  Layers,
+  LayoutDashboard,
+  RotateCcw,
+  UserCircle2,
 } from 'lucide-react';
 
 import { LogoutConfirmModal } from '../../components/common/LogoutConfirmModal';
@@ -59,9 +68,10 @@ export const ProfilePage: React.FC = () => {
   const [showLogoutModal, setShowLogoutModal] = useState(false);
   const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
 
-  const isStoreOwner = user?.role === 'STORE_OWNER' || user?.role === 'STORE_MANAGER';
+  const isStoreOwner = user?.role === 'STORE_OWNER';
   const isCustomer = user?.role === 'CUSTOMER';
   const isAdmin = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '');
+  const isSystemStaff = user?.role === 'SYSTEM_STAFF';
   useEffect(() => {
     if (isCustomer && location.hash === '#customer-identity-verification') navigate('/customer/verification', { replace: true });
   }, [isCustomer, location.hash, navigate]);
@@ -75,8 +85,8 @@ export const ProfilePage: React.FC = () => {
   const requestedTab = searchParams.get('tab') || 'INFO';
   const allowedTabs: ProfileTab[] = isStoreOwner
     ? ['INFO', 'NOTIFICATIONS', 'SECURITY']
-    : isAdmin ? ['INFO', 'SECURITY']
-    : isCustomer ? ['INFO', 'DEVICES', 'ORDERS', 'SECURITY']
+    : isAdmin || isSystemStaff ? ['INFO', 'SECURITY']
+    : isCustomer ? ['INFO', 'ADDRESSES', 'DEVICES', 'ORDERS', 'SECURITY']
     : ['INFO', 'DEVICES', 'ORDERS', 'ADDRESSES', 'SECURITY'];
   const activeTab: ProfileTab = allowedTabs.includes(requestedTab as ProfileTab)
     ? requestedTab as ProfileTab
@@ -208,8 +218,12 @@ export const ProfilePage: React.FC = () => {
       setLoadingData(true);
       try {
         const [devRes, ordRes, addrRes] = await Promise.all([
-          isAdmin ? Promise.resolve({ data: { success: false, data: [] } }) : api.get('/devices').catch(() => ({ data: { success: false, data: [] } })),
-          api.get('/orders').catch(() => ({ data: { success: false, data: [] } })),
+          isAdmin || isSystemStaff
+            ? Promise.resolve({ data: { success: false, data: [] } })
+            : api.get('/devices').catch(() => ({ data: { success: false, data: [] } })),
+          isAdmin || isSystemStaff
+            ? Promise.resolve({ data: { success: false, data: [] } })
+            : api.get('/orders').catch(() => ({ data: { success: false, data: [] } })),
           isCustomer ? api.get('/customer-addresses').catch(() => ({ data: { success: false, data: [] } })) : Promise.resolve({ data: { success: false, data: [] } }),
         ]);
         if (devRes.data?.success && Array.isArray(devRes.data.data)) {
@@ -501,12 +515,13 @@ export const ProfilePage: React.FC = () => {
     switch (role) {
       case 'SUPER_ADMIN':
         return 'Quản trị viên Hệ Thống (Super Admin)';
+      case 'SYSTEM_ADMIN':
+      case 'ADMIN':
+        return 'Quản trị viên Hệ Thống';
+      case 'SYSTEM_STAFF':
+        return 'Kỹ thuật viên hệ thống (SYSTEM_STAFF)';
       case 'STORE_OWNER':
         return 'Chủ đại lý & Cửa hàng (Store Owner)';
-      case 'STORE_MANAGER':
-        return 'Quản lý cửa hàng (Store Manager)';
-      case 'STORE_STAFF':
-        return 'Nhân viên cửa hàng (Store Staff)';
       case 'CUSTOMER':
       default:
         return 'Khách hàng cá nhân';
@@ -516,10 +531,12 @@ export const ProfilePage: React.FC = () => {
   const getRoleBadge = (role?: string) => {
     switch (role) {
       case 'SUPER_ADMIN':
+      case 'SYSTEM_ADMIN':
+      case 'ADMIN':
         return { label: 'Admin Hub', color: 'bg-purple-50 text-purple-700 border-purple-200 dark:bg-purple-950/40 dark:text-purple-300' };
+      case 'SYSTEM_STAFF':
+        return { label: 'Kỹ thuật hệ thống', color: 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300' };
       case 'STORE_OWNER':
-      case 'STORE_MANAGER':
-      case 'STORE_STAFF':
         return { label: 'Chủ Cửa Hàng (Store Owner)', color: 'bg-blue-50 text-[#0E6BA8] border-blue-200 dark:bg-blue-950/40 dark:text-[#38a5da]' };
       case 'CUSTOMER':
       default:
@@ -601,54 +618,57 @@ export const ProfilePage: React.FC = () => {
     }
   };
 
-  // Dynamic menu items based on Role (B2B Store Owner vs B2C Customer)
-  const menuItems = (isStoreOwner
-    ? [
-        {
-          id: 'INFO' as ProfileTab,
-          label: 'Hồ sơ đại lý & Chủ shop',
-          icon: Store,
-        },
-        {
-          id: 'NOTIFICATIONS' as ProfileTab,
-          label: 'Cài đặt thông báo',
-          icon: Radio,
-        },
-        {
-          id: 'SECURITY' as ProfileTab,
-          label: 'Bảo mật & Đổi mật khẩu',
-          icon: Key,
-        },
-      ]
-    : [
-        {
-          id: 'INFO' as ProfileTab,
-          label: 'Thông tin cá nhân',
-          icon: UserIcon,
-        },
-        {
-          id: 'DEVICES' as ProfileTab,
-          label: 'Nút bấm của tôi',
-          icon: Smartphone,
-          count: devices.length > 0 ? devices.length : undefined,
-        },
-        {
-          id: 'ORDERS' as ProfileTab,
-          label: 'Lịch sử đặt hàng',
-          icon: ShoppingBag,
-          count: orders.length > 0 ? orders.length : undefined,
-        },
-        {
-          id: 'ADDRESSES' as ProfileTab,
-          label: 'Địa chỉ đã lưu',
-          icon: MapPin,
-        },
-        {
-          id: 'SECURITY' as ProfileTab,
-          label: 'Bảo mật & Đổi mật khẩu',
-          icon: Key,
-        },
-      ]).filter(item => !isAdmin || item.id === 'INFO' || item.id === 'SECURITY');
+  type AccountRow =
+    | { kind: 'tab'; id: ProfileTab; label: string; icon: React.ElementType; count?: number }
+    | { kind: 'link'; to: string; label: string; icon: React.ElementType };
+
+  const helpPath = isStoreOwner
+    ? '/help/store-partners'
+    : isSystemStaff
+      ? '/help/device-setup'
+      : '/help/ordering';
+
+  const accountMenuRows: AccountRow[] = [
+    {
+      kind: 'tab',
+      id: 'INFO',
+      label: isStoreOwner ? 'Thông tin tài khoản & đại lý' : 'Thông tin tài khoản',
+      icon: UserCircle2,
+    },
+    {
+      kind: 'tab',
+      id: 'SECURITY',
+      label: 'Thay đổi mật khẩu',
+      icon: KeyRound,
+    },
+    ...(isCustomer
+      ? [
+          { kind: 'tab' as const, id: 'ADDRESSES' as ProfileTab, label: 'Địa chỉ giao hàng', icon: MapPin },
+          { kind: 'link' as const, to: '/customer/verification', label: 'Xác minh danh tính (eKYC)', icon: BadgeCheck },
+          { kind: 'link' as const, to: '/customer/banking', label: 'Ngân hàng & hoàn tiền', icon: Landmark },
+        ]
+      : isStoreOwner
+        ? [
+            { kind: 'tab' as const, id: 'NOTIFICATIONS' as ProfileTab, label: 'Thông báo & loa đơn hàng', icon: Bell },
+            { kind: 'link' as const, to: '/store/finance', label: 'Gói dịch vụ & ngân hàng', icon: Landmark },
+          ]
+        : isSystemStaff
+          ? [
+              { kind: 'link' as const, to: '/system-staff/devices', label: 'Kho & cấp phát nút', icon: Cpu },
+              { kind: 'link' as const, to: '/system-staff/warranty', label: 'Bảo hành thiết bị', icon: ShieldCheck },
+              { kind: 'link' as const, to: '/system-staff/returns', label: 'Nhận nút trả', icon: RotateCcw },
+              { kind: 'link' as const, to: '/system-staff/templates', label: 'Mẫu cấu hình nút', icon: Layers },
+            ]
+          : isAdmin
+            ? [
+                { kind: 'link' as const, to: '/admin/dashboard', label: 'Tổng quan quản trị', icon: LayoutDashboard },
+                { kind: 'link' as const, to: '/admin/dashboard?section=RBAC', label: 'Tài khoản & phân quyền', icon: ShieldCheck },
+              ]
+            : []),
+    { kind: 'link', to: helpPath, label: 'Hướng dẫn sử dụng', icon: BookOpen },
+    { kind: 'link', to: '/policies/privacy', label: 'Chính sách bảo mật', icon: FileText },
+    { kind: 'link', to: '/policies/terms', label: 'Điều khoản dịch vụ', icon: FileText },
+  ];
 
   return (
     <motion.div
@@ -699,75 +719,100 @@ export const ProfilePage: React.FC = () => {
         )}
       </AnimatePresence>
 
-      {/* Main Grid: Sidebar Menu + Content Card */}
-      <div data-page-motion className="profile-layout grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
+      {/* Main Grid: Unified Clean Account List (All Roles) + Detail Content */}
+      <div data-page-motion className="profile-layout grid grid-cols-1 lg:grid-cols-12 gap-6 items-start">
         {/* ================================================================= */}
-        {/* LEFT SIDEBAR MENU                                                 */}
+        {/* LEFT ACCOUNT MENU LIST (Unified Clean Style for ALL Roles)        */}
         {/* ================================================================= */}
-        {!isCustomer && !isAdmin && !isStoreOwner && <aside className={`profile-navigation ${isStoreOwner ? 'lg:col-span-3' : 'lg:col-span-4'} bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-3 shadow-xs`}>
-          <nav aria-label="Quản lý tài khoản" className="space-y-1">
-            {menuItems.map((item) => {
-              const Icon = item.icon;
-              const isActive = activeTab === item.id;
-              return (
-                <button
-                  key={item.id}
-                  onClick={() => handleTabChange(item.id)}
-                  aria-current={isActive ? 'page' : undefined}
-                  className={`relative w-full flex items-center justify-between px-3.5 py-3 rounded-xl text-xs font-semibold transition-all cursor-pointer ${
-                    isActive
-                      ? 'bg-[#0E6BA8]/10 text-[#0E6BA8] dark:text-[#38a5da] shadow-2xs'
-                      : 'text-slate-600 dark:text-zinc-400 hover:text-slate-900 dark:hover:text-white hover:bg-slate-50 dark:hover:bg-zinc-800/60'
-                  }`}
-                >
-                  {/* Active Left Pill Indicator */}
-                  {isActive && (
-                    <motion.div
-                      layoutId="activeProfileMenuIndicator"
-                      className="absolute left-0 top-2 bottom-2 w-1 bg-[#0E6BA8] rounded-r-full"
-                      transition={{ type: 'spring', stiffness: 500, damping: 35 }}
-                    />
-                  )}
+        <aside className="profile-navigation lg:col-span-4 bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl overflow-hidden shadow-xs">
+          {/* Compact Identity Header */}
+          <div className="flex items-center gap-3 px-4 py-4 border-b border-slate-100 dark:border-zinc-800 bg-slate-50/50 dark:bg-zinc-900/60">
+            <div className="w-11 h-11 rounded-full bg-[#0E6BA8] text-white flex items-center justify-center font-bold text-sm overflow-hidden shrink-0">
+              {avatarPreview ? (
+                <img src={avatarPreview} alt="" className="w-full h-full object-cover" />
+              ) : (
+                getInitials(user?.fullName)
+              )}
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                {cleanFullName(user?.fullName) || 'Tài khoản'}
+              </p>
+              <p className="text-[11px] text-slate-500 dark:text-zinc-400 truncate">
+                {user?.email}
+              </p>
+              <span className={`inline-block mt-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border ${getRoleBadge(user?.role).color}`}>
+                {getRoleBadge(user?.role).label}
+              </span>
+            </div>
+          </div>
 
-                  <div className="flex items-center gap-2.5">
-                    <Icon className={`w-4 h-4 ${isActive ? 'text-[#0E6BA8] dark:text-[#38a5da]' : 'text-slate-400 dark:text-zinc-500'}`} />
-                    <span>{item.label}</span>
-                  </div>
-
-                  {item.count !== undefined && (
-                    <span
-                      className={`text-xs font-medium px-2 py-0.5 rounded-full tabular-nums ${
-                        isActive
-                          ? 'bg-[#0E6BA8] text-white'
-                          : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-400'
-                      }`}
-                    >
-                      {item.count}
+          <nav aria-label="Danh mục tài khoản" className="divide-y divide-slate-100 dark:divide-zinc-800">
+            {accountMenuRows.map((row) => {
+              const Icon = row.icon;
+              if (row.kind === 'tab') {
+                const isActive = activeTab === row.id;
+                return (
+                  <button
+                    key={row.id}
+                    type="button"
+                    onClick={() => handleTabChange(row.id)}
+                    aria-current={isActive ? 'page' : undefined}
+                    className={`relative w-full flex items-center justify-between px-4 py-3.5 text-left text-[13.5px] transition-[background-color,color,transform] duration-150 active:scale-[0.99] cursor-pointer ${
+                      isActive
+                        ? 'bg-sky-50/80 text-[#0E6BA8] font-semibold dark:bg-sky-950/30 dark:text-sky-300'
+                        : 'text-slate-700 dark:text-zinc-300 font-medium hover:bg-slate-50 dark:hover:bg-zinc-800/60'
+                    }`}
+                  >
+                    {isActive && (
+                      <motion.span
+                        layoutId="profile-active-indicator"
+                        transition={{ type: 'spring', stiffness: 480, damping: 36, mass: 0.8 }}
+                        className="absolute left-0 top-2 bottom-2 w-[3px] rounded-r-full bg-[#0E6BA8]"
+                      />
+                    )}
+                    <span className="flex items-center gap-3 min-w-0">
+                      <Icon className={`w-[18px] h-[18px] shrink-0 ${isActive ? 'text-[#0E6BA8] dark:text-sky-400' : 'text-[#2563EB] dark:text-sky-400'}`} strokeWidth={1.75} />
+                      <span className="truncate">{row.label}</span>
                     </span>
-                  )}
-                </button>
+                    <ChevronRight className={`w-4 h-4 shrink-0 ${isActive ? 'text-[#0E6BA8]' : 'text-slate-300 dark:text-zinc-600'}`} />
+                  </button>
+                );
+              }
+              return (
+                <Link
+                  key={row.to}
+                  to={row.to}
+                  className="w-full flex items-center justify-between px-4 py-3.5 text-left text-[13.5px] font-medium text-slate-700 dark:text-zinc-300 hover:bg-slate-50 dark:hover:bg-zinc-800/60 transition-colors"
+                >
+                  <span className="flex items-center gap-3 min-w-0">
+                    <Icon className="w-[18px] h-[18px] shrink-0 text-[#2563EB] dark:text-sky-400" strokeWidth={1.75} />
+                    <span className="truncate">{row.label}</span>
+                  </span>
+                  <ChevronRight className="w-4 h-4 shrink-0 text-slate-300 dark:text-zinc-600" />
+                </Link>
               );
             })}
 
-            {/* Divider */}
-            <div className="pt-2 my-2 border-t border-slate-100 dark:border-zinc-800" />
-
-            {/* Logout Option */}
+            {/* Logout Row */}
             <button
               type="button"
               onClick={() => setShowLogoutModal(true)}
-              className="w-full flex items-center gap-2.5 px-3.5 py-2.5 rounded-xl text-xs font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
+              className="w-full flex items-center justify-between px-4 py-3.5 text-left text-[13.5px] font-semibold text-rose-600 dark:text-rose-400 hover:bg-rose-50/70 dark:hover:bg-rose-950/30 transition-colors cursor-pointer"
             >
-              <LogOut className="w-4 h-4" />
-              <span>Đăng xuất</span>
+              <span className="flex items-center gap-3">
+                <LogOut className="w-[18px] h-[18px] shrink-0" strokeWidth={1.75} />
+                <span>Đăng xuất</span>
+              </span>
+              <ChevronRight className="w-4 h-4 shrink-0 text-rose-300 dark:text-rose-800" />
             </button>
           </nav>
-        </aside>}
+        </aside>
 
         {/* ================================================================= */}
         {/* RIGHT CONTENT PANEL                                               */}
         {/* ================================================================= */}
-        <section className={`profile-panel min-w-0 ${isAdmin || isStoreOwner ? 'lg:col-span-12' : 'lg:col-span-8'} space-y-6`}>
+        <section key={activeTab} className="profile-panel motion-view-enter min-w-0 lg:col-span-8 space-y-6">
           {/* Header Title & Subtitle with Status Badge */}
           <div className="profile-heading">
             {isCustomer && activeTab !== 'INFO' && <p className="customer-eyebrow">{activeTab === 'SECURITY' ? 'Bảo mật tài khoản' : 'Tài khoản của bạn'}</p>}
@@ -791,7 +836,11 @@ export const ProfilePage: React.FC = () => {
               {activeTab === 'INFO' &&
                 (isStoreOwner
                   ? 'Quản lý thông tin doanh nghiệp, người đại diện pháp luật và hotline chăm sóc khách hàng'
-                  : 'Quản lý thông tin tài khoản và địa chỉ nhận hàng của bạn')}
+                  : isSystemStaff
+                    ? 'Quản lý thông tin cá nhân và phạm vi vận hành kỹ thuật hệ thống'
+                    : isAdmin
+                      ? 'Quản lý thông tin tài khoản và quyền quản trị hệ thống'
+                      : 'Quản lý thông tin tài khoản và địa chỉ nhận hàng của bạn')}
               {activeTab === 'DEVICES' &&
                 (isStoreOwner
                   ? 'Danh sách các nút bấm thông minh một chạm đang được trang bị tại căn hộ của khách hàng'

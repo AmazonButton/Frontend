@@ -27,6 +27,17 @@ export default defineConfig(({ mode }) => {
         },
       },
     },
+    optimizeDeps: {
+      include: [
+        'react',
+        'react-dom',
+        'react-router-dom',
+        'axios',
+        'lucide-react',
+        'framer-motion',
+        'socket.io-client',
+      ],
+    },
     server: {
       port: 5173,
       host: true,
@@ -44,8 +55,18 @@ export default defineConfig(({ mode }) => {
       },
     },
     preview: {
+      port: 5173,
+      host: true,
       headers: {
         'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+      },
+      proxy: {
+        '/api': createDevApiProxy(backendUrl),
+        '/socket.io': {
+          target: backendUrl,
+          ws: true,
+          changeOrigin: true,
+        },
       },
     },
   };

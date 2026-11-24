@@ -1,0 +1,144 @@
+/* ============================================================================
+ * FE Motion & UI Craft — Calibrated CSS Motion Tokens (fe-motion-ui)
+ * Curated from Emil Kowalski (AI for UI) & Design Bookmark Motion standards
+ * ============================================================================ */
+
+:root {
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --ease-in-out: cubic-bezier(0.77, 0, 0.175, 1);
+  --ease-drawer: cubic-bezier(0.32, 0.72, 0, 1);
+
+  --duration-press: 130ms;
+  --duration-tooltip: 150ms;
+  --duration-ui: 190ms;
+  --duration-view: 200ms;
+  --duration-modal: 260ms;
+  --duration-drawer: 340ms;
+}
+
+/* Mobile-native tap hygiene (removes tap flash & 300ms click delay) */
+html {
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a,
+[role='button'] {
+  touch-action: manipulation;
+}
+
+/* Tactile pointer-down feedback across interactive controls (composite-only) */
+.motion-press,
+button:not(:disabled):not([data-no-press]) {
+  transition-timing-function: var(--ease-out);
+}
+
+.motion-press:active:not(:disabled) {
+  transform: scale(0.97);
+}
+
+/* Subtle interactive surface lift strictly gated to fine hover pointers */
+.motion-card {
+  transition:
+    transform var(--duration-ui) var(--ease-out),
+    border-color var(--duration-ui) ease,
+    box-shadow var(--duration-ui) ease;
+}
+
+@media (hover: hover) and (pointer: fine) {
+  .motion-card:hover {
+    transform: translateY(-2px);
+  }
+}
+
+/* Origin-aware popover / menu entrance (never starts at scale(0)) */
+.motion-popover {
+  transform-origin: var(--transform-origin, top right);
+  opacity: 1;
+  transform: scale(1) translateY(0);
+  transition:
+    transform var(--duration-tooltip) var(--ease-out),
+    opacity var(--duration-tooltip) var(--ease-out);
+}
+
+@starting-style {
+  .motion-popover {
+    opacity: 0;
+    transform: scale(0.96) translateY(-4px);
+  }
+}
+
+/* Compositor-only view / tab swap entrance (safe during page hydration) */
+@keyframes feViewEnter {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.motion-view-enter {
+  animation: feViewEnter var(--duration-view) var(--ease-out) both;
+}
+
+/* Pure GPU toast countdown progress bar (0 React re-renders, scaleX only) */
+@keyframes feToastCountdown {
+  from {
+    transform: scaleX(1);
+  }
+  to {
+    transform: scaleX(0);
+  }
+}
+
+.motion-toast-progress {
+  transform-origin: left center;
+  animation-name: feToastCountdown;
+  animation-timing-function: linear;
+  animation-fill-mode: forwards;
+}
+
+/* Smooth grid-rows accordion without animating raw height */
+.motion-accordion {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows 210ms var(--ease-out);
+}
+
+.motion-accordion[data-open='true'] {
+  grid-template-rows: 1fr;
+}
+
+.motion-accordion > .motion-accordion-inner {
+  overflow: hidden;
+}
+
+/* Reduced motion: retain gentle comprehension fades, drop spatial travel */
+@media (prefers-reduced-motion: reduce) {
+  .motion-press:active:not(:disabled),
+  .motion-card:hover {
+    transform: none;
+  }
+
+  .motion-popover,
+  .motion-view-enter {
+    animation-name: feFadeOnly;
+    transform: none;
+  }
+
+  .motion-accordion {
+    transition-duration: 0.01ms;
+  }
+}
+
+@keyframes feFadeOnly {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}

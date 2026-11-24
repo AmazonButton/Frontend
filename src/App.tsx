@@ -1,4 +1,5 @@
 import React, { Suspense } from 'react';
+import { MotionConfig } from 'framer-motion';
 import { Routes, Route, Navigate, useLocation, Outlet } from 'react-router-dom';
 import { Navbar } from './layouts/Navbar';
 import { Sidebar } from './layouts/Sidebar';
@@ -40,6 +41,7 @@ const StoreFinancePage = React.lazy(() => import('./pages/store/StoreFinancePage
 const StoreServicePlansPage = React.lazy(() => import('./pages/store/StoreServicePlansPage').then(module => ({ default: module.StoreServicePlansPage })));
 const AdminPayoutsPage = React.lazy(() => import('./pages/admin/AdminPayoutsPage').then((module) => ({ default: module.AdminPayoutsPage })));
 const AdminRentalActivationPage = React.lazy(() => import('./pages/admin/AdminRentalActivationPanel').then(module => ({ default: module.AdminRentalActivationPage })));
+const SystemStaffWorkspace = React.lazy(() => import('./pages/system-staff/SystemStaffWorkspace').then(module => ({ default: module.SystemStaffWorkspace })));
 const DriverDeliveryPage = React.lazy(() => import('./pages/operations/DriverDeliveryPage').then(module => ({ default: module.DriverDeliveryPage })));
 const DriverShiftManagement = React.lazy(() => import('./pages/operations/DriverShiftManagement').then(module => ({ default: module.DriverShiftPage })));
 const PhoneAuthPage = React.lazy(() => import('./pages/auth/PhoneAuthPage').then(module => ({ default: module.PhoneAuthPage })));
@@ -93,7 +95,7 @@ const AppShellLayout: React.FC<{ children?: React.ReactNode; showBackNavigation?
     <div className="flex flex-col lg:flex-row min-h-[calc(100vh-4rem)] w-full bg-[#FBFBFC] dark:bg-zinc-950 relative">
       <Sidebar />
       <main className={`app-workspace flex-1 min-w-0 w-full ${edgeToEdge ? 'p-0' : 'p-3 sm:p-5 lg:p-6'}`}>
-        {showBackNavigation && ['CUSTOMER', 'STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '') && (
+        {showBackNavigation && ['CUSTOMER', 'STORE_OWNER', 'SYSTEM_STAFF', 'SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '') && (
           <nav aria-label="Điều hướng trang" className="mb-3 flex sm:mb-4">
             <PageBackButton />
           </nav>
@@ -112,20 +114,15 @@ const AppShellLayout: React.FC<{ children?: React.ReactNode; showBackNavigation?
 const StandaloneProfileBackNavigation: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '');
-  const isStoreUser = ['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(user?.role || '');
-  if (!isAdmin && !isStoreUser) return null;
+  const isSystemStaff = user?.role === 'SYSTEM_STAFF';
+  const isStoreOwner = user?.role === 'STORE_OWNER';
+  if (!isAdmin && !isSystemStaff && !isStoreOwner) return null;
 
   return (
     <nav aria-label="Điều hướng trang" className="mx-auto flex max-w-6xl px-4 pt-4 sm:px-6 lg:px-8">
-      <PageBackButton fallbackTo={isAdmin ? '/admin/dashboard' : '/store/dashboard'} />
+      <PageBackButton fallbackTo={isAdmin ? '/admin/dashboard' : isSystemStaff ? '/system-staff/devices' : '/store/dashboard'} />
     </nav>
   );
-};
-
-const DriverBackNavigation: React.FC = () => {
-  const { user } = useAuth();
-  const fallback = ['SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(user?.role || '') ? '/admin/dashboard' : ['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role || '') ? '/store/dashboard' : '/profile';
-  return <nav className="mx-auto max-w-6xl px-4 pt-4 sm:px-6" aria-label="Điều hướng giao hàng"><PageBackButton fallbackTo={fallback} /></nav>;
 };
 
 export const App: React.FC = () => {
@@ -140,17 +137,18 @@ export const App: React.FC = () => {
       return 'auth';
     }
     if (p === '/quick-setup') return 'device-config';
-    if (p.startsWith('/store') || p.startsWith('/customer') || p.startsWith('/admin') || p.startsWith('/driver/')) {
+    if (p.startsWith('/store') || p.startsWith('/customer') || p.startsWith('/admin') || p.startsWith('/system-staff') || p.startsWith('/driver/')) {
       return 'dashboard';
     }
     return 'hero';
   };
 
-  const isDashboard = location.pathname.startsWith('/store') || location.pathname.startsWith('/admin') || location.pathname.startsWith('/driver/');
+  const isDashboard = location.pathname.startsWith('/store') || location.pathname.startsWith('/admin') || location.pathname.startsWith('/system-staff') || location.pathname.startsWith('/driver/');
   const isAuth = ['/login', '/register', '/phone-auth', '/forgot-password', '/reset-password', '/verify-email', '/403'].includes(location.pathname);
   const showFooter = !isDashboard && !isAuth;
 
   return (
+    <MotionConfig reducedMotion="user" transition={{ ease: [0.23, 1, 0.32, 1], duration: 0.2 }}>
     <div className={`min-h-screen bg-surface-bg dark:bg-cyber-bg text-navy-900 dark:text-slate-100 flex flex-col transition-colors duration-200 relative overflow-x-hidden ${location.pathname === '/' ? 'landing-route' : ''}`}>
       {/* 36. Animated Background — Premium 3D Atmosphere */}
       <Atmosphere3DBackground variant={getAtmosphereVariant()} />
@@ -174,10 +172,10 @@ export const App: React.FC = () => {
           <Route path="/verify-email" element={<VerifyEmailPage />} />
           <Route path="/403" element={<ForbiddenPage />} />
 
-          {/* Store Routes with Persistent Shared Sidebar */}
+          {/* Store Routes (Strictly STORE_OWNER after staff/driver deprecation) */}
           <Route
             element={
-              <ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF']}>
+              <ProtectedRoute allowedRoles={['STORE_OWNER']}>
                 <AppShellLayout />
               </ProtectedRoute>
             }
@@ -185,14 +183,42 @@ export const App: React.FC = () => {
             <Route path="/store" element={<Navigate to="/store/dashboard" replace />} />
             <Route path="/store/dashboard" element={<StoreDashboard />} />
             <Route path="/store/devices" element={<StoreDevicesPage />} />
-            <Route path="/store/rentals" element={user?.role === 'STORE_OWNER' ? <Navigate to="/store/service-plans" replace /> : <CustomerRentalsPage />} />
-            <Route path="/store/service-plans" element={<ProtectedRoute allowedRoles={['STORE_OWNER']}><StoreServicePlansPage /></ProtectedRoute>} />
+            <Route path="/store/rentals" element={<Navigate to="/store/service-plans" replace />} />
+            <Route path="/store/service-plans" element={<StoreServicePlansPage />} />
             <Route path="/store/device-templates" element={<StoreDeviceTemplatesPage />} />
             <Route path="/store/products" element={<StoreProductsPage />} />
             <Route path="/store/profile" element={<ProfilePage />} />
             <Route path="/store/analytics" element={<StoreRevenuePage />} />
             <Route path="/store/wallet" element={<Navigate to={storeWalletRedirect(location.search)} replace />} />
-            <Route path="/store/finance" element={<ProtectedRoute allowedRoles={['STORE_OWNER', 'STORE_MANAGER']}><StoreFinancePage /></ProtectedRoute>} />
+            <Route path="/store/finance" element={<StoreFinancePage />} />
+          </Route>
+
+          {/* Store Owner Self-Delivery, POD & Shift/COD Handover Routes */}
+          <Route
+            element={
+              <ProtectedRoute allowedRoles={['STORE_OWNER', 'SUPER_ADMIN', 'SYSTEM_ADMIN']}>
+                <AppShellLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="/driver/shifts" element={<DriverShiftManagement />} />
+            <Route path="/driver/deliveries" element={<DriverDeliveryPage />} />
+          </Route>
+
+          {/* Dedicated SYSTEM_STAFF Hardware & Warranty Workspace (Zero Finance/Admin Governance) */}
+          <Route
+            element={
+              <ProtectedRoute allowedRoles={['SYSTEM_STAFF']}>
+                <AppShellLayout />
+              </ProtectedRoute>
+            }
+          >
+            <Route path="/system-staff" element={<Navigate to="/system-staff/devices" replace />} />
+            <Route path="/system-staff/devices" element={<SystemStaffWorkspace section="DEVICES" />} />
+            <Route path="/system-staff/warranty" element={<SystemStaffWorkspace section="WARRANTY" />} />
+            <Route path="/system-staff/returns" element={<SystemStaffWorkspace section="RETURNS" />} />
+            <Route path="/system-staff/templates" element={<StoreDeviceTemplatesPage />} />
+            <Route path="/system-staff/profile" element={<ProfilePage />} />
           </Route>
 
           {/* Customer routes share the collapsible desktop sidebar. */}
@@ -213,15 +239,6 @@ export const App: React.FC = () => {
             <Route path="/customer/become-store-owner" element={<BecomeStoreOwnerPage />} />
           </Route>
 
-          <Route
-            path="/driver/shifts"
-            element={
-              <ProtectedRoute allowedRoles={['STAFF_DELIVERY', 'STORE_OWNER', 'STORE_MANAGER', 'STAFF_ORDER', 'SUPER_ADMIN', 'SYSTEM_ADMIN']}>
-                <><DriverBackNavigation /><DriverShiftManagement /></>
-              </ProtectedRoute>
-            }
-          />
-          <Route path="/driver/deliveries" element={<ProtectedRoute allowedRoles={['STAFF_DELIVERY', 'STORE_OWNER', 'STORE_MANAGER', 'STAFF_ORDER', 'SUPER_ADMIN', 'SYSTEM_ADMIN']}><DriverBackNavigation /><DriverDeliveryPage /></ProtectedRoute>} />
           {/* Admin routes share the same collapsible desktop sidebar. */}
           <Route
             element={
@@ -256,5 +273,6 @@ export const App: React.FC = () => {
       </div>
       {showFooter && <Footer />}
     </div>
+    </MotionConfig>
   );
 };

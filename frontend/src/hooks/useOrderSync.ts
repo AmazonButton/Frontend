@@ -13,7 +13,7 @@ export function useOrderSync() {
   const lastSnapshot = useRef<{ scope: string; orders: Map<string, string> } | null>(null);
   const storeId = getUserStoreId(user);
   useEffect(() => {
-    if (!user || !token || !['CUSTOMER', 'STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF', 'STAFF_ORDER', 'STAFF_INVENTORY', 'STAFF_BUTTON', 'STAFF_DELIVERY'].includes(user.role)) return;
+    if (!user || !token || !['CUSTOMER', 'STORE_OWNER'].includes(user.role)) return;
     let active = true;
     let busy = false;
     const scope = `${user.id}:${user.role}:${storeId || ''}:${user.customerProfileId || ''}`;

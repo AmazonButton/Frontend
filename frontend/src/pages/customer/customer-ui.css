@@ -146,7 +146,8 @@
 
 /* Account content uses the customer sidebar; store/admin presentation is unchanged. */
 .customer-profile { --account-surface: #fff; --account-muted-surface: #f8fafc; max-width: 960px; margin-inline: auto; padding: 12px 8px 32px; }
-.customer-profile .profile-layout { display: block; }
+.customer-profile .profile-layout { gap: 24px; }
+.customer-profile .profile-navigation { position: sticky; top: 88px; }
 .customer-profile .profile-panel { width: 100%; max-width: none; min-width: 0; }
 .customer-profile .profile-heading h1 { font-size: clamp(24px, 2.1vw, 28px); font-weight: 650; letter-spacing: -.025em; }
 .customer-profile .profile-heading > p:last-child { margin-top: 8px; max-width: 620px; font-size: 14px; line-height: 1.65; }

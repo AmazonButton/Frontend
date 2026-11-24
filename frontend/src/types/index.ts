@@ -2,23 +2,38 @@ export type UserRole =
   | 'SUPER_ADMIN'
   | 'SYSTEM_ADMIN'
   | 'ADMIN'
+  | 'SYSTEM_STAFF'
   | 'STORE_OWNER'
-  | 'STORE_MANAGER'
-  | 'STORE_STAFF'
-  | 'STAFF_ORDER'
-  | 'STAFF_INVENTORY'
-  | 'STAFF_BUTTON'
-  | 'STAFF_DELIVERY'
-  | 'CUSTOMER'
-  | 'TECHNICIAN';
+  | 'CUSTOMER';
+
+export interface RoleCapabilities {
+  managePlatformDevices: boolean;
+  manageWarrantyTickets: boolean;
+  approveFinancialRefunds: boolean;
+  managePayoutsAndWithdrawals: boolean;
+  manageUsersAndRoles: boolean;
+  manageOwnStoreSalesAndDelivery: boolean;
+  manageOwnStoreWallet: boolean;
+}
+
+export interface PlatformMembershipInfo {
+  membershipId?: string;
+  roleCode: string;
+  status: string;
+  grantedAt?: string | null;
+}
 
 export interface User {
   id: string;
+  userId?: string;
   email: string;
   username?: string | null;
   fullName: string;
   phone?: string;
   role: UserRole;
+  platformRole?: string | null;
+  capabilities?: RoleCapabilities | null;
+  platformMemberships?: PlatformMembershipInfo[];
   emailVerified?: boolean;
   storeId?: string | null;
   customerProfileId?: string | null;
@@ -195,17 +210,17 @@ export interface Order {
   deviceId?: string | null;
   device?: Device | null;
   status:
-    | 'PENDING'
-    | 'CONFIRMED'
-    | 'PREPARING'
-    | 'READY_FOR_DELIVERY'
-    | 'SHIPPING'
-    | 'DELIVERED'
-    | 'DELIVERY_FAILED'
-    | 'OUT_FOR_DELIVERY'
-    | 'COMPLETED'
-    | 'CANCELLED'
-    | 'REJECTED';
+  | 'PENDING'
+  | 'CONFIRMED'
+  | 'PREPARING'
+  | 'READY_FOR_DELIVERY'
+  | 'SHIPPING'
+  | 'DELIVERED'
+  | 'DELIVERY_FAILED'
+  | 'OUT_FOR_DELIVERY'
+  | 'COMPLETED'
+  | 'CANCELLED'
+  | 'REJECTED';
   paymentMethod?: 'PAYOS' | 'CASH_ON_DELIVERY' | string | null;
   paymentStatus?: 'UNPAID' | 'PENDING' | 'COD_DUE' | 'PAID' | 'REFUNDED' | string;
   paidAt?: string | null;

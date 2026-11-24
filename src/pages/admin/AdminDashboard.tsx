@@ -11,37 +11,38 @@ import { useSearchParams } from 'react-router-dom';
 const AdminLiveAnalytics = React.lazy(() => import('./AdminLiveData').then(module => ({ default: module.AdminLiveAnalytics })));
 const AdminLiveDevices = React.lazy(() => import('./AdminLiveData').then(module => ({ default: module.AdminLiveDevices })));
 import { WarrantyPanel } from '../../components/devices/WarrantyPanel';
+import { PlatformDevicesWorkspace } from '../../components/devices/PlatformDevicesWorkspace';
 
 const modalBackdropVariants: Variants = {
   hidden: { opacity: 0 },
   visible: {
     opacity: 1,
-    transition: { duration: 0.24, ease: [0.16, 1, 0.3, 1] },
+    transition: { duration: 0.18, ease: [0.23, 1, 0.32, 1] },
   },
   exit: {
     opacity: 0,
-    transition: { duration: 0.18, ease: 'easeOut' },
+    transition: { duration: 0.13, ease: [0.23, 1, 0.32, 1] },
   },
 };
 
 const modalDialogVariants: Variants = {
-  hidden: { opacity: 0, scale: 0.93, y: 20 },
+  hidden: { opacity: 0, scale: 0.96, y: 10 },
   visible: {
     opacity: 1,
     scale: 1,
     y: 0,
     transition: {
       type: 'spring',
-      damping: 28,
-      stiffness: 320,
-      mass: 0.8,
+      damping: 32,
+      stiffness: 380,
+      mass: 1,
     },
   },
   exit: {
     opacity: 0,
-    scale: 0.94,
-    y: 14,
-    transition: { duration: 0.18, ease: 'easeOut' },
+    scale: 0.97,
+    y: 6,
+    transition: { duration: 0.13, ease: [0.23, 1, 0.32, 1] },
   },
 };
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
@@ -103,18 +104,18 @@ const tableBodyVariants: Variants = {
   visible: {
     opacity: 1,
     transition: {
-      staggerChildren: 0.03,
+      duration: 0.12,
     },
   },
 };
 
 const tableRowVariants: Variants = {
-  hidden: { opacity: 0, y: 10 },
+  hidden: { opacity: 0, y: 6 },
   visible: {
     opacity: 1,
     y: 0,
     transition: {
-      duration: 0.2,
+      duration: 0.12,
       ease: 'easeOut',
     },
   },
@@ -195,15 +196,30 @@ const DEFAULT_AUDIT_LOGS: AuditLog[] = [
   },
 ];
 
+const parsedAuditValueCache = new Map<string, any>();
+
+const parseAuditJsonCached = (raw: string): any => {
+  if (parsedAuditValueCache.has(raw)) {
+    return parsedAuditValueCache.get(raw);
+  }
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    parsed = null;
+  }
+  if (parsedAuditValueCache.size > 300) {
+    parsedAuditValueCache.clear();
+  }
+  parsedAuditValueCache.set(raw, parsed);
+  return parsed;
+};
+
 const renderAuditLogDetails = (log: AuditLog) => {
   let parsed: any = null;
   const raw = log.newValues || log.oldValues;
   if (typeof raw === 'string') {
-    try {
-      parsed = JSON.parse(raw);
-    } catch {
-      parsed = null;
-    }
+    parsed = parseAuditJsonCached(raw);
   } else if (typeof raw === 'object' && raw !== null) {
     parsed = raw;
   }
@@ -434,8 +450,6 @@ export const AdminDashboard: React.FC = () => {
   // Device Batch Inventory & Allocation State
   const [unassignedDevices, setUnassignedDevices] = useState<any[]>([]);
   const [allDevices, setAllDevices] = useState<any[]>([]);
-  const [deviceStoreFilter, setDeviceStoreFilter] = useState<string>('ALL');
-  const [deviceSearchQuery, setDeviceSearchQuery] = useState<string>('');
   const [allStores, setAllStores] = useState<any[]>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_admin_stores') : null; if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; } } catch {} return []; });
   const [storeSubs, setStoreSubs] = useState<AdminStoreSubscriptionItem[]>([]);
   const [storeSubsLoading, setStoreSubsLoading] = useState(false);
@@ -519,19 +533,6 @@ export const AdminDashboard: React.FC = () => {
     const unsubscribed = storeSubs.filter(s => s.statusCategory === 'UNSUBSCRIBED').length;
     return { total, subscribed, exempt, unsubscribed };
   }, [storeSubs]);
-  const [selectedDeviceIds, setSelectedDeviceIds] = useState<string[]>([]);
-  const [showBatchModal, setShowBatchModal] = useState(false);
-  const [showAllocateModal, setShowAllocateModal] = useState(false);
-  const [batchCount, setBatchCount] = useState(20);
-  const [batchPrefix, setBatchPrefix] = useState('BTN');
-  const [selectedStoreId, setSelectedStoreId] = useState('');
-  const [isProcessingBatch, setIsProcessingBatch] = useState(false);
-
-  // Factory Reset Device Modal State (POST /devices/:id/factory-reset)
-  const [showFactoryResetModal, setShowFactoryResetModal] = useState(false);
-  const [resettingDevice, setResettingDevice] = useState<any | null>(null);
-  const [resetDeviceIdInput, setResetDeviceIdInput] = useState('');
-  const [isFactoryResetting, setIsFactoryResetting] = useState(false);
 
   // =========================================================================
   // 4.2.1 RBAC User Management State
@@ -562,10 +563,7 @@ export const AdminDashboard: React.FC = () => {
   // Universal body scroll lock & header submerge whenever any modal is open
   const isAnyAdminModalOpen = Boolean(
     rejectingStoreId ||
-    showBatchModal ||
-    showAllocateModal ||
-    showAddProductModal ||
-    showFactoryResetModal
+    showAddProductModal
   );
   useBodyScrollLock(isAnyAdminModalOpen);
 
@@ -746,6 +744,7 @@ export const AdminDashboard: React.FC = () => {
 
   useEffect(() => {
     fetchAdminData();
+    let lastFocusRefresh = Date.now();
 
     const handleStoreChange = () => {
       try {
@@ -753,6 +752,13 @@ export const AdminDashboard: React.FC = () => {
           window.sessionStorage.removeItem('sob_cached_admin_stores');
         }
       } catch {}
+      lastFocusRefresh = Date.now();
+      fetchAdminData();
+    };
+
+    const handleWindowFocus = () => {
+      if (Date.now() - lastFocusRefresh < 15000) return;
+      lastFocusRefresh = Date.now();
       fetchAdminData();
     };
 
@@ -765,13 +771,13 @@ export const AdminDashboard: React.FC = () => {
     window.addEventListener('store:updated', handleStoreChange);
     window.addEventListener('catalog:changed', handleStoreChange);
     window.addEventListener('storage', handleStorage);
-    window.addEventListener('focus', handleStoreChange);
+    window.addEventListener('focus', handleWindowFocus);
 
     return () => {
       window.removeEventListener('store:updated', handleStoreChange);
       window.removeEventListener('catalog:changed', handleStoreChange);
       window.removeEventListener('storage', handleStorage);
-      window.removeEventListener('focus', handleStoreChange);
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, []);
 
@@ -872,89 +878,6 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  const handleBatchGenerate = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsProcessingBatch(true);
-    try {
-      const res = await api.post('/devices/batch-generate', {
-        count: Number(batchCount),
-        prefix: batchPrefix.trim().toUpperCase(),
-      });
-      if (res.data.success) {
-        toast.success(res.data.message || 'Tạo lô nút bấm thành công');
-        setShowBatchModal(false);
-        fetchAdminData();
-      }
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Không thể tạo lô nút bấm');
-    } finally {
-      setIsProcessingBatch(false);
-    }
-  };
-
-  const handleAllocateDevices = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!selectedStoreId) {
-      toast.warning('Vui lòng chọn cửa hàng cần cấp phát nút');
-      return;
-    }
-    if (selectedDeviceIds.length === 0) {
-      toast.warning('Vui lòng tick chọn ít nhất 1 nút bấm từ kho');
-      return;
-    }
-
-    const selectedStore = allStores.find((store) => String(store.id || store.storeId) === selectedStoreId);
-    if (!selectedStore || selectedStore.status !== 'ACTIVE') {
-      toast.warning('Chỉ có thể bàn giao thiết bị cho cửa hàng đang hoạt động.');
-      return;
-    }
-
-    setIsProcessingBatch(true);
-    try {
-      const res = await api.post('/devices/allocate-store', {
-        storeId: selectedStoreId,
-        deviceIds: selectedDeviceIds,
-      });
-      if (res.data.success) {
-        setUnassignedDevices((prev) => prev.filter((d) => !selectedDeviceIds.includes(d.deviceId)));
-        setShowAllocateModal(false);
-        setSelectedDeviceIds([]);
-        toast.success(res.data.message || 'Cấp phát nút bấm thành công!');
-        fetchAdminData();
-      }
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Không thể cấp phát nút');
-    } finally {
-      setIsProcessingBatch(false);
-    }
-  };
-
-  // Factory Reset Device (POST /devices/:id/factory-reset)
-  const handleFactoryReset = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    const targetId = resetDeviceIdInput.trim();
-    if (!targetId) {
-      toast.warning('Vui lòng nhập hoặc chọn mã thiết bị cần khôi phục xuất xưởng');
-      return;
-    }
-
-    setIsFactoryResetting(true);
-    try {
-      const res = await api.post(`/devices/${encodeURIComponent(targetId)}/factory-reset`);
-      if (res.data?.success) {
-        toast.success(res.data.message || `Đã khôi phục cài đặt gốc nút [${targetId}] thành công!`);
-        setShowFactoryResetModal(false);
-        setResettingDevice(null);
-        setResetDeviceIdInput('');
-        fetchAdminData();
-      }
-    } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Không thể khôi phục cài đặt gốc thiết bị');
-    } finally {
-      setIsFactoryResetting(false);
-    }
-  };
-
   // Toggle user status
   const handleToggleUserStatus = async (userId: string) => {
     try {
@@ -981,19 +904,18 @@ export const AdminDashboard: React.FC = () => {
   const handleChangeUserRole = async (userId: string, newRole: string) => {
     try {
       const res = await api.post(`/admin/users/${encodeURIComponent(userId)}/role`, { role: newRole });
+      const resolvedRole = res.data?.data?.newEffectiveRole || newRole;
       setUsersList((prev) =>
         prev.map((u) =>
           u.id === userId || String(u.id) === String(userId) || String(u.userId) === String(userId)
-            ? { ...u, role: newRole }
+            ? { ...u, role: resolvedRole }
             : u
         )
       );
-      toast.success(res.data?.message || `Đã cập nhật vai trò người dùng thành ${newRole}`);
-      if (newRole === 'STORE_OWNER') {
-        void fetchAdminData();
-      }
+      toast.success(res.data?.message || `Đã cập nhật vai trò người dùng thành ${resolvedRole}`);
+      void fetchAdminData();
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Không thể cập nhật vai trò');
+      toast.error(err?.response?.data?.message || 'Không thể cập nhật vai trò người dùng');
     }
   };
 
@@ -1067,20 +989,6 @@ export const AdminDashboard: React.FC = () => {
     });
   }, [catalogProducts, catalogCategoryFilter, catalogSearch]);
 
-  const toggleDeviceSelect = (devId: string) => {
-    setSelectedDeviceIds((prev) =>
-      prev.includes(devId) ? prev.filter((id) => id !== devId) : [...prev, devId]
-    );
-  };
-
-  const toggleSelectAll = () => {
-    if (selectedDeviceIds.length === unassignedDevices.length) {
-      setSelectedDeviceIds([]);
-    } else {
-      setSelectedDeviceIds(unassignedDevices.map((d) => d.deviceId));
-    }
-  };
-
   return (
     <div className="admin-ui admin-dashboard text-zinc-900 dark:text-zinc-100">
       {/* ========================================================================= */}
@@ -1152,7 +1060,6 @@ export const AdminDashboard: React.FC = () => {
               <button
                 onClick={() => {
                   selectTab('DEVICES');
-                  setShowBatchModal(true);
                 }}
                 className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] text-white font-medium text-xs flex items-center gap-1.5 shadow-sm transition-all cursor-pointer"
               >
@@ -1498,401 +1405,12 @@ export const AdminDashboard: React.FC = () => {
       {/* MODULE 3: DEVICES BATCH INVENTORY & ALLOCATION (3. KHO NÚT BẤM)           */}
       {/* ========================================================================= */}
       {activeTab === 'DEVICES' && (
-        <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl shadow-2xs p-5 space-y-4">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-            <div className="flex items-center space-x-3">
-              <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 flex items-center justify-center border border-zinc-200 dark:border-zinc-700">
-                <Cpu className="w-4 h-4" />
-              </div>
-              <div>
-                <h2 className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-2">
-                  <span>Kho Nút Bấm Trống & Bàn Giao Đại Lý</span>
-                  <span className="px-2 py-0.5 rounded text-[10px]  font-medium bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border border-zinc-200 dark:border-zinc-700">
-                    {unassignedDevices.length} nút chưa phân bổ
-                  </span>
-                </h2>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                  Tạo lô thiết bị mới và phân bổ cho các cửa hàng.
-                </p>
-              </div>
-            </div>
-
-            <div className="admin-actions flex items-center gap-2">
-              <button
-                onClick={() => setShowBatchModal(true)}
-                className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-medium shadow-sm flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer"
-              >
-                <PlusCircle className="w-4 h-4" />
-                <span>Tạo Lô Nút Bấm Mới</span>
-              </button>
-              <button
-                disabled={selectedDeviceIds.length === 0}
-                onClick={() => setShowAllocateModal(true)}
-                className={`px-3.5 py-2 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-all ${
-                  selectedDeviceIds.length > 0
-                    ? 'bg-[#0E6BA8] hover:bg-[#0B5586] text-white shadow-sm active:scale-[0.97] cursor-pointer'
-                    : 'bg-slate-100 border border-slate-200 text-slate-600 cursor-not-allowed dark:bg-zinc-800/40 dark:border-zinc-800 dark:text-zinc-600'
-                }`}
-              >
-                <Send className="w-4 h-4" />
-                <span>Cấp Phát Cho Cửa Hàng ({selectedDeviceIds.length})</span>
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setResettingDevice(null);
-                  setResetDeviceIdInput('');
-                  setShowFactoryResetModal(true);
-                }}
-                className="px-3.5 py-2 rounded-lg bg-rose-50 hover:bg-rose-100 text-rose-700 dark:bg-rose-950/40 dark:hover:bg-rose-900/60 dark:text-rose-300 border border-rose-200 dark:border-rose-800 text-xs font-medium flex items-center gap-1.5 active:scale-[0.97] transition-all cursor-pointer shadow-xs"
-              >
-                <RotateCcw className="w-3.5 h-3.5" />
-                <span>Khôi phục cài đặt gốc</span>
-              </button>
-            </div>
-          </div>
-
-          <p className="text-xs text-zinc-600 dark:text-zinc-400">Danh sách hiển thị tối đa 50 thiết bị. Tổng trong kho: {unassignedDevices.length}.</p>
-          {unassignedDevices.length === 0 ? (
-            <motion.div
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              transition={{ duration: 0.35, ease: 'easeOut' }}
-              className="p-12 border border-dashed border-zinc-200 dark:border-zinc-800 rounded-xl text-center space-y-2 bg-zinc-50/50 dark:bg-zinc-900/50"
-            >
-              <Boxes className="w-8 h-8 text-zinc-600 mx-auto" />
-              <p className="text-xs font-semibold text-zinc-800 dark:text-zinc-200">Kho nút tổng đang trống</p>
-              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
-                Nhấn nút <strong className="text-zinc-700 dark:text-zinc-300">"Tạo Lô Nút Bấm Mới"</strong> để nạp mã thiết bị vào hệ thống.
-              </p>
-            </motion.div>
-          ) : (
-            <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg">
-              <table className="w-full text-left text-xs">
-                <thead className="bg-zinc-50 dark:bg-zinc-800/60 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500 dark:text-zinc-400 font-semibold    text-[10px]">
-                  <tr>
-                    <th scope="col" className="py-2.5 px-3 w-10">
-                      <button aria-label="Chọn tất cả thiết bị" onClick={toggleSelectAll} className="flex items-center cursor-pointer">
-                        {selectedDeviceIds.length === unassignedDevices.length && unassignedDevices.length > 0 ? (
-                          <CheckSquare className="w-4 h-4 text-[#0E6BA8]" />
-                        ) : (
-                          <Square className="w-4 h-4 text-zinc-600" />
-                        )}
-                      </button>
-                    </th>
-                    <th scope="col" className="py-2.5 px-3">Mã thiết bị</th>
-                    <th scope="col" className="py-2.5 px-3">Số sê-ri</th>
-                    <th scope="col" className="py-2.5 px-3">Mã ghép nối</th>
-                    <th scope="col" className="py-2.5 px-3">Tên kết nối</th>
-                    <th scope="col" className="py-2.5 px-3">Trạng thái</th>
-                    <th scope="col" className="py-2.5 px-3 text-right">Thao tác</th>
-                  </tr>
-                </thead>
-                <motion.tbody
-                  variants={tableBodyVariants}
-                  initial="hidden"
-                  animate="visible"
-                  className="divide-y divide-zinc-100 dark:divide-zinc-800/60 "
-                >
-                  {unassignedDevices.slice(0, 50).map((dev) => {
-                    const isSelected = selectedDeviceIds.includes(dev.deviceId);
-                    return (
-                      <motion.tr
-                        variants={tableRowVariants}
-                        key={dev.id}
-                        onClick={() => toggleDeviceSelect(dev.deviceId)}
-                        className={`cursor-pointer transition-colors ${
-                          isSelected
-                            ? 'bg-zinc-100/70 dark:bg-zinc-800/60'
-                            : 'hover:bg-zinc-50 dark:hover:bg-zinc-850/40'
-                        }`}
-                      >
-                        <td className="py-2.5 px-3" onClick={(e) => e.stopPropagation()}>
-                          <button aria-label={`Chọn thiết bị ${dev.deviceId}`} aria-pressed={isSelected} onClick={() => toggleDeviceSelect(dev.deviceId)} className="cursor-pointer">
-                            {isSelected ? (
-                              <CheckSquare className="w-4 h-4 text-[#0E6BA8]" />
-                            ) : (
-                              <Square className="w-4 h-4 text-zinc-600" />
-                            )}
-                          </button>
-                        </td>
-                        <td className="py-2.5 px-3 font-semibold text-zinc-900 dark:text-white">
-                          <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-xs">
-                            {dev.deviceId}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-zinc-500 dark:text-zinc-400 text-[11px]">{dev.serialNumber}</td>
-                        <td className="py-2.5 px-3 text-zinc-800 dark:text-zinc-200 font-bold">{dev.pairingCode || '-'}</td>
-                        <td className="py-2.5 px-3 text-zinc-700 dark:text-zinc-300">
-                          <span className="text-[11px] font-sans text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 px-2 py-0.5 rounded">
-                            SOB-{dev.deviceId}
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3">
-                          <span className="px-2 py-0.5 rounded-full text-[10px]  font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-700 dark:text-amber-400 border border-amber-200 dark:border-amber-800">
-                            Trong Kho Trống
-                          </span>
-                        </td>
-                        <td className="py-2.5 px-3 text-right" onClick={(e) => e.stopPropagation()}>
-                          <button
-                            type="button"
-                            onClick={() => {
-                              setResettingDevice(dev);
-                              setResetDeviceIdInput(dev.deviceId);
-                              setShowFactoryResetModal(true);
-                            }}
-                            className="px-2 py-1 rounded text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 border border-rose-200/60 dark:border-rose-900/50 transition-colors inline-flex items-center gap-1 cursor-pointer"
-                            title="Khôi phục xuất xưởng"
-                          >
-                            <RotateCcw className="w-3 h-3" />
-                            <span>Khôi phục cài đặt gốc</span>
-                          </button>
-                        </td>
-                      </motion.tr>
-                    );
-                  })}
-                </motion.tbody>
-              </table>
-            </div>
-          )}
-
-          {/* Danh sách nút bấm đã cấp phát cho các cửa hàng */}
-          <div className="pt-6 border-t border-zinc-200 dark:border-zinc-800 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div>
-                <h3 className="text-sm font-semibold text-zinc-900 dark:text-white flex items-center gap-2">
-                  <span>Nút Bấm Đã Cấp Cho Cửa Hàng</span>
-                  <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-sky-50 dark:bg-sky-950/40 text-[#0E6BA8] dark:text-sky-300 border border-sky-200 dark:border-sky-800">
-                    {allDevices.filter((d) => Boolean(d?.storeId)).length} nút
-                  </span>
-                </h3>
-                <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
-                  Theo dõi các nút đang nằm tại từng đại lý/cửa hàng và khôi phục về kho tổng khi cần.
-                </p>
-              </div>
-              <div className="flex flex-wrap items-center gap-2">
-                <input
-                  type="text"
-                  value={deviceSearchQuery}
-                  onChange={(e) => setDeviceSearchQuery(e.target.value)}
-                  placeholder="Tìm mã nút, cửa hàng..."
-                  className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#0E6BA8]"
-                />
-                <select
-                  value={deviceStoreFilter}
-                  onChange={(e) => setDeviceStoreFilter(e.target.value)}
-                  aria-label="Lọc nút theo cửa hàng"
-                  className="px-3 py-1.5 rounded-lg text-xs border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-[#0E6BA8] max-w-md"
-                >
-                  <option value="ALL">Tất cả cửa hàng ({allDevices.filter((d) => Boolean(d?.storeId)).length} nút)</option>
-                  {allStores.map((store) => {
-                    const sid = String(store.id || store.storeId);
-                    const storeDevs = allDevices.filter((d) => String(d?.storeId || '') === sid);
-                    const codesPreview = storeDevs.slice(0, 3).map((d) => d.deviceId).join(', ');
-                    const suffix = storeDevs.length > 0
-                      ? ` — ${storeDevs.length} nút (${codesPreview}${storeDevs.length > 3 ? ', ...' : ''})`
-                      : ' — 0 nút';
-                    return (
-                      <option key={sid} value={sid}>
-                        {store.name || store.storeName} ({store.code || store.storeCode || `#${sid}`}){suffix}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-            </div>
-
-            {(() => {
-              const storeBuckets = new Map<string, { storeId: string; storeName: string; storeCode: string; devices: any[] }>();
-              for (const d of allDevices) {
-                if (!d?.storeId) continue;
-                const sid = String(d.storeId);
-                const matchedStore = allStores.find((s) => String(s.id || s.storeId) === sid);
-                const storeName = d.store?.storeName || d.store?.name || matchedStore?.name || `Cửa hàng #${sid}`;
-                const storeCode = matchedStore?.code || matchedStore?.storeCode || '';
-                if (!storeBuckets.has(sid)) {
-                  storeBuckets.set(sid, { storeId: sid, storeName, storeCode, devices: [] });
-                }
-                storeBuckets.get(sid)!.devices.push(d);
-              }
-              const buckets = Array.from(storeBuckets.values());
-              if (buckets.length === 0) return null;
-              return (
-                <div className="flex flex-wrap gap-1.5">
-                  {buckets.map((b) => {
-                    const isActive = deviceStoreFilter === b.storeId;
-                    const availableCount = b.devices.filter((d) => !d.customerId).length;
-                    return (
-                      <button
-                        key={b.storeId}
-                        type="button"
-                        onClick={() => setDeviceStoreFilter(isActive ? 'ALL' : b.storeId)}
-                        title={`${b.storeName} (${b.storeCode || `#${b.storeId}`}): ${b.devices.map((d) => d.deviceId).join(', ')}`}
-                        className={`inline-flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[11px] transition-all cursor-pointer ${
-                          isActive
-                            ? 'border-[#0E6BA8] bg-sky-50 text-[#0E6BA8] dark:bg-sky-950/40 dark:text-sky-300 font-semibold'
-                            : 'border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-900/50 text-zinc-700 dark:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
-                        }`}
-                      >
-                        <span className="max-w-[180px] truncate font-medium">{b.storeName}</span>
-                        <span className="px-1.5 py-0.2 rounded-full text-[10px] font-semibold bg-sky-100 dark:bg-sky-950/60 text-[#0E6BA8] dark:text-sky-300">
-                          {b.devices.length} nút
-                        </span>
-                        <span className="text-[10px] text-zinc-400">({availableCount} trống)</span>
-                      </button>
-                    );
-                  })}
-                </div>
-              );
-            })()}
-
-            {(() => {
-              const allocatedList = allDevices
-                .filter((d) => Boolean(d?.storeId))
-                .filter((d) => deviceStoreFilter === 'ALL' || String(d.storeId) === deviceStoreFilter)
-                .filter((d) => {
-                  const q = deviceSearchQuery.trim().toLowerCase();
-                  if (!q) return true;
-                  const matchedStore = allStores.find((s) => String(s.id || s.storeId) === String(d.storeId));
-                  const storeLabel = `${d.store?.storeName || d.store?.name || matchedStore?.name || ''} ${matchedStore?.code || ''}`.toLowerCase();
-                  return (
-                    String(d.deviceId || '').toLowerCase().includes(q) ||
-                    String(d.buttonCode || '').toLowerCase().includes(q) ||
-                    String(d.serialNumber || '').toLowerCase().includes(q) ||
-                    storeLabel.includes(q)
-                  );
-                });
-
-              if (allocatedList.length === 0) {
-                return (
-                  <div className="rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800 py-8 text-center text-xs text-zinc-500">
-                    Chưa có nút bấm nào phù hợp bộ lọc đang ở cửa hàng.
-                  </div>
-                );
-              }
-
-              const visibleAllocated = allocatedList.slice(0, 100);
-              const selectableIds = visibleAllocated.filter((d) => !d.customerId).map((d) => d.deviceId);
-              const allAllocatedSelected = selectableIds.length > 0 && selectableIds.every((id) => selectedDeviceIds.includes(id));
-
-              return (
-                <div className="overflow-x-auto rounded-xl border border-zinc-200 dark:border-zinc-800">
-                  <table className="w-full text-left text-xs">
-                    <thead className="bg-zinc-50 dark:bg-zinc-900/60 text-zinc-500 dark:text-zinc-400 border-b border-zinc-200 dark:border-zinc-800">
-                      <tr>
-                        <th scope="col" className="py-2.5 px-3 w-10">
-                          <button
-                            type="button"
-                            aria-label="Chọn tất cả nút chưa gắn khách"
-                            disabled={selectableIds.length === 0}
-                            onClick={() => {
-                              if (allAllocatedSelected) {
-                                setSelectedDeviceIds((prev) => prev.filter((id) => !selectableIds.includes(id)));
-                              } else {
-                                setSelectedDeviceIds((prev) => Array.from(new Set([...prev, ...selectableIds])));
-                              }
-                            }}
-                            className="flex items-center cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            {allAllocatedSelected ? (
-                              <CheckSquare className="w-4 h-4 text-[#0E6BA8]" />
-                            ) : (
-                              <Square className="w-4 h-4 text-zinc-500" />
-                            )}
-                          </button>
-                        </th>
-                        <th className="py-2.5 px-3 font-medium">Mã Thiết Bị</th>
-                        <th className="py-2.5 px-3 font-medium">Cửa Hàng Đang Giữ</th>
-                        <th className="py-2.5 px-3 font-medium">Khách Hàng</th>
-                        <th className="py-2.5 px-3 font-medium">Trạng Thái</th>
-                        <th className="py-2.5 px-3 font-medium text-right">Thao Tác</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
-                      {visibleAllocated.map((dev) => {
-                        const matchedStore = allStores.find((s) => String(s.id || s.storeId) === String(dev.storeId));
-                        const storeName = dev.store?.storeName || dev.store?.name || matchedStore?.name || `Cửa hàng #${dev.storeId}`;
-                        const storeCode = matchedStore?.code || matchedStore?.storeCode || '';
-                        const canSelect = !dev.customerId;
-                        const isSelected = selectedDeviceIds.includes(dev.deviceId);
-                        return (
-                          <tr
-                            key={dev.id || dev.deviceId}
-                            className={`transition-colors ${isSelected ? 'bg-sky-50/60 dark:bg-sky-950/20' : 'hover:bg-zinc-50 dark:hover:bg-zinc-850/40'}`}
-                          >
-                            <td className="py-2.5 px-3">
-                              <button
-                                type="button"
-                                disabled={!canSelect}
-                                onClick={() => toggleDeviceSelect(dev.deviceId)}
-                                aria-label={`Chọn nút ${dev.deviceId}`}
-                                title={canSelect ? 'Tick chọn để giao cho cửa hàng' : 'Nút đã gắn khách hàng, không thể giao lại'}
-                                className="flex items-center cursor-pointer disabled:opacity-35 disabled:cursor-not-allowed"
-                              >
-                                {isSelected ? (
-                                  <CheckSquare className="w-4 h-4 text-[#0E6BA8]" />
-                                ) : (
-                                  <Square className="w-4 h-4 text-zinc-500" />
-                                )}
-                              </button>
-                            </td>
-                            <td className="py-2.5 px-3 font-semibold text-zinc-900 dark:text-white">
-                              <span className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 text-xs">
-                                {dev.deviceId}
-                              </span>
-                              {dev.buttonCode && (
-                                <div className="mt-1 text-[10px] font-mono font-normal text-zinc-500 dark:text-zinc-400">
-                                  {dev.buttonCode}
-                                </div>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3 text-zinc-800 dark:text-zinc-200">
-                              <span className="font-medium">{storeName}</span>
-                              {storeCode && (
-                                <span className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-500 dark:text-zinc-400">
-                                  {storeCode}
-                                </span>
-                              )}
-                            </td>
-                            <td className="py-2.5 px-3 text-zinc-600 dark:text-zinc-400">
-                              {dev.customer?.fullName || (dev.customerId ? `Khách #${dev.customerId}` : 'Chưa gắn khách')}
-                            </td>
-                            <td className="py-2.5 px-3">
-                              <span
-                                className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${
-                                  dev.status === 'ACTIVE'
-                                    ? 'bg-emerald-50 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-400 border-emerald-200 dark:border-emerald-800'
-                                    : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700'
-                                }`}
-                              >
-                                {dev.status === 'ACTIVE' ? 'Đang hoạt động' : dev.status === 'INACTIVE' ? 'Chưa kích hoạt' : dev.status || '—'}
-                              </span>
-                            </td>
-                            <td className="py-2.5 px-3 text-right">
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setResettingDevice(dev);
-                                  setResetDeviceIdInput(dev.deviceId);
-                                  setShowFactoryResetModal(true);
-                                }}
-                                className="px-2 py-1 rounded text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950/50 border border-rose-200/60 dark:border-rose-900/50 transition-colors inline-flex items-center gap-1 cursor-pointer"
-                                title="Khôi phục về kho tổng"
-                              >
-                                <RotateCcw className="w-3 h-3" />
-                                <span>Khôi phục về kho</span>
-                              </button>
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
-              );
-            })()}
-          </div>
-        </div>
+        <PlatformDevicesWorkspace
+          unassignedDevices={unassignedDevices}
+          allDevices={allDevices}
+          stores={allStores}
+          onRefresh={fetchAdminData}
+        />
       )}
 
       {activeTab === 'WARRANTY' && (
@@ -1942,8 +1460,9 @@ export const AdminDashboard: React.FC = () => {
               >
                 <option value="ALL">Tất cả vai trò</option>
                 <option value="SUPER_ADMIN">Quản trị viên cấp cao</option>
+                <option value="SYSTEM_ADMIN">Quản trị hệ thống</option>
                 <option value="ADMIN">Quản trị viên</option>
-                <option value="SYSTEM_STAFF">Nhân viên hệ thống</option>
+                <option value="SYSTEM_STAFF">Kỹ thuật hệ thống (SYSTEM_STAFF)</option>
                 <option value="STORE_OWNER">Chủ cửa hàng</option>
                 <option value="CUSTOMER">Khách hàng</option>
               </select>
@@ -1999,8 +1518,9 @@ export const AdminDashboard: React.FC = () => {
                         className="px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer text-zinc-800 dark:text-zinc-200"
                       >
                         <option value="SUPER_ADMIN">Quản trị viên cấp cao</option>
+                        <option value="SYSTEM_ADMIN">Quản trị hệ thống</option>
                         <option value="ADMIN">Quản trị viên</option>
-                        <option value="SYSTEM_STAFF">Nhân viên hệ thống</option>
+                        <option value="SYSTEM_STAFF">Kỹ thuật hệ thống</option>
                         <option value="STORE_OWNER">Chủ cửa hàng</option>
                         <option value="CUSTOMER">Khách hàng</option>
                       </select>
@@ -2856,184 +2376,7 @@ export const AdminDashboard: React.FC = () => {
         document.body
       )}
 
-      {/* 2. Batch Generate Modal */}
-      {createPortal(
-        <AnimatePresence>
-          {showBatchModal && (
-            <div className="admin-ui admin-modal fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
-              <motion.div
-                variants={modalBackdropVariants}
-                initial="hidden"
-                animate="visible"
-                exit="exit"
-                onClick={() => setShowBatchModal(false)}
-                className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm cursor-pointer"
-              />
-              <motion.div
-                variants={modalDialogVariants}
-                initial="hidden"
-                animate="visible"
-                exit="exit"
-                className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl max-w-md w-full p-5 shadow-2xl border border-zinc-200 dark:border-zinc-800"
-              >
-                <div className="flex items-center space-x-3 mb-3">
-                  <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white flex items-center justify-center">
-                    <PlusCircle className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Tạo Lô Nút Bấm Trống Mới</h3>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400">Tạo mã thiết bị và mã ghép nối cho lô mới.</p>
-                  </div>
-                </div>
-
-                <form onSubmit={handleBatchGenerate} className="space-y-3 mt-3">
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Số lượng nút cần tạo</label>
-                    <input
-                      type="number"
-                      min={1}
-                      max={500}
-                      required
-                      value={batchCount}
-                      onChange={(e) => setBatchCount(Number(e.target.value))}
-                      className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white  focus:outline-none focus:border-zinc-900"
-                    />
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Tiền tố mã định danh (Prefix)</label>
-                    <input
-                      type="text"
-                      required
-                      value={batchPrefix}
-                      onChange={(e) => setBatchPrefix(e.target.value.toUpperCase())}
-                      placeholder="BTN"
-                      className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white  font-medium focus:outline-none focus:border-zinc-900"
-                    />
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button
-                      type="button"
-                      disabled={isProcessingBatch}
-                      onClick={() => setShowBatchModal(false)}
-                      className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-                    >
-                      Hủy
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isProcessingBatch}
-                      className="px-4 py-1.5 text-xs font-medium text-white bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
-                    >
-                      {isProcessingBatch ? 'Đang tạo...' : 'Xác Nhận Tạo Lô Nút'}
-                    </button>
-                  </div>
-                </form>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* 3. Allocate to Store Modal */}
-      {createPortal(
-        <AnimatePresence>
-          {showAllocateModal && (
-            <div className="admin-ui admin-modal fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
-              <motion.div
-                variants={modalBackdropVariants}
-                initial="hidden"
-                animate="visible"
-                exit="exit"
-                onClick={() => setShowAllocateModal(false)}
-                className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm cursor-pointer"
-              />
-              <motion.div
-                variants={modalDialogVariants}
-                initial="hidden"
-                animate="visible"
-                exit="exit"
-                className="relative z-10 bg-white dark:bg-zinc-900 rounded-xl max-w-lg w-full p-5 shadow-2xl border border-zinc-200 dark:border-zinc-800"
-              >
-                <div className="flex items-center space-x-3 mb-3">
-                  <div className="w-8 h-8 rounded-lg bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-white flex items-center justify-center">
-                    <Send className="w-4 h-4" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Cấp Phát Nút Cho Cửa Hàng</h3>
-                    <p className="text-xs text-zinc-500 dark:text-zinc-400">
-                      Ủy quyền phân phối <strong>{selectedDeviceIds.length}</strong> nút bấm đã chọn
-                    </p>
-                  </div>
-                </div>
-
-                <form onSubmit={handleAllocateDevices} className="space-y-3 mt-3">
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                      Chọn Cửa Hàng nhận bàn giao nút
-                    </label>
-                    <select
-                      required
-                      value={selectedStoreId}
-                      onChange={(e) => setSelectedStoreId(e.target.value)}
-                      className="w-full px-3 py-1.5 text-xs border border-zinc-200 dark:border-zinc-800 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-white focus:outline-none focus:border-zinc-900"
-                    >
-                      <option value="">-- Chọn Cửa Hàng --</option>
-                      {allStores.filter((store) => store.status === 'ACTIVE').map((store) => {
-                        const sId = store.id || store.storeId;
-                        return (
-                          <option key={sId} value={sId}>
-                            {store.name} ({store.code}) - {store.ownerName || store.owner?.fullName || 'Chủ shop'}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                      Danh sách mã nút bấm sẽ cấp ({selectedDeviceIds.length} nút)
-                    </label>
-                    <div className="max-h-36 overflow-y-auto p-2 bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded-lg flex flex-wrap gap-1.5  text-[11px]">
-                      {selectedDeviceIds.map((id) => (
-                        <span
-                          key={id}
-                          className="px-2 py-0.5 rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-800 dark:text-zinc-200 border border-zinc-200 dark:border-zinc-700 font-medium"
-                        >
-                          {id}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-
-                  <div className="flex justify-end gap-2 pt-2">
-                    <button
-                      type="button"
-                      disabled={isProcessingBatch}
-                      onClick={() => setShowAllocateModal(false)}
-                      className="px-3.5 py-1.5 text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-                    >
-                      Hủy
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isProcessingBatch}
-                      className="px-4 py-1.5 text-xs font-medium text-white bg-[#0E6BA8] hover:bg-[#0B5586] active:scale-[0.97] rounded-lg transition-all cursor-pointer shadow-sm"
-                    >
-                      {isProcessingBatch ? 'Đang bàn giao...' : 'Xác Nhận Bàn Giao'}
-                    </button>
-                  </div>
-                </form>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>,
-        document.body
-      )}
-
-      {/* 4. Add Master Product Modal */}
+      {/* 2. Add Master Product Modal */}
       {createPortal(
         <AnimatePresence>
           {showAddProductModal && (
@@ -3169,103 +2512,6 @@ export const AdminDashboard: React.FC = () => {
         document.body
       )}
 
-      {/* 5. Factory Reset Device Modal (POST /devices/:id/factory-reset) */}
-      {createPortal(
-        <AnimatePresence>
-          {showFactoryResetModal && (
-            <div className="admin-ui admin-modal fixed inset-0 z-[100] flex items-center justify-center p-4 overscroll-contain responsive-modal overflow-y-auto">
-              <motion.div
-                variants={modalBackdropVariants}
-                initial="hidden"
-                animate="visible"
-                exit="exit"
-                onClick={() => !isFactoryResetting && setShowFactoryResetModal(false)}
-                className="fixed inset-0 bg-slate-950/65 backdrop-blur-sm cursor-pointer"
-              />
-              <motion.div
-                variants={modalDialogVariants}
-                initial="hidden"
-                animate="visible"
-                exit="exit"
-                className="relative z-10 bg-white dark:bg-zinc-900 rounded-2xl max-w-md w-full p-6 shadow-2xl border border-zinc-200 dark:border-zinc-800 space-y-4"
-              >
-                <div className="flex items-center space-x-3 pb-3 border-b border-zinc-100 dark:border-zinc-800">
-                  <div className="w-10 h-10 rounded-xl bg-rose-50 dark:bg-rose-950/60 text-rose-600 dark:text-rose-400 flex items-center justify-center border border-rose-200 dark:border-rose-800 shrink-0">
-                    <RotateCcw className="w-5 h-5 stroke-[2]" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-slate-900 dark:text-white">
-                      Khôi phục cài đặt gốc
-                    </h3>
-                    <p className="text-xs text-slate-500 dark:text-zinc-400">
-                      Thu hồi thiết bị về trạng thái xuất xưởng
-                    </p>
-                  </div>
-                </div>
-
-                <form onSubmit={handleFactoryReset} className="space-y-3.5">
-                  <div>
-                    <label className="block text-xs font-semibold text-slate-700 dark:text-zinc-300 mb-1">
-                      Mã thiết bị
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="VD: BTN-1891001 hoặc SOB-WHITE-PRO-01"
-                      value={resetDeviceIdInput}
-                      onChange={(e) => setResetDeviceIdInput(e.target.value.toUpperCase())}
-                      className="w-full px-3 py-2 text-xs  font-bold border border-zinc-200 dark:border-zinc-700 rounded-lg bg-zinc-50 dark:bg-zinc-950 text-slate-900 dark:text-white focus:outline-none focus:border-[#0E6BA8]"
-                    />
-                  </div>
-
-                  {/* Safety Warning Card */}
-                  <div className="p-3 bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200/80 dark:border-amber-800/60 rounded-xl space-y-1.5 text-xs text-amber-900 dark:text-amber-200">
-                    <div className="font-semibold flex items-center gap-1.5 text-[11px] text-amber-800 dark:text-amber-300">
-                      <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
-                      <span>Tác vụ xóa cấu hình phần cứng:</span>
-                    </div>
-                    <ul className="text-[11px] list-disc list-inside space-y-0.5 text-amber-800/90 dark:text-amber-300/80 pl-1">
-                      <li>Gỡ liên kết với khách hàng đang sở hữu thiết bị.</li>
-                      <li>Đưa thiết bị về trạng thái sẵn sàng để phân phối lại.</li>
-                      <li>Tạo lại mã ghép nối và mã QR kích hoạt.</li>
-                      <li>Giữ nguyên định danh và khóa bảo mật phần cứng.</li>
-                    </ul>
-                  </div>
-
-                  <div className="flex items-center justify-end gap-2.5 pt-2">
-                    <button
-                      type="button"
-                      disabled={isFactoryResetting}
-                      onClick={() => setShowFactoryResetModal(false)}
-                      className="px-4 py-2 text-xs font-medium text-slate-600 dark:text-zinc-400 hover:bg-slate-100 dark:hover:bg-zinc-800 rounded-lg transition-colors cursor-pointer"
-                    >
-                      Hủy Bỏ
-                    </button>
-                    <button
-                      type="submit"
-                      disabled={isFactoryResetting || !resetDeviceIdInput.trim()}
-                      className="px-4.5 py-2 text-xs font-semibold text-white bg-rose-600 hover:bg-rose-700 active:scale-[0.98] rounded-lg transition-all cursor-pointer shadow-xs disabled:opacity-50 flex items-center gap-1.5"
-                    >
-                      {isFactoryResetting ? (
-                        <>
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                          <span>Đang khôi phục...</span>
-                        </>
-                      ) : (
-                        <>
-                          <RotateCcw className="w-3.5 h-3.5" />
-                          <span>Xác nhận khôi phục</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </form>
-              </motion.div>
-            </div>
-          )}
-        </AnimatePresence>,
-        document.body
-      )}
       {editingPlan && <EditStorePlanModal key={String(editingPlan.planId || editingPlan.id)} plan={editingPlan} onClose={() => setEditingPlan(null)} onSaved={changes => {
         setSubscriptionPlans(items => items.map(item => String(item.planId || item.id) === String(editingPlan.planId || editingPlan.id) ? { ...item, ...changes } : item));
         setEditingPlan(null);

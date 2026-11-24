@@ -1,4 +1,3 @@
-import { StoreProfileNavigation } from '../components/store/StoreProfileNavigation';
 import React, { useEffect, useRef, useState } from 'react';
 import ReactDOM from 'react-dom';
 import { Link, useLocation } from 'react-router-dom';
@@ -12,22 +11,20 @@ import {
   Menu,
   Package,
   ReceiptText,
+  RotateCcw,
   ShieldCheck,
   ShoppingBag,
   ShoppingCart,
   Smartphone,
   Store,
   UserRound,
-  Wallet,
-  Truck,
+  Wrench,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useSidebar } from '../context/SidebarContext';
-import { CustomerAccountNavigation, CUSTOMER_ACCOUNT_LINKS } from '../components/customer/CustomerAccountNavigation';
 import { StoreFinanceNavigation } from '../components/store/StoreFinanceNavigation';
 import { StoreRevenueNavigation } from '../components/store/StoreRevenueNavigation';
 import { AdminPackageNavigation } from '../components/admin/AdminPackageNavigation';
-import { AdminAccountNavigation } from '../components/admin/AdminAccountNavigation';
 import { AdminRevenueNavigation } from '../components/admin/AdminRevenueNavigation';
 
 type NavigationItem = {
@@ -65,6 +62,14 @@ const adminLinks: NavigationItem[] = [
   { to: '/admin/profile', label: 'Tài khoản', icon: UserRound },
 ];
 
+const systemStaffLinks: NavigationItem[] = [
+  { to: '/system-staff/devices', label: 'Kho & cấp phát nút', icon: Cpu },
+  { to: '/system-staff/warranty', label: 'Bảo hành thiết bị', icon: ShieldCheck },
+  { to: '/system-staff/returns', label: 'Nhận nút trả', icon: RotateCcw },
+  { to: '/system-staff/templates', label: 'Mẫu cấu hình nút', icon: Layers },
+  { to: '/system-staff/profile', label: 'Tài khoản', icon: UserRound },
+];
+
 export const Sidebar: React.FC = () => {
   const { user } = useAuth();
   const location = useLocation();
@@ -77,25 +82,41 @@ export const Sidebar: React.FC = () => {
   }, [location.pathname, location.search, location.hash]);
 
   const isCustomer = user?.role === 'CUSTOMER';
-  const accountTab = new URLSearchParams(location.search).get('tab') || 'INFO';
-  const selectedAccountTab = location.pathname === '/customer/become-store-owner' ? 'BECOME_STORE_OWNER' : location.pathname === '/customer/banking' ? 'BANKING' : location.pathname === '/customer/verification' ? 'VERIFICATION' : accountTab;
   const isAdmin = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user?.role || '');
+  const isSystemStaff = user?.role === 'SYSTEM_STAFF';
+  const isStoreOwner = user?.role === 'STORE_OWNER';
   const links = isCustomer
     ? customerLinks
     : isAdmin
       ? adminLinks
-      : [
-          ...storeLinks.filter(link => !(user?.role === 'STORE_OWNER' && link.to === '/store/rentals')),
-          ...(['STORE_OWNER', 'STORE_MANAGER', 'STAFF_ORDER'].includes(user?.role || '') ? [{ to: '/driver/deliveries', label: 'Giao hàng', icon: Truck }] : []),
-          ...(['STORE_OWNER', 'STORE_MANAGER'].includes(user?.role || '')
-            ? [{ to: '/store/finance', label: 'Gói & ngân hàng', icon: Landmark }]
-            : []),
-          { to: '/store/profile', label: 'Hồ sơ cửa hàng', icon: Store },
-        ];
-  const title = isCustomer ? 'Khách hàng' : isAdmin ? 'Quản trị hệ thống' : user?.store?.name || 'Đại lý Nước & Gas Gia Đình';
-  const subtitle = isCustomer ? 'Không gian mua sắm' : isAdmin ? 'Trung tâm điều hành' : 'Edge Broker Connected';
-  const icon = isCustomer ? UserRound : isAdmin ? ShieldCheck : Store;
+      : isSystemStaff
+        ? systemStaffLinks
+        : isStoreOwner
+          ? [
+              ...storeLinks.filter(link => link.to !== '/store/rentals'),
+              { to: '/store/finance', label: 'Gói & ngân hàng', icon: Landmark },
+              { to: '/store/profile', label: 'Tài khoản', icon: UserRound },
+            ]
+          : [];
+  const title = isCustomer
+    ? 'Khách hàng'
+    : isAdmin
+      ? 'Quản trị hệ thống'
+      : isSystemStaff
+        ? 'Kỹ thuật hệ thống'
+        : user?.store?.name || 'Cửa hàng';
+  const subtitle = isCustomer
+    ? 'Không gian mua sắm'
+    : isAdmin
+      ? 'Trung tâm điều hành'
+      : isSystemStaff
+        ? 'Kho nút & bảo hành'
+        : 'Edge Broker Connected';
+  const icon = isCustomer ? UserRound : isSystemStaff ? Wrench : isAdmin ? ShieldCheck : Store;
   const HeaderIcon = icon;
+
+  const isAccountPath = (path: string) =>
+    ['/customer/profile', '/store/profile', '/system-staff/profile', '/admin/profile'].includes(path);
 
   const isLinkActive = (path: string) => {
     if (path === '/shop') return location.pathname === '/shop';
@@ -108,8 +129,11 @@ export const Sidebar: React.FC = () => {
       return location.pathname === pathname && new URLSearchParams(location.search).get('section') === new URLSearchParams(search).get('section');
     }
     if (search) return location.pathname === pathname && location.search === `?${search}`;
-    if (path.includes('profile')) {
-      return location.pathname === pathname && (pathname === '/customer/profile' || !location.search || location.search === '?tab=INFO');
+    if (path === '/customer/profile') {
+      return ['/customer/profile', '/profile', '/customer/verification', '/customer/banking', '/customer/become-store-owner'].includes(location.pathname);
+    }
+    if (isAccountPath(path)) {
+      return location.pathname === pathname || location.pathname === '/profile';
     }
     return location.pathname === path || location.pathname.startsWith(`${path}/`);
   };
@@ -124,11 +148,11 @@ export const Sidebar: React.FC = () => {
     }}>
       <summary className="flex min-h-12 cursor-pointer list-none items-center gap-3 px-4 py-3 text-sm font-semibold text-zinc-800 dark:text-zinc-100 [&::-webkit-details-marker]:hidden">
         <Menu size={20} className="shrink-0" />
-        <span className="min-w-0 break-words">{isAdmin && location.pathname === '/admin/payouts' ? 'Theo dõi chi trả' : isAdmin && location.pathname === '/admin/dashboard' && ['PLANS', 'RENTALS'].includes(new URLSearchParams(location.search).get('section') || '') ? 'Gói nút bấm' : !isCustomer && !isAdmin && ['/store/finance', '/store/service-plans'].includes(location.pathname) ? 'Gói & ngân hàng' : isCustomer && ['/customer/profile', '/profile', '/customer/verification', '/customer/banking', '/customer/become-store-owner'].includes(location.pathname) ? CUSTOMER_ACCOUNT_LINKS.find(item => item.tab === selectedAccountTab)?.label || 'Tài khoản' : links.find((item) => isLinkActive(item.to))?.label || 'Menu điều hướng'}</span>
+        <span className="min-w-0 break-words">{isAdmin && location.pathname === '/admin/payouts' ? 'Theo dõi chi trả' : isAdmin && location.pathname === '/admin/dashboard' && ['PLANS', 'RENTALS'].includes(new URLSearchParams(location.search).get('section') || '') ? 'Gói nút bấm' : !isCustomer && !isAdmin && ['/store/finance', '/store/service-plans'].includes(location.pathname) ? 'Gói & ngân hàng' : links.find((item) => isLinkActive(item.to))?.label || 'Menu điều hướng'}</span>
         <span className="ml-auto shrink-0 text-xs text-zinc-500">Menu</span>
       </summary>
       <nav aria-label="Điều hướng trên điện thoại" className="grid gap-1 px-3 pb-3 sm:grid-cols-2">
-        {links.map(({ to, label, icon: Icon }) => to === '/admin/dashboard?section=ANALYTICS' ? <AdminRevenueNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/admin/profile' ? <AdminAccountNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/admin/dashboard?section=RENTALS' ? <AdminPackageNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/analytics' ? <StoreRevenueNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/profile' ? <StoreProfileNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/finance' ? <StoreFinanceNavigation key={to} mobile canRegister={user?.role === 'STORE_OWNER'} onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : isCustomer && to === '/customer/profile' ? <CustomerAccountNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : (
+        {links.map(({ to, label, icon: Icon }) => to === '/admin/dashboard?section=ANALYTICS' ? <AdminRevenueNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/admin/dashboard?section=RENTALS' ? <AdminPackageNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/analytics' ? <StoreRevenueNavigation key={to} mobile onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : to === '/store/finance' ? <StoreFinanceNavigation key={to} mobile canRegister={user?.role === 'STORE_OWNER'} onNavigate={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }} /> : (
           <Link key={to} to={to} aria-current={isLinkActive(to) ? 'page' : undefined}
             onClick={() => { if (mobileMenuRef.current) mobileMenuRef.current.open = false; }}
             className={`flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm ${isLinkActive(to) ? 'bg-sky-50 font-semibold text-sky-700 dark:bg-sky-950 dark:text-sky-300' : 'text-zinc-700 hover:bg-zinc-100 dark:text-zinc-300 dark:hover:bg-zinc-900'}`}>
@@ -140,7 +164,7 @@ export const Sidebar: React.FC = () => {
     <motion.aside
       initial={false}
       animate={{ width: isSidebarOpen ? 256 : 68 }}
-      transition={{ type: 'spring', bounce: 0, duration: 0.4 }}
+      transition={{ duration: 0.26, ease: [0.23, 1, 0.32, 1] }}
       className={`${isAdmin ? 'admin-navigation ' : ''}min-h-[calc(100vh-4rem)] border-r border-zinc-200 dark:border-zinc-800 flex-col justify-between shrink-0 overflow-hidden bg-[#FBFBFC] dark:bg-zinc-950 select-none z-20 hidden lg:flex`}
     >
       <div>
@@ -184,20 +208,23 @@ export const Sidebar: React.FC = () => {
           <nav className="px-3.5 space-y-1 mt-1">
             {links.map((item) => {
               if (item.to === '/admin/dashboard?section=ANALYTICS') return <AdminRevenueNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
-              if (item.to === '/store/profile') return <StoreProfileNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
-              if (item.to === '/admin/profile') return <AdminAccountNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
               if (item.to === '/admin/dashboard?section=RENTALS') return <AdminPackageNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
               if (item.to === '/store/analytics') return <StoreRevenueNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
               if (item.to === '/store/finance') return <StoreFinanceNavigation key={item.to} canRegister={user?.role === 'STORE_OWNER'} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
-              if (isCustomer && item.to === '/customer/profile') return <CustomerAccountNavigation key={item.to} collapsed={!isSidebarOpen} onExpandSidebar={toggleSidebar} onNavigate={() => setHoveredItem(null)} />;
               const Icon = item.icon;
               const isActive = isLinkActive(item.to);
+              const isAccount = isAccountPath(item.to);
               return (
-                <Link key={item.to} to={item.to} aria-current={isActive ? 'page' : undefined} title={item.label} onClick={() => setHoveredItem(null)} onMouseEnter={(event) => { if (!isSidebarOpen) { const rect = event.currentTarget.getBoundingClientRect(); setHoveredItem({ label: item.label, top: rect.top + rect.height / 2 }); } }} onMouseLeave={() => setHoveredItem(null)} className={`relative flex items-center h-10 rounded-lg text-xs font-medium transition-colors group select-none cursor-pointer ${isActive ? 'text-[#287DA8] dark:text-[#38a5da] font-semibold' : 'text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/40'}`}>
-                  {isActive && <motion.div layoutId="sidebar-active-pill" className="absolute inset-0 bg-[#287DA8]/10 dark:bg-[#287DA8]/15 rounded-lg border-l-[3px] border-[#287DA8] dark:border-[#38a5da] pointer-events-none" transition={{ type: 'spring', stiffness: 420, damping: 34 }} />}
-                  <div className="w-[40px] h-[40px] flex items-center justify-center shrink-0 relative z-10 pointer-events-none"><Icon size={18} strokeWidth={1.5} className={isActive ? 'text-[#287DA8] dark:text-[#38a5da]' : 'text-zinc-400 dark:text-zinc-500 group-hover:text-[#287DA8] dark:group-hover:text-[#38a5da]'} /></div>
-                  <motion.span initial={false} animate={{ opacity: isSidebarOpen ? 1 : 0, width: isSidebarOpen ? 'auto' : 0 }} transition={{ duration: 0.2 }} className="relative z-10 overflow-hidden whitespace-nowrap pl-1 text-[13px] pointer-events-none">{item.label}</motion.span>
-                </Link>
+                <React.Fragment key={item.to}>
+                  {isAccount && (
+                    <div className="my-2 border-t border-zinc-200/80 dark:border-zinc-800/80" />
+                  )}
+                  <Link to={item.to} aria-current={isActive ? 'page' : undefined} title={item.label} onClick={() => setHoveredItem(null)} onMouseEnter={(event) => { if (!isSidebarOpen) { const rect = event.currentTarget.getBoundingClientRect(); setHoveredItem({ label: item.label, top: rect.top + rect.height / 2 }); } }} onMouseLeave={() => setHoveredItem(null)} className={`relative flex items-center h-10 rounded-lg text-xs font-medium transition-[color,background-color,transform] duration-150 active:scale-[0.985] group select-none cursor-pointer ${isActive ? 'text-[#287DA8] dark:text-[#38a5da] font-semibold' : 'text-zinc-600 dark:text-zinc-400 hover:text-[#287DA8] dark:hover:text-[#38a5da] hover:bg-[#287DA8]/5 dark:hover:bg-zinc-800/40'}`}>
+                    {isActive && <motion.div layoutId="sidebar-active-pill" className="absolute inset-0 bg-[#287DA8]/10 dark:bg-[#287DA8]/15 rounded-lg border-l-[3px] border-[#287DA8] dark:border-[#38a5da] pointer-events-none" transition={{ type: 'spring', stiffness: 460, damping: 36, mass: 0.8 }} />}
+                    <div className="w-[40px] h-[40px] flex items-center justify-center shrink-0 relative z-10 pointer-events-none"><Icon size={18} strokeWidth={1.5} className={isActive ? 'text-[#287DA8] dark:text-[#38a5da]' : 'text-zinc-400 dark:text-zinc-500 group-hover:text-[#287DA8] dark:group-hover:text-[#38a5da]'} /></div>
+                    <motion.span initial={false} animate={{ opacity: isSidebarOpen ? 1 : 0, width: isSidebarOpen ? 'auto' : 0 }} transition={{ duration: 0.2 }} className="relative z-10 overflow-hidden whitespace-nowrap pl-1 text-[13px] pointer-events-none">{item.label}</motion.span>
+                  </Link>
+                </React.Fragment>
               );
             })}
           </nav>
@@ -205,7 +232,7 @@ export const Sidebar: React.FC = () => {
       </div>
 
       <div className="p-3 border-t border-zinc-200/80 dark:border-zinc-800/80">
-        <div className={`flex items-center rounded-lg bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200/60 dark:border-zinc-800 h-9 transition-all ${isSidebarOpen ? 'px-2 justify-between' : 'justify-center px-0'}`}>
+        <div className={`flex items-center rounded-lg bg-zinc-50 dark:bg-zinc-900/40 border border-zinc-200/60 dark:border-zinc-800 h-9 transition-[padding] duration-200 ${isSidebarOpen ? 'px-2 justify-between' : 'justify-center px-0'}`}>
           <div className="flex items-center gap-1.5 min-w-0"><ShieldCheck className="w-3.5 h-3.5 text-emerald-500 shrink-0" strokeWidth={1.5} /><motion.span initial={false} animate={{ opacity: isSidebarOpen ? 1 : 0, width: isSidebarOpen ? 'auto' : 0 }} transition={{ duration: 0.2 }} className="text-[10px] font-medium text-zinc-600 dark:text-zinc-400 truncate overflow-hidden whitespace-nowrap">Đang hoạt động</motion.span></div>
         </div>
       </div>

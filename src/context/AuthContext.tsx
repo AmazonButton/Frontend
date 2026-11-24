@@ -1,9 +1,11 @@
-import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { User } from '../types';
 import { api, apiSessionMarker, isTokenExpired, getOrRefreshValidToken } from '../services/api';
 import { apiCooldownError, getApiRetryUntil } from '../services/request-backoff';
 import { updateSocketAuth, clearSocketSubscriptions } from '../services/socket';
 import { clearPushToken, cleanupBrowserPushAfterLogout, currentPushUserId, invalidatePushSession, readPushOwner, readPushToken, unregisterWebPush } from '../services/web-push-state';
+import { isActiveRole, normalizeAuthUser } from '../utils/authority';
+import { toast } from './ToastContext';
 import axios from 'axios';
 
 interface AuthContextType {
@@ -33,7 +35,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     if (saved) {
       try {
-        return JSON.parse(saved);
+        const parsed = JSON.parse(saved);
+        return isActiveRole(parsed?.role) ? normalizeAuthUser(parsed) : null;
       } catch (_) {
         return null;
       }
@@ -185,22 +188,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (res.data?.success && res.data?.data) {
         if (apiSessionMarker() !== sessionScope) return;
         setSessionError(null);
-        const u = res.data.data;
-        const rawStore = u.store || (Array.isArray(u.ownedStores) ? u.ownedStores[0] : null);
-        const normalizedUser: User = {
-          ...u,
-          customerProfileId: u.customerProfileId || u.customerProfile?.customerId || u.customerProfile?.id || null,
-          store: rawStore ? {
-            ...rawStore,
-            id: String(rawStore.storeId || rawStore.id || ''),
-            storeId: String(rawStore.storeId || rawStore.id || ''),
-            status: String(rawStore.status || 'ACTIVE'),
-          } : u.store || null,
-        };
-        setUser(normalizedUser);
-        localStorage.setItem('smart_order_user', JSON.stringify(normalizedUser));
+        const normalizedUser = normalizeAuthUser(res.data.data);
+        if (!isActiveRole(normalizedUser.role)) {
+          localStorage.removeItem('smart_order_token');
+          localStorage.removeItem('smart_order_refresh_token');
+          localStorage.removeItem('smart_order_user');
+          delete api.defaults.headers.common['Authorization'];
+          setUser(null);
+          setToken(null);
+          setRefreshToken(null);
+          clearSocketSubscriptions();
+          updateSocketAuth(null);
+          return;
+        }
+        const serializedUser = JSON.stringify(normalizedUser);
+        const previousSerialized = localStorage.getItem('smart_order_user');
+        if (previousSerialized !== serializedUser) {
+          localStorage.setItem('smart_order_user', serializedUser);
+          setUser(normalizedUser);
+        } else {
+          setUser((prev) => (prev ? prev : normalizedUser));
+        }
 
-        setToken(validToken);
+        setToken((prev) => (prev === validToken ? prev : validToken));
         api.defaults.headers.common['Authorization'] = `Bearer ${validToken}`;
         updateSocketAuth(validToken);
       }
@@ -215,6 +225,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         delete api.defaults.headers.common['Authorization'];
         setUser(null);
         setToken(null);
+        setRefreshToken(null);
         clearSocketSubscriptions();
         updateSocketAuth(null);
       }
@@ -227,11 +238,31 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshUser();
   }, [refreshUser]);
 
-  const login = (newToken: string, userData: User, newRefreshToken?: string) => {
+  useEffect(() => {
+    const handleAuthRevoked = (event: Event) => {
+      const detail = (event as CustomEvent)?.detail;
+      localStorage.removeItem('smart_order_token');
+      localStorage.removeItem('smart_order_refresh_token');
+      localStorage.removeItem('smart_order_user');
+      delete api.defaults.headers.common['Authorization'];
+      setUser(null);
+      setToken(null);
+      setRefreshToken(null);
+      setSessionError(null);
+      clearSocketSubscriptions();
+      updateSocketAuth(null);
+      toast.warning(detail?.reason || 'Phiên đăng nhập đã bị thu hồi hoặc quyền tài khoản vừa thay đổi. Vui lòng đăng nhập lại.');
+    };
+    window.addEventListener('sob_auth_revoked', handleAuthRevoked);
+    return () => window.removeEventListener('sob_auth_revoked', handleAuthRevoked);
+  }, []);
+
+  const login = useCallback((newToken: string, userData: User, newRefreshToken?: string) => {
     setSessionError(null);
+    const normalizedUser = normalizeAuthUser(userData);
     const previousPushOwner = readPushOwner();
     invalidatePushSession();
-    if (previousPushOwner && previousPushOwner !== userData.id) {
+    if (previousPushOwner && previousPushOwner !== normalizedUser.id) {
       clearPushToken(previousPushOwner);
       void cleanupBrowserPushAfterLogout(previousPushOwner).catch(() => undefined);
     }
@@ -244,45 +275,32 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setRefreshToken(newRefreshToken);
     }
 
-    const rawStore = userData.store || ((userData as any).ownedStores && (userData as any).ownedStores[0]) || null;
-    const normalizedUser: User = {
-      ...userData,
-      customerProfileId:
-        userData.customerProfileId ||
-        (userData as any).customerProfile?.customerId ||
-        (userData as any).customerProfile?.id ||
-        null,
-      store: rawStore ? {
-        ...rawStore,
-        id: String(rawStore.storeId || rawStore.id || ''),
-        storeId: String(rawStore.storeId || rawStore.id || ''),
-        status: String(rawStore.status || 'ACTIVE'),
-      } : userData.store || null,
-    };
-
     clearSocketSubscriptions();
     localStorage.setItem('smart_order_user', JSON.stringify(normalizedUser));
     setUser(normalizedUser);
     setIsLoading(false);
     updateSocketAuth(newToken);
-  };
+  }, []);
 
   const isAuthenticated = Boolean(user && token);
 
+  const contextValue = useMemo(
+    () => ({
+      user,
+      token,
+      refreshToken,
+      isLoading,
+      isAuthenticated,
+      sessionError,
+      login,
+      logout,
+      refreshUser,
+    }),
+    [user, token, refreshToken, isLoading, isAuthenticated, sessionError, login, logout, refreshUser]
+  );
+
   return (
-    <AuthContext.Provider
-      value={{
-        user,
-        token,
-        refreshToken,
-        isLoading,
-        isAuthenticated,
-        sessionError,
-        login,
-        logout,
-        refreshUser,
-      }}
-    >
+    <AuthContext.Provider value={contextValue}>
       {children}
     </AuthContext.Provider>
   );

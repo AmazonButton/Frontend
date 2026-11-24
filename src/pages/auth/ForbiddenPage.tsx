@@ -3,22 +3,15 @@ import { Link, useNavigate } from 'react-router-dom';
 import { ShieldAlert, ArrowLeft, Home, LogOut } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 
+import { getRoleHomePath } from '../../utils/authority';
+
 export const ForbiddenPage: React.FC = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
 
   const getHomePath = () => {
     if (!user) return '/login';
-    if (['STORE_OWNER', 'STORE_MANAGER', 'STORE_STAFF'].includes(user.role)) {
-      return '/store/dashboard';
-    }
-    if (user.role === 'CUSTOMER') {
-      return '/customer/home';
-    }
-    if (user.role === 'SUPER_ADMIN') {
-      return '/admin/dashboard';
-    }
-    return '/';
+    return getRoleHomePath(user.role);
   };
 
   return (

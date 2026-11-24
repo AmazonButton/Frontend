@@ -22,10 +22,35 @@ export interface DeliveryFailureDto {
   failureNote?: string;
   evidenceImageUrl: string;
 }
+export interface LegacyHandoverSummary {
+  storeId: string;
+  ownerUserId: string | null;
+  inFlightShipperOrders: Array<{
+    orderId: string;
+    orderCode: string;
+    totalAmount: number;
+    paymentMethod: string;
+    assignedDriverId: string | null;
+  }>;
+  openShifts: DriverShift[];
+  pendingHandoverClosedShifts: DriverShift[];
+  pendingCodHandoverTotal: number;
+}
+export interface LegacyHandoverSettleResult {
+  storeId: string;
+  reclaimAssigneeId: string;
+  reclaimedShippingOrdersCount: number;
+  settledOpenShiftsCount: number;
+  settledClosedShiftsCount: number;
+  totalCodSettled: number;
+  totalVietqrSettled: number;
+}
 export interface DriverShift {
   shiftId: string;
   driverId: string;
   storeId: string;
+  driverName?: string | null;
+  driverPhone?: string | null;
   status: 'OPEN' | 'CLOSED' | 'HANDED_OVER';
   startedAt: string;
   endedAt?: string | null;
@@ -91,6 +116,9 @@ export const driversService = {
   async claimOrder(orderId: string | number, options: { publishEvent?: boolean } = {}) {
     return changedOrder((await api.post(`/orders/${idPath(orderId)}/claim`)).data, 'SHIPPING', orderId, options.publishEvent !== false);
   },
+  async takeoverLegacyDelivery(orderId: string | number, options: { publishEvent?: boolean } = {}) {
+    return changedOrder((await api.post(`/orders/${idPath(orderId)}/takeover-delivery`)).data, 'SHIPPING', orderId, options.publishEvent !== false);
+  },
   async getOrder(orderId: string | number) {
     const body = checked((await api.get(`/orders/${idPath(orderId)}`)).data);
     if (!body?.data?.id && !body?.data?.orderId) throw new Error('Không thể đọc thông tin đơn hàng.');
@@ -122,5 +150,21 @@ export const driversService = {
   },
   async confirmHandover(shiftId: string | number, note?: string) {
     return changedShift((await api.post(`/driver-shifts/${idPath(shiftId)}/confirm-handover`, { note: note?.trim() || undefined })).data, 'HANDED_OVER');
+  },
+  async getStoreDriverShifts(storeId: string | number, page = 1, signal?: AbortSignal) {
+    const body = checked((await api.get(`/stores/${idPath(storeId)}/driver-shifts`, { params: { page, pageSize: 10 }, signal })).data);
+    return {
+      ...body,
+      shifts: Array.isArray(body?.data) ? body.data : [],
+      pagination: body?.pagination || { page, totalPages: 1 },
+    };
+  },
+  async getLegacyHandoverStatus(storeId: string | number, signal?: AbortSignal): Promise<LegacyHandoverSummary> {
+    const body = checked((await api.get(`/stores/${idPath(storeId)}/legacy-handover-status`, { signal })).data);
+    return body.data as LegacyHandoverSummary;
+  },
+  async settleLegacyHandover(storeId: string | number, note?: string): Promise<LegacyHandoverSettleResult> {
+    const body = checked((await api.post(`/stores/${idPath(storeId)}/legacy-handover/settle`, { note: note?.trim() || undefined })).data);
+    return body.data as LegacyHandoverSettleResult;
   },
 };

@@ -1,3 +1,5 @@
+@import './styles/motion-tokens.css';
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
@@ -187,21 +189,26 @@
   box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.6);
 }
 
-/* Cyber Card Polish */
+/* Cyber Card Polish (explicit composite properties + pointer-fine hover gating) */
 .cyber-card {
   position: relative;
-  transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    transform var(--duration-ui, 190ms) var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1)),
+    border-color var(--duration-ui, 190ms) ease,
+    box-shadow var(--duration-ui, 190ms) ease;
 }
 
-.cyber-card:hover {
-  border-color: rgba(37, 99, 235, 0.35);
-  box-shadow: 0 12px 32px -8px rgba(37, 99, 235, 0.15);
-  transform: translateY(-2px);
-}
+@media (hover: hover) and (pointer: fine) {
+  .cyber-card:hover {
+    border-color: rgba(37, 99, 235, 0.35);
+    box-shadow: 0 12px 32px -8px rgba(37, 99, 235, 0.15);
+    transform: translateY(-2px);
+  }
 
-.dark .cyber-card:hover {
-  border-color: rgba(239, 68, 68, 0.5);
-  box-shadow: 0 12px 32px -8px rgba(239, 68, 68, 0.25);
+  .dark .cyber-card:hover {
+    border-color: rgba(239, 68, 68, 0.5);
+    box-shadow: 0 12px 32px -8px rgba(239, 68, 68, 0.25);
+  }
 }
 
 /* Custom Clean Scrollbar */
@@ -228,9 +235,9 @@
 
 /* Subtle button press effect */
 .btn-press {
-  transition: transform 0.12s cubic-bezier(0.4, 0, 0.2, 1), box-shadow 0.12s ease;
+  transition: transform var(--duration-press, 130ms) var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1)), box-shadow 130ms ease;
 }
-.btn-press:active {
+.btn-press:active:not(:disabled) {
   transform: scale(0.97);
 }
 
@@ -275,11 +282,19 @@
 /* Glow gradient shine effect */
 .btn-gradient-glow {
   background: linear-gradient(135deg, #2563eb 0%, #4f46e5 50%, #06b6d4 100%);
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition:
+    transform var(--duration-press, 130ms) var(--ease-out, cubic-bezier(0.23, 1, 0.32, 1)),
+    box-shadow var(--duration-ui, 190ms) ease,
+    filter var(--duration-ui, 190ms) ease;
 }
-.btn-gradient-glow:hover {
-  box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.4), 0 0 15px 0 rgba(6, 182, 212, 0.2);
-  filter: brightness(1.05);
+.btn-gradient-glow:active:not(:disabled) {
+  transform: scale(0.97);
+}
+@media (hover: hover) and (pointer: fine) {
+  .btn-gradient-glow:hover {
+    box-shadow: 0 10px 25px -5px rgba(37, 99, 235, 0.4), 0 0 15px 0 rgba(6, 182, 212, 0.2);
+    filter: brightness(1.05);
+  }
 }
 
 /* ========================================================================= */

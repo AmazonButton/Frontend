@@ -28,7 +28,8 @@ const deliveryHeroBackground = '/assets/products/delivery-hero-pastel.png';
 type Product = { id: string; storeId: string; name: string; brand: string; category: string; unit: string; price: number; stock: number; reservedStock: number; imageUrl?: string; store: { id: string; name: string } };
 type CartLine = { product: Product; quantity: number; selected: boolean };
 const CART_KEY = 'sob_storefront_cart_v1';
-const money = (value: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(value);
+const vndFormatter = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 });
+const money = (value: number) => vndFormatter.format(value);
 
 const loadCart = (): CartLine[] => {
   try {
@@ -56,13 +57,17 @@ export const ShopPage: React.FC = () => {
   const { user } = useAuth();
   const reduceMotion = useReducedMotion();
   const location = useLocation();
-  const cachedProducts = getInitialStorefrontCatalog();
-  const [products, setProducts] = useState<Product[]>(cachedProducts);
+  const [products, setProducts] = useState<Product[]>(getInitialStorefrontCatalog);
   const [cart, setCart] = useState<CartLine[]>(loadCart);
-  const { discounts, now: discountNow } = useProductDiscounts([...products.map(product => product.id), ...cart.map(line => line.product.id)]);
-  const currentPrices = new Map(products.map(product => [product.id, product.price]));
-  const basePrice = (product: Product) => currentPrices.get(product.id) ?? product.price;
-  const salePrice = (product: Product) => discountedPrice(basePrice(product), discounts[product.id], discountNow);
+  const discountProductIds = useMemo(
+    () => [...products.map((product) => product.id), ...cart.map((line) => line.product.id)],
+    [products, cart]
+  );
+  const { discounts, now: discountNow } = useProductDiscounts(discountProductIds);
+  const currentPrices = useMemo(() => new Map(products.map((product) => [product.id, product.price])), [products]);
+  const cartByProductId = useMemo(() => new Map(cart.map((item) => [item.product.id, item])), [cart]);
+  const basePrice = useCallback((product: Product) => currentPrices.get(product.id) ?? product.price, [currentPrices]);
+  const salePrice = useCallback((product: Product) => discountedPrice(basePrice(product), discounts[product.id], discountNow), [basePrice, discounts, discountNow]);
   const [search, setSearch] = useState(() => {
     if (typeof window !== 'undefined') {
       return new URLSearchParams(window.location.search).get('search') || '';
@@ -70,7 +75,7 @@ export const ShopPage: React.FC = () => {
     return '';
   });
   const [category, setCategory] = useState('Tất cả');
-  const [loading, setLoading] = useState(cachedProducts.length === 0);
+  const [loading, setLoading] = useState(() => products.length === 0);
   const [error, setError] = useState('');
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
@@ -234,8 +239,15 @@ export const ShopPage: React.FC = () => {
 
   useEffect(() => {
     if (products.length === 0) setLoading(true);
-    fetchCatalog();
-  }, [fetchCatalog]);
+    if (!search.trim()) {
+      fetchCatalog();
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      fetchCatalog();
+    }, 220);
+    return () => window.clearTimeout(timer);
+  }, [fetchCatalog, search]);
 
   useEffect(() => {
     const socket = getSocket();
@@ -261,7 +273,10 @@ export const ShopPage: React.FC = () => {
   }, [fetchCatalog]);
 
   const categories = useMemo(() => ['Tất cả', ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))], [products]);
-  const shownProducts = products.filter((p) => category === 'Tất cả' || p.category === category);
+  const shownProducts = useMemo(
+    () => products.filter((p) => category === 'Tất cả' || p.category === category),
+    [products, category]
+  );
   const cartCount = cart.reduce((sum, line) => sum + line.quantity, 0);
   const selectedCart = useMemo(() => cart.filter((line) => line.selected !== false), [cart]);
   const selectedCount = selectedCart.reduce((sum, line) => sum + line.quantity, 0);
@@ -661,7 +676,7 @@ export const ShopPage: React.FC = () => {
       {loading && (
         <div className="shop-products grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
           {Array.from({ length: 8 }, (_, i) => (
-            <div key={i} className="h-72 animate-pulse rounded-2xl bg-white/80 border border-slate-100 shadow-xs" />
+            <div key={`shop-skeleton-${i}`} className="h-72 animate-pulse rounded-2xl bg-white/80 border border-slate-100 shadow-xs" />
           ))}
         </div>
       )}
@@ -676,7 +691,7 @@ export const ShopPage: React.FC = () => {
         </motion.div>
       )}
       {!loading && shownProducts.length > 0 && <div className="shop-products grid grid-cols-1 sm:grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">{shownProducts.map((product) => {
-        const line = cart.find((item) => item.product.id === product.id);
+        const line = cartByProductId.get(product.id);
         const stock = Math.max(0, product.stock - product.reservedStock);
         return <article key={product.id} className="shop-product group overflow-hidden rounded-2xl border border-slate-100 bg-white shadow-sm transition hover:-translate-y-0.5 hover:shadow-md">
           <button type="button" onClick={() => setSelectedProduct(product)} className="shop-product-image relative block aspect-square w-full overflow-hidden bg-slate-50 text-left">{product.imageUrl ? <img src={product.imageUrl} alt={product.name} crossOrigin="anonymous" referrerPolicy="no-referrer" loading="lazy" className="h-full w-full object-cover transition group-hover:scale-[1.03]"/> : <div className="grid h-full place-items-center text-5xl">🛍️</div>}<span className="absolute left-3 top-3 rounded-full bg-white/90 px-2.5 py-1 text-[11px] font-medium text-slate-600"><Store className="mr-1 inline" size={12}/>{product.store.name}</span></button>

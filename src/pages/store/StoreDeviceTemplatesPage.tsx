@@ -26,6 +26,15 @@ import { Link } from 'react-router-dom';
 
 export const StoreDeviceTemplatesPage: React.FC = () => {
   const { user } = useAuth();
+  const isPlatformOps = ['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN', 'SYSTEM_STAFF'].includes(
+    String(user?.role || '')
+  );
+  const backToDevicesPath =
+    user?.role === 'SYSTEM_STAFF'
+      ? '/system-staff/devices'
+      : isPlatformOps
+        ? '/admin/dashboard?section=DEVICES'
+        : '/store/devices';
   const portalTarget = typeof document !== 'undefined' ? (document.getElementById('modal-root') || document.body) : null;
   const [templates, setTemplates] = useState<DeviceTemplate[]>([]);
   const [products, setProducts] = useState<Product[]>([]);
@@ -103,7 +112,7 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
       name: '',
       description: '',
       category: 'Nước uống',
-      defaultProductId: products[0]?.id || '',
+      defaultProductId: isPlatformOps ? '' : (products[0]?.id || ''),
       singlePressAction: 'CREATE_ORDER',
       doublePressAction: 'CANCEL_ORDER',
       longPressAction: 'WIFI_CONFIGURATION',
@@ -195,12 +204,24 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
       }
 
       const res = await api.post(`/device-templates/${deployingTemplate.id}/deploy`, payload);
-      if (res.data.success) {
-        setDeployResult(res.data);
-        fetchData();
+      const data = res?.data;
+      if (data) {
+        setDeployResult(data);
+        if (data.success || Number(data.succeeded || 0) > 0) {
+          fetchData();
+        }
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Triển khai thất bại');
+      const errData = err.response?.data;
+      const errResults = Array.isArray(errData?.results) ? errData.results : [];
+      setDeployResult({
+        success: false,
+        total: Number(errData?.total ?? (errResults.length || 1)),
+        succeeded: 0,
+        failed: Number(errData?.failed ?? (errResults.length || 1)),
+        message: errData?.message || 'Triển khai thất bại',
+        results: errResults,
+      });
     } finally {
       setDeployLoading(false);
     }
@@ -221,30 +242,36 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
   };
 
   return (
-    <div className="w-full space-y-5 text-slate-900 dark:text-slate-100">
-      {/* ── Page Header (Sits directly on canvas with 1px border) ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 pb-4 border-b border-slate-200 dark:border-slate-800">
+    <div className="max-w-7xl mx-auto w-full space-y-5 text-slate-900 dark:text-slate-100">
+      {/* ── Page Header (Consistent Executive Card) ── */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 rounded-2xl border border-slate-200/80 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-5 shadow-2xs">
         <div>
-          <h1 className="text-base font-bold tracking-tight text-slate-900 dark:text-slate-100">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-sky-50 dark:bg-sky-950/50 px-2.5 py-0.5 text-[11px] font-semibold text-[#0E6BA8] dark:text-sky-300 border border-sky-200/80 dark:border-sky-800">
+              <Layers className="w-3 h-3" />
+              Cấu hình chuẩn hóa
+            </span>
+          </div>
+          <h1 className="text-xl font-bold tracking-tight text-slate-900 dark:text-slate-100">
             Mẫu Cấu Hình Thiết Bị
           </h1>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-            Chuẩn hóa kịch bản nút bấm, sản phẩm mặc định và triển khai hàng loạt cho 10–100 thiết bị
+            Chuẩn hóa kịch bản nút bấm, sản phẩm mặc định và triển khai hàng loạt cho tối đa 100 thiết bị mỗi đợt
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             type="button"
             onClick={handleOpenCreate}
-            className="px-3.5 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
+            className="px-3.5 py-2 rounded-xl bg-[#0E6BA8] hover:bg-[#0B5586] text-white text-xs font-semibold shadow-xs flex items-center gap-1.5 transition-all active:scale-[0.98] cursor-pointer"
           >
             <Plus className="w-4 h-4" strokeWidth={2} />
             <span>Tạo Mẫu Thiết Bị Mới</span>
           </button>
           <Link
-            to="/store/devices"
-            className="px-3.5 py-2 rounded-lg bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800/80 text-xs font-medium transition-colors cursor-pointer"
+            to={backToDevicesPath}
+            className="px-3.5 py-2 rounded-xl bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:bg-slate-100 dark:hover:bg-slate-700 text-xs font-semibold transition-colors cursor-pointer"
           >
             Quay lại Danh Sách Nút
           </Link>
@@ -505,22 +532,29 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
 
                   <div>
                     <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                      Sản Phẩm SKU Mặc Định *
+                      Sản Phẩm SKU Mặc Định {isPlatformOps ? '(Không bắt buộc)' : '*'}
                     </label>
                     <select
-                      required
+                      required={!isPlatformOps}
+                      disabled={isPlatformOps && !editingTemplate?.storeId}
                       value={templateForm.defaultProductId}
                       onChange={(e) =>
                         setTemplateForm({ ...templateForm, defaultProductId: e.target.value })
                       }
-                      className="w-full px-3 py-1.5 rounded-md bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900 dark:focus:ring-zinc-100/20 dark:focus:border-zinc-100 transition-colors truncate cursor-pointer"
+                      className="w-full px-3 py-1.5 rounded-md bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 text-xs focus:outline-none focus:ring-2 focus:ring-zinc-900/20 focus:border-zinc-900 dark:focus:ring-zinc-100/20 dark:focus:border-zinc-100 transition-colors truncate cursor-pointer disabled:opacity-60"
                     >
-                      <option value="">-- Chọn sản phẩm --</option>
-                      {products.map((p) => (
-                        <option key={p.id} value={p.id}>
-                          {p.name} ({p.sku})
-                        </option>
-                      ))}
+                      <option value="">
+                        {isPlatformOps && !editingTemplate?.storeId
+                          ? '-- Template toàn cục (không gắn SKU cửa hàng) --'
+                          : '-- Chọn sản phẩm --'}
+                      </option>
+                      {products
+                        .filter((p) => !editingTemplate?.storeId || String(p.storeId) === String(editingTemplate.storeId))
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name} ({p.sku})
+                          </option>
+                        ))}
                     </select>
                   </div>
                 </div>
@@ -737,12 +771,48 @@ export const StoreDeviceTemplatesPage: React.FC = () => {
                 </div>
               )}
 
-              {deployResult && (
-                <div className="p-2.5 bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400 rounded-lg text-xs font-medium flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 shrink-0" strokeWidth={1.5} />
-                  <span>{deployResult.message}</span>
-                </div>
-              )}
+              {deployResult && (() => {
+                const results: Array<{ deviceId?: string; success?: boolean; reason?: string; message?: string }> =
+                  Array.isArray(deployResult.results) ? deployResult.results : [];
+                const failedItems = results.filter((r) => !r.success);
+                const totalFailed = Number(deployResult.failed ?? failedItems.length);
+                const isTotalFailure = !deployResult.success && Number(deployResult.succeeded ?? 0) === 0;
+                const isPartial = !isTotalFailure && totalFailed > 0;
+                const toneClasses = isTotalFailure
+                  ? 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800 text-rose-700 dark:text-rose-400'
+                  : isPartial
+                    ? 'bg-amber-50 dark:bg-amber-950/40 border-amber-200 dark:border-amber-800 text-amber-800 dark:text-amber-300'
+                    : 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800 text-emerald-700 dark:text-emerald-400';
+
+                return (
+                  <div className={`p-2.5 border rounded-lg text-xs space-y-2 ${toneClasses}`}>
+                    <div className="font-medium flex items-center gap-2">
+                      {isTotalFailure || isPartial ? (
+                        <AlertCircle className="w-4 h-4 shrink-0" strokeWidth={1.5} />
+                      ) : (
+                        <CheckCircle2 className="w-4 h-4 shrink-0" strokeWidth={1.5} />
+                      )}
+                      <span>
+                        {deployResult.message ||
+                          (isTotalFailure ? 'Triển khai template thất bại' : 'Đã hoàn tất triển khai template')}
+                        {totalFailed > 0 && Number(deployResult.total || 0) > 0
+                          ? ` (${totalFailed}/${deployResult.total} thất bại)`
+                          : ''}
+                      </span>
+                    </div>
+                    {failedItems.length > 0 && (
+                      <ul className="max-h-32 overflow-y-auto space-y-1 pl-5 list-disc text-[11px] font-normal">
+                        {failedItems.map((item, idx) => (
+                          <li key={`${item.deviceId || idx}`}>
+                            <span className="font-semibold tabular-nums">{item.deviceId || 'Thiết bị'}:</span>{' '}
+                            <span>{item.reason || item.message || 'Không rõ lý do'}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    )}
+                  </div>
+                );
+              })()}
 
               <div className="flex justify-end gap-2 pt-3 border-t border-slate-100 dark:border-slate-800">
                 <button
