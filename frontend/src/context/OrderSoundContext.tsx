@@ -107,8 +107,9 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     duration: number,
     delay: number = 0,
     volume: number = 0.35,
+    force: boolean = false,
   ) => {
-    if (!isSoundEnabledRef.current) return;
+    if (!isSoundEnabledRef.current && !force) return;
     try {
       const ctx = getAudioContext();
       if (!ctx) return;
@@ -162,8 +163,8 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
   };
 
   // 🎙️ Phát giọng đọc tiếng Việt gốc (Chuẩn Google tự nhiên, trong trẻo, không bị méo/vang)
-  const playVietnameseVoiceAudio = (text: string) => {
-    if (!isVoiceEnabledRef.current) return;
+  const playVietnameseVoiceAudio = (text: string, force: boolean = false) => {
+    if (!isVoiceEnabledRef.current && !force) return;
     if ('speechSynthesis' in window) {
       window.speechSynthesis.cancel();
       speakViaSynthesis(text);
@@ -246,23 +247,22 @@ export const SoundProvider: React.FC<{ children: React.ReactNode }> = ({ childre
     playTone(1760, 'triangle', 0.06, 10, 0.15);
   };
 
-  // 🔊 5. Test sound helpers
+  // 🔊 5. Test sound helpers (Luôn phát âm thanh mẫu để người dùng kiểm tra loa)
   const testSound = () => {
     getAudioContext();
-    if (user?.role === 'CUSTOMER') {
-      playOrderChime(true);
-    } else {
-      testStoreBankSpeaker();
-    }
+    // Bấm nghe thử chuông: Phát chuông Ting Ting ngân vang mẫu
+    playTone(1046.5, 'sine', 0.12, 0, 0.35, true);   // C6
+    playTone(1318.5, 'sine', 0.18, 120, 0.38, true); // E6
   };
 
   const testStoreBankSpeaker = () => {
     getAudioContext();
-    announceStoreOrder({
-      customerName: 'Nguyễn Văn An',
-      productName: 'Dầu đậu nành Simply Can 5L',
-      quantity: 1,
-    });
+    // Bấm nghe thử loa: Phát chuông Ting Ting + Đọc mẫu giọng nói Smart Bank Speaker
+    playTone(1046.5, 'sine', 0.12, 0, 0.35, true);   // C6
+    playTone(1318.5, 'sine', 0.18, 120, 0.38, true); // E6
+    setTimeout(() => {
+      playVietnameseVoiceAudio('Có đơn hàng mới từ Smart Order Button: 1 bình nước Vĩnh Hảo 20L!', true);
+    }, 350);
   };
 
   // Order sounds are owned by the notification bell, which deduplicates

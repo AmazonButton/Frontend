@@ -536,58 +536,7 @@ export const AdminDashboard: React.FC = () => {
   // =========================================================================
   // 4.2.1 RBAC User Management State
   // =========================================================================
-  const [usersList, setUsersList] = useState<any[]>([
-    {
-      id: 'usr-admin-01',
-      fullName: 'Võ Minh Quân',
-      email: 'admin@smartorder.local',
-      phone: '0901000999',
-      role: 'SUPER_ADMIN',
-      isActive: true,
-      createdAt: '2026-01-10T08:00:00Z',
-      storeName: 'Toàn Hệ Thống',
-    },
-    {
-      id: 'usr-store-01',
-      fullName: 'Nguyễn Văn Định',
-      email: 'store@smartorder.local',
-      phone: '0908112233',
-      role: 'STORE_OWNER',
-      isActive: true,
-      createdAt: '2026-02-14T09:30:00Z',
-      storeName: 'Đại lý Nước & Gas Gia Định',
-    },
-    {
-      id: 'usr-delivery-01',
-      fullName: 'Trần Văn Hùng (Shipper)',
-      email: 'shipper.hung@smartorder.local',
-      phone: '0933556677',
-      role: 'DELIVERY_STAFF',
-      isActive: true,
-      createdAt: '2026-03-01T10:15:00Z',
-      storeName: 'Đại lý Nước & Gas Gia Định',
-    },
-    {
-      id: 'usr-customer-01',
-      fullName: 'Nguyễn Văn An (Chung Cư)',
-      email: 'customer@smartorder.local',
-      phone: '0988776655',
-      role: 'CUSTOMER',
-      isActive: true,
-      createdAt: '2026-02-20T14:20:00Z',
-      storeName: 'Căn hộ 1204 - Tháp Sapphire',
-    },
-    {
-      id: 'usr-customer-02',
-      fullName: 'Trần Thị Mai',
-      email: 'mai.tran@smartorder.local',
-      phone: '0977223344',
-      role: 'CUSTOMER',
-      isActive: false,
-      createdAt: '2026-03-05T11:00:00Z',
-      storeName: 'Căn hộ 0802 - Tháp Ruby',
-    },
-  ]);
+  const [usersList, setUsersList] = useState<any[]>([]);
   const [userSearch, setUserSearch] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState('ALL');
 
@@ -773,7 +722,7 @@ export const AdminDashboard: React.FC = () => {
         setAllDevices(allDevicesRes.data.data);
       }
       if (storesRes.data.success) { setAllStores(storesRes.data.data || []); try { if (typeof window !== 'undefined' && window.sessionStorage) window.sessionStorage.setItem('sob_cached_admin_stores', JSON.stringify(storesRes.data.data || [])); } catch {} }
-      if (usersRes.data?.success && Array.isArray(usersRes.data.data) && usersRes.data.data.length > 0) {
+      if (usersRes.data?.success && Array.isArray(usersRes.data.data)) {
         const mapped = usersRes.data.data.map((u: any) => ({
           ...u,
           id: String(u.id || u.userId),
@@ -1031,7 +980,7 @@ export const AdminDashboard: React.FC = () => {
   // Change user role
   const handleChangeUserRole = async (userId: string, newRole: string) => {
     try {
-      await api.post(`/admin/users/${encodeURIComponent(userId)}/role`, { role: newRole }).catch(() => {});
+      const res = await api.post(`/admin/users/${encodeURIComponent(userId)}/role`, { role: newRole });
       setUsersList((prev) =>
         prev.map((u) =>
           u.id === userId || String(u.id) === String(userId) || String(u.userId) === String(userId)
@@ -1039,11 +988,13 @@ export const AdminDashboard: React.FC = () => {
             : u
         )
       );
-      toast.success(`Đã cập nhật vai trò người dùng thành ${newRole}`);
+      toast.success(res.data?.message || `Đã cập nhật vai trò người dùng thành ${newRole}`);
       if (newRole === 'STORE_OWNER') {
         void fetchAdminData();
       }
-    } catch (_) {}
+    } catch (err: any) {
+      toast.error(err.response?.data?.message || 'Không thể cập nhật vai trò');
+    }
   };
 
   // Add Product to Master Catalog
@@ -1960,7 +1911,6 @@ export const AdminDashboard: React.FC = () => {
       {/* ========================================================================= */}
       {activeTab === 'RBAC' && (
         <div className="space-y-4">
-          <p className="admin-data-note">Danh sách có thể bao gồm tài khoản minh họa khi chưa tải được dữ liệu thực.</p>
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
             <div className="flex items-center gap-2">
               <Users className="w-4 h-4 text-zinc-700 dark:text-zinc-300" />
@@ -1991,10 +1941,11 @@ export const AdminDashboard: React.FC = () => {
                 className="px-2.5 py-1 text-xs font-medium rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-zinc-800 dark:text-zinc-200 cursor-pointer"
               >
                 <option value="ALL">Tất cả vai trò</option>
-                <option value="SUPER_ADMIN">Quản trị viên</option>
+                <option value="SUPER_ADMIN">Quản trị viên cấp cao</option>
+                <option value="ADMIN">Quản trị viên</option>
+                <option value="SYSTEM_STAFF">Nhân viên hệ thống</option>
                 <option value="STORE_OWNER">Chủ cửa hàng</option>
-                <option value="DELIVERY_STAFF">Delivery Staff (Giao hàng)</option>
-                <option value="CUSTOMER">Customer (Cư dân)</option>
+                <option value="CUSTOMER">Khách hàng</option>
               </select>
             </div>
           </div>
@@ -2018,7 +1969,14 @@ export const AdminDashboard: React.FC = () => {
                 animate="visible"
                 className="divide-y divide-zinc-200 dark:divide-zinc-800"
               >
-                {filteredUsers.map((u) => (
+                {filteredUsers.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} className="py-8 text-center text-zinc-500 text-xs">
+                      {loading ? 'Đang tải danh sách tài khoản...' : 'Không tìm thấy tài khoản nào phù hợp.'}
+                    </td>
+                  </tr>
+                ) : (
+                  filteredUsers.map((u) => (
                   <motion.tr
                     variants={tableRowVariants}
                     key={u.id}
@@ -2038,11 +1996,12 @@ export const AdminDashboard: React.FC = () => {
                       <select aria-label={`Vai trò của ${u.fullName || u.email}`}
                         value={u.role}
                         onChange={(e) => handleChangeUserRole(u.id, e.target.value)}
-                        className="px-2 py-0.5 rounded text-[11px]  font-medium bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer text-zinc-800 dark:text-zinc-200"
+                        className="px-2 py-0.5 rounded text-[11px] font-medium bg-zinc-50 dark:bg-zinc-800 border border-zinc-200 dark:border-zinc-700 cursor-pointer text-zinc-800 dark:text-zinc-200"
                       >
-                        <option value="SUPER_ADMIN">Quản trị viên</option>
+                        <option value="SUPER_ADMIN">Quản trị viên cấp cao</option>
+                        <option value="ADMIN">Quản trị viên</option>
+                        <option value="SYSTEM_STAFF">Nhân viên hệ thống</option>
                         <option value="STORE_OWNER">Chủ cửa hàng</option>
-                        <option value="DELIVERY_STAFF">Nhân viên giao hàng</option>
                         <option value="CUSTOMER">Khách hàng</option>
                       </select>
                     </td>
@@ -2065,7 +2024,7 @@ export const AdminDashboard: React.FC = () => {
                       </button>
                     </td>
                   </motion.tr>
-                ))}
+                )))}
               </motion.tbody>
             </table>
           </div>

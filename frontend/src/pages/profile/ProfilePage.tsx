@@ -46,6 +46,7 @@ import {
 
 import { LogoutConfirmModal } from '../../components/common/LogoutConfirmModal';
 import { PushNotificationSettings } from '../../components/operations/PushNotificationSettings';
+import { PhoneVerificationModal } from '../../components/profile/PhoneVerificationModal';
 
 type ProfileTab = 'INFO' | 'DEVICES' | 'ORDERS' | 'ADDRESSES' | 'NOTIFICATIONS' | 'SECURITY';
 
@@ -56,6 +57,7 @@ export const ProfilePage: React.FC = () => {
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showLogoutModal, setShowLogoutModal] = useState(false);
+  const [isPhoneModalOpen, setIsPhoneModalOpen] = useState(false);
 
   const isStoreOwner = user?.role === 'STORE_OWNER' || user?.role === 'STORE_MANAGER';
   const isCustomer = user?.role === 'CUSTOMER';
@@ -65,6 +67,9 @@ export const ProfilePage: React.FC = () => {
   }, [isCustomer, location.hash, navigate]);
   const customerPhoneVerified = (user as any)?.phoneVerified === true ||
     (typeof (user as any)?.phoneVerifiedAt === 'string' && Number.isFinite(Date.parse((user as any).phoneVerifiedAt)));
+  const isPhoneVerified = customerPhoneVerified ||
+    (user as any)?.phoneVerified === true ||
+    Boolean((user as any)?.phoneVerifiedAt);
 
   // Resolve hidden/invalid tabs before rendering, including old bookmarked URLs.
   const requestedTab = searchParams.get('tab') || 'INFO';
@@ -814,7 +819,33 @@ export const ProfilePage: React.FC = () => {
               transition={{ duration: 0.2 }}
               className={isCustomer ? 'profile-info account-personal-card space-y-6' : 'profile-info bg-white dark:bg-zinc-900 border border-slate-200/80 dark:border-zinc-800 rounded-2xl p-6 sm:p-7 shadow-xs space-y-6'}
             >
-              {!isCustomer && <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 p-4 dark:border-sky-900 dark:bg-sky-950/25"><div><p className="text-sm font-semibold text-zinc-900 dark:text-white">Số điện thoại tài khoản</p><p className="mt-1 text-xs text-zinc-500">Xác nhận bằng tin nhắn để liên kết số điện thoại của bạn.</p></div><Link to="/phone-auth?mode=verify" className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-[#287DA8]"><Phone className="h-4 w-4" />Xác minh số điện thoại</Link></div>}
+              {!isCustomer && (
+                <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-sky-200 bg-sky-50 p-4 dark:border-sky-900 dark:bg-sky-950/25">
+                  <div>
+                    <p className="text-sm font-semibold text-zinc-900 dark:text-white">Số điện thoại tài khoản</p>
+                    <p className="mt-1 text-xs text-zinc-500">
+                      {isPhoneVerified
+                        ? `Số điện thoại ${user?.phone || phone || ''} đã được xác minh chính chủ.`
+                        : 'Xác nhận bằng tin nhắn SMS để liên kết và bảo vệ tài khoản của bạn.'}
+                    </p>
+                  </div>
+                  {isPhoneVerified ? (
+                    <span className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-100 dark:bg-emerald-950/40 text-emerald-700 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 text-xs font-semibold">
+                      <CheckCircle2 className="h-4 w-4 text-emerald-600 dark:text-emerald-400" />
+                      Đã xác minh
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => setIsPhoneModalOpen(true)}
+                      className="inline-flex min-h-11 items-center gap-2 text-sm font-semibold text-[#0E6BA8] hover:text-[#0B5586] dark:text-sky-400 dark:hover:text-sky-300 transition-colors cursor-pointer"
+                    >
+                      <Phone className="h-4 w-4" />
+                      Xác minh số điện thoại
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Avatar / Store Logo Section */}
               <div className={isCustomer ? 'profile-avatar account-profile-card' : 'profile-avatar flex flex-col sm:flex-row sm:items-center gap-5'}>
@@ -863,11 +894,27 @@ export const ProfilePage: React.FC = () => {
                 </div>
               </div>
 
-              {isCustomer && <div className="account-phone-notice" role="status">
-                {customerPhoneVerified ? <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0" /> : <Phone aria-hidden="true" className="h-4 w-4 shrink-0" />}
-                <p>{customerPhoneVerified ? 'Số điện thoại đã xác minh' : 'Bảo vệ tài khoản bằng số điện thoại.'}</p>
-                {!customerPhoneVerified && <Link to="/phone-auth?mode=verify" aria-label="Xác minh số điện thoại">Xác minh<ChevronRight aria-hidden="true" className="h-3.5 w-3.5" /></Link>}
-              </div>}
+              {isCustomer && (
+                <div className="account-phone-notice" role="status">
+                  {isPhoneVerified ? (
+                    <CheckCircle2 aria-hidden="true" className="h-4 w-4 shrink-0 text-emerald-600" />
+                  ) : (
+                    <Phone aria-hidden="true" className="h-4 w-4 shrink-0 text-[#0E6BA8]" />
+                  )}
+                  <p>{isPhoneVerified ? 'Số điện thoại đã xác minh chính chủ' : 'Bảo vệ tài khoản bằng số điện thoại.'}</p>
+                  {!isPhoneVerified && (
+                    <button
+                      type="button"
+                      onClick={() => setIsPhoneModalOpen(true)}
+                      aria-label="Xác minh số điện thoại"
+                      className="inline-flex items-center gap-1 font-semibold text-[#0E6BA8] hover:underline cursor-pointer"
+                    >
+                      Xác minh
+                      <ChevronRight aria-hidden="true" className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Form Input Grid */}
               <form onSubmit={handleSaveProfile} aria-busy={isCustomer ? isSaving : undefined} className={isCustomer ? 'account-contact-card space-y-5' : 'space-y-5'}>
@@ -1666,6 +1713,19 @@ export const ProfilePage: React.FC = () => {
           navigate('/login', { replace: true });
         }}
         user={user}
+      />
+
+      {/* Phone Verification Modal Popup */}
+      <PhoneVerificationModal
+        isOpen={isPhoneModalOpen}
+        onClose={() => setIsPhoneModalOpen(false)}
+        initialPhone={isStoreOwner ? (user?.phone || storePhone || phone) : (user?.phone || phone)}
+        onSuccess={(verifiedPhone) => {
+          if (!phone) setPhone(verifiedPhone);
+          if (isStoreOwner && !storePhone) setStorePhone(verifiedPhone);
+          setSuccessToast(`Đã xác minh số điện thoại ${verifiedPhone} thành công!`);
+          setTimeout(() => setSuccessToast(null), 4000);
+        }}
       />
     </motion.div>
   );
