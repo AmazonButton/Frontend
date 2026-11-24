@@ -51,11 +51,19 @@ export const Navbar: React.FC = () => {
   }, []);
 
   // Sync user avatar with ProfilePage storage and realtime event
-  const [userAvatar, setUserAvatar] = useState<string | null>(() => {
-    if (!user) return null;
-    const uid = user.id || 'store-owner';
-    return localStorage.getItem(`sob_avatar_${uid}`) || (user as any)?.avatar || null;
-  });
+  const getResolvedAvatar = (u: any) => {
+    if (!u) return null;
+    const uid = u.id || u.userId || 'store-owner';
+    return (
+      u.avatarUrl ||
+      u.avatar ||
+      (u.role === 'STORE_OWNER' && u.store?.logoUrl ? u.store.logoUrl : null) ||
+      (typeof window !== 'undefined' ? localStorage.getItem(`sob_avatar_${uid}`) : null) ||
+      null
+    );
+  };
+
+  const [userAvatar, setUserAvatar] = useState<string | null>(() => getResolvedAvatar(user));
 
   useEffect(() => {
     const syncAvatar = (e?: any) => {
@@ -63,12 +71,7 @@ export const Navbar: React.FC = () => {
         setUserAvatar(e.detail);
         return;
       }
-      if (!user) {
-        setUserAvatar(null);
-        return;
-      }
-      const uid = user.id || 'store-owner';
-      setUserAvatar(localStorage.getItem(`sob_avatar_${uid}`) || (user as any)?.avatar || null);
+      setUserAvatar(getResolvedAvatar(user));
     };
 
     syncAvatar();

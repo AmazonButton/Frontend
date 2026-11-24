@@ -35,6 +35,8 @@ export interface User {
   capabilities?: RoleCapabilities | null;
   platformMemberships?: PlatformMembershipInfo[];
   emailVerified?: boolean;
+  avatarUrl?: string | null;
+  avatar?: string | null;
   storeId?: string | null;
   customerProfileId?: string | null;
   store?: Store | null;
@@ -50,6 +52,7 @@ export interface Store {
   phone: string;
   email: string;
   address: string;
+  logoUrl?: string | null;
   status: 'PENDING_APPROVAL' | 'ACTIVE' | 'SUSPENDED' | 'REJECTED' | string;
   rejectionReason?: string | null;
   approvedAt?: string | null;

@@ -40,6 +40,7 @@ const BecomeStoreOwnerPage = React.lazy(() => import('./pages/customer/BecomeSto
 const StoreFinancePage = React.lazy(() => import('./pages/store/StoreFinancePage').then((module) => ({ default: module.StoreFinancePage })));
 const StoreServicePlansPage = React.lazy(() => import('./pages/store/StoreServicePlansPage').then(module => ({ default: module.StoreServicePlansPage })));
 const AdminPayoutsPage = React.lazy(() => import('./pages/admin/AdminPayoutsPage').then((module) => ({ default: module.AdminPayoutsPage })));
+const AdminRefundsPage = React.lazy(() => import('./pages/admin/AdminRefundsPage').then((module) => ({ default: module.AdminRefundsPage })));
 const AdminRentalActivationPage = React.lazy(() => import('./pages/admin/AdminRentalActivationPanel').then(module => ({ default: module.AdminRentalActivationPage })));
 const SystemStaffWorkspace = React.lazy(() => import('./pages/system-staff/SystemStaffWorkspace').then(module => ({ default: module.SystemStaffWorkspace })));
 const DriverDeliveryPage = React.lazy(() => import('./pages/operations/DriverDeliveryPage').then(module => ({ default: module.DriverDeliveryPage })));
@@ -249,6 +250,7 @@ export const App: React.FC = () => {
           >
             <Route path="/admin/dashboard" element={<AdminDashboard />} />
             <Route path="/admin/payouts" element={<AdminPayoutsPage />} />
+            <Route path="/admin/refunds" element={<AdminRefundsPage />} />
             <Route path="/admin/identity" element={<Navigate to="/admin/dashboard" replace />} />
             <Route path="/admin/rental-activation" element={<AdminRentalActivationPage />} />
             <Route path="/admin/profile" element={<ProfilePage />} />

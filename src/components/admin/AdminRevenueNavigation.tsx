@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { BarChart3, ChevronDown, Wallet } from 'lucide-react';
+import { BarChart3, ChevronDown, RotateCcw, Wallet } from 'lucide-react';
 
 export const ADMIN_REVENUE_LINKS = [
   { to: '/admin/dashboard?section=ANALYTICS', label: 'Tổng quan doanh thu', icon: BarChart3 },
-  { to: '/admin/payouts', label: 'Theo dõi chi trả', icon: Wallet },
+  { to: '/admin/payouts', label: 'Chi trả ví cửa hàng', icon: Wallet },
+  { to: '/admin/refunds', label: 'Hoàn tiền PayOS', icon: RotateCcw },
 ];
 
 export const AdminRevenueNavigation: React.FC<{
@@ -14,7 +15,7 @@ export const AdminRevenueNavigation: React.FC<{
 }> = ({ mobile = false, collapsed = false, onExpandSidebar, onNavigate }) => {
   const location = useLocation();
   const section = new URLSearchParams(location.search).get('section');
-  const isRevenue = location.pathname === '/admin/payouts' || location.pathname === '/admin/dashboard' && section === 'ANALYTICS';
+  const isRevenue = location.pathname === '/admin/payouts' || location.pathname === '/admin/refunds' || (location.pathname === '/admin/dashboard' && section === 'ANALYTICS');
   const [expanded, setExpanded] = useState(isRevenue);
   const trigger = useRef<HTMLButtonElement>(null);
   const reducedMotion = useReducedMotion();
@@ -34,7 +35,11 @@ export const AdminRevenueNavigation: React.FC<{
       {expanded && !collapsed && <motion.div id={submenuId} key="revenue-submenu" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: reducedMotion ? 0 : 0.18, ease: 'easeOut' }} className="overflow-hidden">
         <ul className="my-1 ml-5 space-y-1 border-l border-zinc-200 pl-2 dark:border-zinc-800">
           {ADMIN_REVENUE_LINKS.map(({ to, label, icon: Icon }) => {
-            const active = to === '/admin/payouts' ? location.pathname === '/admin/payouts' : location.pathname === '/admin/dashboard' && section === 'ANALYTICS';
+            const active = to === '/admin/payouts'
+              ? location.pathname === '/admin/payouts'
+              : to === '/admin/refunds'
+                ? location.pathname === '/admin/refunds'
+                : location.pathname === '/admin/dashboard' && section === 'ANALYTICS';
             return <li key={to}><Link to={to} onClick={onNavigate} aria-current={active ? 'page' : undefined} className={`flex min-h-11 items-center gap-2 rounded-lg px-2.5 py-2 text-xs leading-5 transition-colors duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#287DA8] ${active ? 'bg-[#287DA8]/10 font-semibold text-[#287DA8] dark:bg-sky-950/50 dark:text-sky-300' : 'font-medium text-zinc-500 hover:bg-zinc-100 hover:text-[#287DA8] dark:text-zinc-400 dark:hover:bg-zinc-800 dark:hover:text-sky-300'}`}>
               <Icon aria-hidden="true" size={16} strokeWidth={1.5} className="shrink-0" /><span>{label}</span>
             </Link></li>;

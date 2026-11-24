@@ -118,6 +118,8 @@ export function normalizeAuthUser(rawUser: any): User {
       ? rawUser.platformMemberships
       : undefined,
     storeId: resolvedStoreId || null,
+    avatarUrl: rawUser?.avatarUrl || rawUser?.avatar || rawUser?.picture || null,
+    avatar: rawUser?.avatarUrl || rawUser?.avatar || rawUser?.picture || null,
     customerProfileId:
       rawUser?.customerProfileId ||
       rawUser?.customerProfile?.customerId ||
@@ -129,6 +131,7 @@ export function normalizeAuthUser(rawUser: any): User {
           id: String(rawStore.storeId || rawStore.id || ''),
           storeId: String(rawStore.storeId || rawStore.id || ''),
           status: String(rawStore.status || 'ACTIVE'),
+          logoUrl: rawStore.logoUrl || rawStore.logo || null,
         }
       : null,
   };

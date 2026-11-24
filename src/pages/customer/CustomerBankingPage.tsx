@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import { CreditCard, ExternalLink, Landmark, Loader2, Plus, RefreshCw, ShieldCheck, Star, Trash2, X } from 'lucide-react';
+import { CheckCircle2, ChevronDown, CreditCard, ExternalLink, Info, Landmark, Loader2, Plus, RefreshCw, ShieldCheck, Star, Trash2, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { financeError } from '../../services/store-finance-flow';
@@ -24,6 +24,8 @@ export const CustomerBankingWorkspace: React.FC = () => {
   const [bankBin, setBankBin] = useState('');
   const [accountNumber, setAccountNumber] = useState('');
   const [accountName, setAccountName] = useState('');
+  const [lookup, setLookup] = useState<{ bankBin: string; bankName: string; accountNumberMasked: string; accountName: string } | null>(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
   const [isDefault, setIsDefault] = useState(true);
   const [confirmed, setConfirmed] = useState(false);
   const [uncertain, setUncertain] = useState(false);
@@ -97,6 +99,37 @@ export const CustomerBankingWorkspace: React.FC = () => {
   useEffect(() => { if (formOpen && !banks.length && !banksLoading && !banksError) void loadBanks(); }, [formOpen, banks.length, banksLoading, banksError, loadBanks]);
   useEffect(() => { if (formOpen) formRef.current?.focus(); }, [formOpen]);
   useEffect(() => { if (action) actionHeading.current?.focus(); }, [action]);
+
+  useEffect(() => {
+    if (!formOpen || banksLoading || !/^\d{6}$/.test(bankBin) || !/^[0-9]{6,20}$/.test(accountNumber.trim())) {
+      setLookup(null);
+      return;
+    }
+    let active = true;
+    setLookupLoading(true);
+    const timer = setTimeout(async () => {
+      try {
+        const res = await api.post('/stores/bank-accounts/lookup', {
+          bankBin,
+          accountNumber: accountNumber.trim(),
+        });
+        const data = res?.data?.data || res?.data;
+        if (active && data?.accountName) {
+          setLookup(data);
+          setAccountName(data.accountName);
+          setConfirmed(true);
+        }
+      } catch {
+        if (active) setLookup(null);
+      } finally {
+        if (active) setLookupLoading(false);
+      }
+    }, 700);
+    return () => {
+      active = false;
+      clearTimeout(timer);
+    };
+  }, [formOpen, bankBin, accountNumber, banksLoading]);
 
   const loadStatus = useCallback(async (accountId: string) => {
     if (statusRunning.current || !alive.current) return;
@@ -179,7 +212,7 @@ export const CustomerBankingWorkspace: React.FC = () => {
       dispatched = true;
       const account = await flow.addCustomerAccount(payload);
       if (!alive.current) return;
-      setFormOpen(false); setAccountNumber(''); setAccountName(''); setConfirmed(false);
+      setFormOpen(false); setAccountNumber(''); setAccountName(''); setConfirmed(false); setLookup(null);
       setNotice('Đã thêm tài khoản. Hãy xác minh chính chủ trước khi sử dụng để nhận hoàn tiền.');
       selectAfterCreate(account);
       await loadAccounts();
@@ -253,38 +286,433 @@ export const CustomerBankingWorkspace: React.FC = () => {
   const paymentRecorded = ['PAID', 'PENDING_RECONCILIATION'].includes(session?.paymentStatus || '') && !canRetryMismatch;
   const summary = session?.refundSummary;
 
-  return <main className="customer-banking mx-auto w-full max-w-6xl space-y-5 rounded-xl bg-slate-100 p-4 text-slate-900 sm:p-6">
-    <header className="flex flex-wrap items-end justify-between gap-4"><div><p className="text-xs font-semibold text-[#287DA8] dark:text-sky-300">Tài khoản của bạn</p><h1 className="mt-1 text-2xl font-semibold tracking-tight">Ngân hàng & hoàn tiền</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-zinc-500 dark:text-zinc-400">Quản lý tài khoản nhận hoàn cọc, xác minh chính chủ và theo dõi khoản tiền xác minh được hoàn lại.</p></div><button type="button" className={bankButton} disabled={loading || historyLoading || !!busy} onClick={async () => { await loadAccounts(); if (selectedRef.current) await loadStatus(selectedRef.current); await loadHistory(); }}><RefreshCw size={16} />Tải lại</button></header>
-    {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">{notice}</p>}
-    <section className="grid gap-4 sm:grid-cols-3" aria-label="Tổng quan tài khoản ngân hàng">{[[Landmark, 'Tài khoản đã thêm', accountsError ? '—' : loading && !accounts.length ? '…' : accounts.length], [ShieldCheck, 'Đã xác minh chính chủ', accountsError ? '—' : loading && !accounts.length ? '…' : accounts.filter(a => a.verificationStatus === 'VERIFIED').length], [CreditCard, 'Tài khoản mặc định', accountsError ? 'Chưa tải được' : accounts.find(a => a.isDefault)?.bankName || 'Chưa thiết lập']].map(([Icon, label, value]: any) => <div key={label} className={`${card} customer-banking-stat`}><div className="flex items-center gap-2"><Icon className="h-4 w-4 text-slate-600" /><p className="text-xs font-medium text-slate-600">{label}</p></div><p className="mt-2 text-2xl font-bold leading-tight tracking-tight text-slate-900">{value}</p></div>)}</section>
-    <section className={card} aria-labelledby="customer-banks-title">
-      <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 id="customer-banks-title" className="font-semibold">Tài khoản nhận hoàn tiền</h2><p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Dùng tài khoản đứng tên bạn để hệ thống đối chiếu giao dịch.</p></div><button ref={addRef} type="button" className={`${primaryButton} min-h-11 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#287DA8]`} disabled={!!busy || !!action || statusLoading || loading || !!accountsError} aria-expanded={formOpen} aria-controls="customer-bank-form" onClick={() => { setFormOpen(value => !value); setFormError(''); setUncertain(false); }}><Plus size={16} />Thêm tài khoản</button></div>
-      <div className="mt-4"><BankError message={accountsError} retry={() => void loadAccounts()} busy={loading} /></div>
-      {formOpen && <form id="customer-bank-form" onSubmit={createAccount} className="mt-5 space-y-4 rounded-xl border border-zinc-200 bg-zinc-50 p-4 dark:border-zinc-800 dark:bg-zinc-950/50"><div className="flex items-center justify-between"><h3 className="text-sm font-semibold">Thêm tài khoản ngân hàng</h3><button type="button" disabled={!!busy} aria-label="Đóng biểu mẫu ngân hàng" className={bankButton} onClick={() => { setFormOpen(false); addRef.current?.focus(); }}><X size={16} /></button></div><div className="grid gap-4 sm:grid-cols-2"><label className="text-sm">Ngân hàng<select ref={formRef} className={bankInput} value={bankBin} required disabled={banksLoading || !!busy} onChange={event => { setBankBin(event.target.value); setConfirmed(false); }}><option value="">{banksLoading ? 'Đang tải ngân hàng…' : 'Chọn ngân hàng'}</option>{banks.map(bank => <option key={bank.bin} value={bank.bin}>{bank.shortName} — {bank.name}</option>)}</select></label><label className="text-sm">Số tài khoản<input className={bankInput} required type="text" inputMode="numeric" pattern="[0-9]{6,20}" minLength={6} maxLength={20} autoComplete="off" disabled={!!busy} value={accountNumber} onChange={event => { setAccountNumber(event.target.value); setConfirmed(false); }} /></label></div><label className="block text-sm">Tên chủ tài khoản<input className={bankInput} required maxLength={150} autoComplete="name" placeholder="Ví dụ: NGUYEN VAN A" disabled={!!busy} value={accountName} onChange={event => { setAccountName(event.target.value); setConfirmed(false); }} /><span className="mt-1 block text-xs text-zinc-500">Nhập đúng tên tại ngân hàng. Tên nhập vào sẽ được đối chiếu trong bước xác minh.</span></label><label className="flex items-start gap-2 text-sm"><input type="checkbox" checked={isDefault} disabled={!!busy} onChange={event => setIsDefault(event.target.checked)} className="mt-1 h-4 w-4 accent-[#287DA8]" />Chọn tài khoản này để nhận hoàn tiền mặc định</label><label className="flex items-start gap-2 text-sm"><input type="checkbox" required checked={confirmed} disabled={!!busy} onChange={event => setConfirmed(event.target.checked)} className="mt-1 h-4 w-4 accent-[#287DA8]" />Tôi xác nhận thông tin đã nhập là tài khoản ngân hàng của mình.</label><BankError message={banksError} retry={() => void loadBanks()} busy={banksLoading} /><BankError message={formError} /><button type="submit" className={`${primaryButton} min-h-11 text-sm`} disabled={!!busy || statusLoading || !confirmed || !bankBin || !!banksError || banksLoading || uncertain || !!accountsError}>{busy === 'create' && <Loader2 size={16} className="motion-safe:animate-spin" />}Lưu tài khoản</button></form>}
-      <div className="mt-4"><BankError message={actionError} /></div>
-      {action && <div role="region" aria-labelledby="customer-bank-action-title" className="mt-5 rounded-xl border border-sky-200 bg-sky-50/60 p-4 dark:border-sky-900 dark:bg-sky-950/20" onKeyDown={event => { if (event.key === 'Escape') closeAction(); }}>
-        <h3 id="customer-bank-action-title" ref={actionHeading} tabIndex={-1} className="font-semibold outline-none">{action.kind === 'delete' ? 'Xóa tài khoản ngân hàng?' : 'Chọn tài khoản nhận hoàn tiền mặc định?'}</h3>
-        <p className="mt-2 text-sm">{action.account.bankName} · {action.account.accountNumberMasked} · {action.account.accountName}</p>
-        <p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{action.kind === 'delete'
-          ? 'Thao tác xóa không thể hoàn tác. Hệ thống sẽ từ chối nếu tài khoản còn phiên xác minh, khoản hoàn đang xử lý hoặc lịch sử giao dịch tài chính cần lưu giữ.'
-          : 'Chỉ tài khoản đã xác minh chính chủ mới được chọn. Việc đổi mặc định không có nghĩa các khoản hoàn đang xử lý sẽ tự đổi tài khoản nhận.'}</p>
-        {action.kind === 'delete' && action.account.isDefault && <p className="mt-2 text-sm text-amber-800 dark:text-amber-300">Đây là tài khoản mặc định. Nếu xóa thành công, hãy chọn tài khoản đã xác minh khác để nhận hoàn tiền.</p>}
-        <div className="mt-4 flex flex-wrap gap-2">
-          <button type="button" disabled={!!busy || statusLoading || loading || !!accountsError} onClick={confirmAction} className={action.kind === 'delete' ? bankButton + ' text-rose-700 dark:text-rose-300' : primaryButton + ' min-h-11 text-sm'}>
-            {!!busy && <Loader2 size={16} className="motion-safe:animate-spin" />}{action.kind === 'delete' ? 'Xác nhận xóa' : 'Xác nhận đặt mặc định'}
-          </button>
-          <button type="button" disabled={!!busy} onClick={closeAction} className={bankButton}>Giữ nguyên</button>
+  return <main className="customer-banking mx-auto w-full max-w-6xl space-y-6 p-4 sm:p-6 lg:p-8">
+    <header className="flex flex-wrap items-end justify-between gap-4 pb-2 border-b border-zinc-200/80 dark:border-zinc-800">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-[#287DA8] dark:text-sky-400">Tài khoản của bạn</p>
+        <h1 className="mt-1 text-2xl font-bold tracking-tight text-zinc-900 dark:text-white">Tài khoản ngân hàng & hoàn tiền</h1>
+        <p className="mt-1.5 max-w-2xl text-xs sm:text-sm text-zinc-500 dark:text-zinc-400">
+          Quản lý tài khoản ngân hàng thụ hưởng chính chủ để nhận hoàn tiền hủy đơn hoặc hoàn cọc thiết bị qua cổng chuyển khoản PayOS 24/7.
+        </p>
+      </div>
+      <button
+        type="button"
+        className={`${bankButton} text-xs !py-2`}
+        disabled={loading || historyLoading || !!busy}
+        onClick={async () => {
+          await loadAccounts();
+          if (selectedRef.current) await loadStatus(selectedRef.current);
+          await loadHistory();
+        }}
+      >
+        <RefreshCw size={15} />
+        <span>Tải lại</span>
+      </button>
+    </header>
+
+    {notice && (
+      <div role="status" className="flex items-center gap-2.5 rounded-xl border border-emerald-200 bg-emerald-50/90 p-4 text-xs sm:text-sm text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-300">
+        <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
+        <p>{notice}</p>
+      </div>
+    )}
+
+    {/* 3 Thẻ chỉ số tổng quan */}
+    <section className="grid gap-4 sm:grid-cols-3" aria-label="Tổng quan tài khoản ngân hàng">
+      <div className={`${card} relative overflow-hidden group hover:border-[#287DA8]/40 transition-all duration-200 customer-banking-stat`}>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Tài khoản đã liên kết</span>
+          <span className="p-2 rounded-xl bg-sky-50 dark:bg-sky-950/40 text-[#287DA8] dark:text-sky-300">
+            <Landmark className="w-4 h-4" />
+          </span>
         </div>
-      </div>}
-      <div aria-busy={loading} className="mt-4">{loading && !accounts.length ? <p role="status" className="py-8 text-sm text-zinc-500">Đang tải tài khoản…</p> : accounts.length ? <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">{accounts.map(account => <li key={account.id} className="flex flex-wrap items-center justify-between gap-4 py-4">
-        <div><div className="flex flex-wrap items-center gap-2"><h3 className="text-sm font-semibold">{account.bankName}</h3>{account.isDefault && <span className="text-xs text-[#287DA8] dark:text-sky-300">Mặc định</span>}<BankBadge value={account.verificationStatus} /></div><p className="mt-2 text-sm tabular-nums">{account.accountNumberMasked}</p><p className="mt-1 text-xs text-zinc-500 dark:text-zinc-400">{account.accountName}</p></div>
-        <div className="flex flex-wrap gap-2">
-          <button type="button" className={bankButton} disabled={!!busy || !!action || statusLoading || loading || !!accountsError} aria-pressed={selected?.id === account.id} onClick={() => selectAccount(account)}>Xem xác minh & hoàn tiền</button>
-          {account.verificationStatus === 'VERIFIED' && !account.isDefault && <button type="button" className={bankButton} disabled={!!busy || !!action || formOpen || statusLoading || loading || !!accountsError} aria-label={'Đặt mặc định tài khoản ' + account.accountNumberMasked} onClick={event => openAction('default', account, event.currentTarget)}><Star size={16} />Đặt mặc định</button>}
-          <button type="button" className={bankButton} disabled={!!busy || !!action || formOpen || statusLoading || loading || !!accountsError} aria-label={'Xóa tài khoản ' + account.accountNumberMasked} onClick={event => openAction('delete', account, event.currentTarget)}><Trash2 size={16} />Xóa tài khoản</button>
+        <p className="mt-3 text-2xl font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">
+          {accountsError ? '—' : loading && !accounts.length ? '…' : accounts.length}
+        </p>
+        <p className="mt-1 text-xs text-zinc-500">
+          Sẵn sàng nhận thanh toán hoàn tiền
+        </p>
+      </div>
+
+      <div className={`${card} relative overflow-hidden group hover:border-[#287DA8]/40 transition-all duration-200 customer-banking-stat`}>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Đã xác minh chính chủ</span>
+          <span className="p-2 rounded-xl bg-emerald-50 dark:bg-emerald-950/40 text-emerald-600 dark:text-emerald-400">
+            <ShieldCheck className="w-4 h-4" />
+          </span>
         </div>
-      </li>)}</ul> : !accountsError && <div className="py-8 text-center"><Landmark className="mx-auto h-8 w-8 text-zinc-400" /><h3 className="mt-3 text-sm font-semibold">Chưa có tài khoản ngân hàng</h3><p className="mt-1 text-sm text-zinc-500">Thêm tài khoản để chuẩn bị nhận hoàn cọc khi kết thúc hợp đồng thuê.</p></div>}</div>
+        <p className="mt-3 text-2xl font-bold tracking-tight text-zinc-900 dark:text-white tabular-nums">
+          {accountsError ? '—' : loading && !accounts.length ? '…' : accounts.filter(a => a.verificationStatus === 'VERIFIED').length}
+        </p>
+        <p className="mt-1 text-xs text-zinc-500">
+          Được hệ thống và đối soát xác nhận
+        </p>
+      </div>
+
+      <div className={`${card} relative overflow-hidden group hover:border-[#287DA8]/40 transition-all duration-200 customer-banking-stat`}>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-semibold text-zinc-500 uppercase tracking-wider">Tài khoản mặc định</span>
+          <span className="p-2 rounded-xl bg-amber-50 dark:bg-amber-950/40 text-amber-600 dark:text-amber-400">
+            <CreditCard className="w-4 h-4" />
+          </span>
+        </div>
+        <p className="mt-3 text-lg font-bold tracking-tight text-zinc-900 dark:text-white truncate">
+          {accountsError ? 'Chưa tải được' : accounts.find(a => a.isDefault)?.bankName || 'Chưa thiết lập'}
+        </p>
+        <p className="mt-1 text-xs text-zinc-500 font-mono">
+          {accounts.find(a => a.isDefault)?.accountNumberMasked || 'Ưu tiên nhận hoàn tiền PayOS'}
+        </p>
+      </div>
     </section>
+
+    {/* Khối quản lý danh sách tài khoản */}
+    <section className={`${card} space-y-4`} aria-labelledby="customer-banks-title">
+      <div className="flex flex-wrap items-center justify-between gap-3 pb-3 border-b border-zinc-100 dark:border-zinc-800">
+        <div>
+          <h2 id="customer-banks-title" className="text-base font-bold text-zinc-900 dark:text-white">
+            Tài khoản nhận hoàn tiền
+          </h2>
+          <p className="mt-0.5 text-xs text-zinc-500 dark:text-zinc-400">
+            Dùng tài khoản đứng tên bạn để hệ thống đối chiếu giao dịch và Admin chi trả chuyển hoàn.
+          </p>
+        </div>
+        <button
+          ref={addRef}
+          type="button"
+          className={`${primaryButton} min-h-10 text-xs px-3.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-[#287DA8] shadow-xs`}
+          disabled={!!busy || !!action || statusLoading || loading || !!accountsError}
+          aria-expanded={formOpen}
+          aria-controls="customer-bank-form"
+          onClick={() => {
+            setFormOpen(value => !value);
+            setFormError('');
+            setUncertain(false);
+            setLookup(null);
+          }}
+        >
+          <Plus size={15} />
+          <span>Thêm tài khoản</span>
+        </button>
+      </div>
+
+      <div className="mt-4"><BankError message={accountsError} retry={() => void loadAccounts()} busy={loading} /></div>
+
+      {/* Biểu mẫu Thêm tài khoản ngân hàng (tự động tra cứu NAPAS chuẩn như Chủ cửa hàng) */}
+      {formOpen && (
+        <form
+          id="customer-bank-form"
+          onSubmit={createAccount}
+          className="rounded-2xl border border-[#287DA8]/30 bg-zinc-50 dark:bg-zinc-900/90 p-5 sm:p-6 shadow-sm space-y-4"
+        >
+          <div className="flex items-center justify-between pb-3 border-b border-zinc-200/80 dark:border-zinc-800">
+            <div className="flex items-center gap-2.5">
+              <div className="p-2 rounded-xl bg-[#287DA8]/10 text-[#287DA8]">
+                <CreditCard className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Thêm tài khoản ngân hàng</h3>
+                <p className="text-[11px] text-zinc-500">Hệ thống hỗ trợ tự động tra cứu tên chủ tài khoản qua NAPAS</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={!!busy}
+              aria-label="Đóng biểu mẫu ngân hàng"
+              className="p-1.5 rounded-lg text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200 hover:bg-zinc-200/60 dark:hover:bg-zinc-800 transition"
+              onClick={() => {
+                setFormOpen(false);
+                setLookup(null);
+                addRef.current?.focus();
+              }}
+            >
+              <X size={16} />
+            </button>
+          </div>
+
+          <div className="grid gap-4 sm:grid-cols-2">
+            <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Ngân hàng
+              <select
+                ref={formRef}
+                className={`${bankInput} mt-1`}
+                value={bankBin}
+                required
+                disabled={banksLoading || !!busy}
+                onChange={event => {
+                  setBankBin(event.target.value);
+                  setConfirmed(false);
+                  setLookup(null);
+                }}
+              >
+                <option value="">{banksLoading ? 'Đang tải ngân hàng…' : 'Chọn ngân hàng'}</option>
+                {banks.map(bank => (
+                  <option key={bank.bin} value={bank.bin}>
+                    {bank.shortName} — {bank.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Số tài khoản
+              <input
+                className={`${bankInput} mt-1`}
+                required
+                type="text"
+                inputMode="numeric"
+                pattern="[0-9]{6,20}"
+                minLength={6}
+                maxLength={20}
+                autoComplete="off"
+                disabled={!!busy}
+                placeholder="Nhập số tài khoản"
+                value={accountNumber}
+                onChange={event => {
+                  setAccountNumber(event.target.value);
+                  setConfirmed(false);
+                  setLookup(null);
+                }}
+              />
+            </label>
+          </div>
+
+          {/* Trạng thái tra cứu NAPAS */}
+          {lookupLoading && (
+            <div className="flex items-center gap-2 p-2.5 rounded-xl bg-sky-50 dark:bg-sky-950/30 text-sky-700 dark:text-sky-300 text-xs">
+              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+              <span>Đang tra cứu tên chủ tài khoản qua cổng NAPAS 24/7…</span>
+            </div>
+          )}
+
+          {lookup && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50/80 p-3.5 dark:border-emerald-900/60 dark:bg-emerald-950/20 text-xs space-y-1">
+              <div className="flex items-center gap-1.5 text-emerald-800 dark:text-emerald-300 font-semibold">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                <span>Xác thực thành công qua hệ thống liên ngân hàng NAPAS</span>
+              </div>
+              <p className="text-sm font-bold text-zinc-900 dark:text-white uppercase tracking-wider">
+                {lookup.accountName}
+              </p>
+              <p className="text-[11px] text-zinc-500 dark:text-zinc-400">
+                {lookup.bankName} · {lookup.accountNumberMasked}
+              </p>
+            </div>
+          )}
+
+          <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+            Tên chủ tài khoản
+            <input
+              className={`${bankInput} mt-1 font-semibold uppercase`}
+              required
+              maxLength={150}
+              autoComplete="name"
+              placeholder="Ví dụ: NGUYEN VAN A"
+              disabled={!!busy}
+              value={accountName}
+              onChange={event => {
+                setAccountName(event.target.value);
+                setConfirmed(false);
+              }}
+            />
+            <span className="mt-1 block text-[11px] text-zinc-500 font-normal">
+              Nhập đúng tên tại ngân hàng. Tên nhập vào sẽ được đối chiếu trong bước xác minh và chuyển tiền hoàn.
+            </span>
+          </label>
+
+          <div className="space-y-2 pt-1">
+            <label className="flex items-center gap-2 text-xs font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={isDefault}
+                disabled={!!busy}
+                onChange={event => setIsDefault(event.target.checked)}
+                className="h-4 w-4 rounded border-zinc-300 text-[#287DA8] focus:ring-[#287DA8]"
+              />
+              <span>Chọn tài khoản này để nhận hoàn tiền mặc định</span>
+            </label>
+
+            <label className="flex items-center gap-2 text-xs font-medium text-zinc-700 dark:text-zinc-300 cursor-pointer">
+              <input
+                type="checkbox"
+                required
+                checked={confirmed}
+                disabled={!!busy}
+                onChange={event => setConfirmed(event.target.checked)}
+                className="h-4 w-4 rounded border-zinc-300 text-[#287DA8] focus:ring-[#287DA8]"
+              />
+              <span>Tôi xác nhận thông tin đã nhập là tài khoản ngân hàng của mình.</span>
+            </label>
+          </div>
+
+          <BankError message={banksError} retry={() => void loadBanks()} busy={banksLoading} />
+          <BankError message={formError} />
+
+          <div className="flex items-center justify-end gap-2 pt-2">
+            <button
+              type="button"
+              disabled={!!busy}
+              onClick={() => {
+                setFormOpen(false);
+                setLookup(null);
+                addRef.current?.focus();
+              }}
+              className={bankButton}
+            >
+              Hủy bỏ
+            </button>
+            <button
+              type="submit"
+              className={`${primaryButton} min-h-10 text-xs px-4`}
+              disabled={!!busy || statusLoading || !confirmed || !bankBin || !!banksError || banksLoading || uncertain || !!accountsError}
+            >
+              {busy === 'create' && <Loader2 size={15} className="motion-safe:animate-spin" />}
+              <span>Lưu tài khoản</span>
+            </button>
+          </div>
+        </form>
+      )}
+
+      <div className="mt-4"><BankError message={actionError} /></div>
+
+      {action && (
+        <div
+          role="region"
+          aria-labelledby="customer-bank-action-title"
+          className="rounded-2xl border border-sky-200 bg-sky-50/70 p-4 sm:p-5 dark:border-sky-900/60 dark:bg-sky-950/20"
+          onKeyDown={event => {
+            if (event.key === 'Escape') closeAction();
+          }}
+        >
+          <h3 id="customer-bank-action-title" ref={actionHeading} tabIndex={-1} className="font-bold text-sm text-zinc-900 dark:text-white outline-none">
+            {action.kind === 'delete' ? 'Xóa tài khoản ngân hàng?' : 'Chọn tài khoản nhận hoàn tiền mặc định?'}
+          </h3>
+          <p className="mt-2 text-xs font-semibold text-zinc-800 dark:text-zinc-200">
+            {action.account.bankName} · {action.account.accountNumberMasked} · {action.account.accountName}
+          </p>
+          <p className="mt-1 text-xs leading-5 text-zinc-600 dark:text-zinc-400">
+            {action.kind === 'delete'
+              ? 'Thao tác xóa không thể hoàn tác. Hệ thống sẽ từ chối nếu tài khoản còn phiên xác minh, khoản hoàn đang xử lý hoặc lịch sử giao dịch tài chính cần lưu giữ.'
+              : 'Chỉ tài khoản đã xác minh chính chủ mới được chọn. Việc đổi mặc định không có nghĩa các khoản hoàn đang xử lý sẽ tự đổi tài khoản nhận.'}
+          </p>
+          {action.kind === 'delete' && action.account.isDefault && (
+            <p className="mt-2 text-xs text-amber-700 dark:text-amber-300 font-medium">
+              Đây là tài khoản mặc định. Nếu xóa thành công, hãy chọn tài khoản đã xác minh khác để nhận hoàn tiền.
+            </p>
+          )}
+          <div className="mt-4 flex flex-wrap gap-2">
+            <button
+              type="button"
+              disabled={!!busy || statusLoading || loading || !!accountsError}
+              onClick={confirmAction}
+              className={action.kind === 'delete' ? `${bankButton} text-rose-700 dark:text-rose-300 !border-rose-300` : `${primaryButton} min-h-10 text-xs px-3`}
+            >
+              {!!busy && <Loader2 size={15} className="motion-safe:animate-spin" />}
+              <span>{action.kind === 'delete' ? 'Xác nhận xóa' : 'Xác nhận đặt mặc định'}</span>
+            </button>
+            <button type="button" disabled={!!busy} onClick={closeAction} className={bankButton}>
+              Giữ nguyên
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Danh sách tài khoản ngân hàng đã lưu */}
+      <div aria-busy={loading} className="mt-4">
+        {loading && !accounts.length ? (
+          <div role="status" className="flex items-center justify-center gap-2 py-10 text-xs text-zinc-500">
+            <Loader2 className="w-4 h-4 animate-spin text-[#287DA8]" />
+            <span>Đang tải tài khoản…</span>
+          </div>
+        ) : accounts.length ? (
+          <ul className="divide-y divide-zinc-100 dark:divide-zinc-800">
+            {accounts.map(account => (
+              <li key={account.id} className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 py-4 first:pt-1 last:pb-1">
+                <div className="flex items-start gap-3 min-w-0">
+                  <div className="w-10 h-10 rounded-xl bg-[#287DA8]/10 text-[#287DA8] flex items-center justify-center shrink-0 border border-[#287DA8]/20">
+                    <CreditCard className="w-5 h-5" />
+                  </div>
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h3 className="text-sm font-bold text-zinc-900 dark:text-white truncate">{account.bankName}</h3>
+                      {account.isDefault && (
+                        <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-sky-100 text-sky-800 dark:bg-sky-900/40 dark:text-sky-300">
+                          Mặc định
+                        </span>
+                      )}
+                      <BankBadge value={account.verificationStatus} />
+                    </div>
+                    <p className="mt-1 text-sm font-mono font-medium text-zinc-800 dark:text-zinc-200 tabular-nums">
+                      {account.accountNumberMasked}
+                    </p>
+                    <p className="text-xs font-semibold uppercase text-zinc-600 dark:text-zinc-400">
+                      {account.accountName}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center gap-2 self-start sm:self-center">
+                  <button
+                    type="button"
+                    className={`${bankButton} text-xs !py-1.5`}
+                    disabled={!!busy || !!action || statusLoading || loading || !!accountsError}
+                    aria-pressed={selected?.id === account.id}
+                    onClick={() => selectAccount(account)}
+                  >
+                    Xem xác minh & hoàn tiền
+                  </button>
+                  {account.verificationStatus === 'VERIFIED' && !account.isDefault && (
+                    <button
+                      type="button"
+                      className={`${bankButton} text-xs !py-1.5`}
+                      disabled={!!busy || !!action || formOpen || statusLoading || loading || !!accountsError}
+                      aria-label={'Đặt mặc định tài khoản ' + account.accountNumberMasked}
+                      onClick={event => openAction('default', account, event.currentTarget)}
+                    >
+                      <Star size={14} />
+                      <span>Đặt mặc định</span>
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    className={`${bankButton} text-xs !py-1.5 text-rose-600 dark:text-rose-400 hover:border-rose-300`}
+                    disabled={!!busy || !!action || formOpen || statusLoading || loading || !!accountsError}
+                    aria-label={'Xóa tài khoản ' + account.accountNumberMasked}
+                    onClick={event => openAction('delete', account, event.currentTarget)}
+                  >
+                    <Trash2 size={14} />
+                    <span>Xóa tài khoản</span>
+                  </button>
+                </div>
+              </li>
+            ))}
+          </ul>
+        ) : (
+          !accountsError && (
+            <div className="py-10 text-center">
+              <div className="w-12 h-12 rounded-2xl bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mx-auto mb-3 text-zinc-400">
+                <Landmark className="w-6 h-6" />
+              </div>
+              <h3 className="text-sm font-semibold text-zinc-900 dark:text-white">Chưa có tài khoản ngân hàng</h3>
+              <p className="mt-1 text-xs text-zinc-500 max-w-sm mx-auto">
+                Thêm tài khoản để chuẩn bị nhận hoàn cọc khi kết thúc hợp đồng thuê hoặc hoàn tiền khi hủy đơn.
+              </p>
+            </div>
+          )
+        )}
+      </div>
+    </section>
+
+    {/* Chính sách hoàn tiền minh bạch */}
+    <div className="rounded-xl border border-sky-100 bg-sky-50/60 p-4 dark:border-sky-950/40 dark:bg-sky-950/20 text-xs text-sky-900 dark:text-sky-300 space-y-1">
+      <div className="flex items-center gap-2 font-bold text-sm text-[#287DA8] dark:text-sky-400">
+        <ShieldCheck className="w-4 h-4" />
+        <span>Chính sách hoàn tiền tự động qua PayOS Payout</span>
+      </div>
+      <p className="leading-5 text-zinc-600 dark:text-zinc-400">
+        Khi bạn thực hiện hủy đơn hàng đã thanh toán hoặc kết thúc hợp đồng thuê thiết bị, Quản trị viên (Admin) sẽ đối soát và gửi lệnh chuyển khoản hoàn tiền trực tiếp qua PayOS về tài khoản ngân hàng mặc định của bạn. Tiền hoàn sẽ về tài khoản Napas 24/7 một cách nhanh chóng và an toàn.
+      </p>
+    </div>
+
     {selected && <section className={`${card} border-sky-200 dark:border-sky-900`} aria-labelledby="customer-bank-session-title" aria-busy={statusLoading}><div className="flex flex-wrap items-start justify-between gap-3"><div><h2 ref={detailRef} tabIndex={-1} id="customer-bank-session-title" className="font-semibold outline-none">{selected.bankName} · {selected.accountNumberMasked}</h2><p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">{selected.accountName}</p></div>{status && <BankBadge value={status.accountVerificationStatus} />}</div><div className="mt-4"><BankError message={statusError} retry={() => void loadStatus(selected.id)} busy={statusLoading || !!busy} />{initiateError && <div className="mt-3 space-y-2"><BankError message={initiateError} /><p className="text-xs leading-5 text-zinc-500 dark:text-zinc-400">Chưa xác nhận được phiên xác minh mới. Tài khoản đã thêm vẫn được giữ lại. Kiểm tra kết quả trước khi thử khởi tạo lại; việc đọc trạng thái không bật lại dịch vụ xác minh.</p></div>}</div>{statusLoading && !status && <p role="status" className="mt-4 text-sm text-zinc-500">Đang kiểm tra phiên xác minh…</p>}{status && <><p role="status" className="mt-4 text-sm leading-6 text-zinc-600 dark:text-zinc-300">{status.message}</p>{session && <><dl className="mt-5 grid max-w-3xl gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:grid-cols-3"><div><dt className="text-xs text-zinc-500">Xác minh phiên</dt><dd className="mt-2"><BankBadge value={session.verificationStatus} /></dd></div><div><dt className="text-xs text-zinc-500">Thanh toán xác minh</dt><dd className="mt-2"><BankBadge value={session.paymentStatus} /></dd></div><div><dt className="text-xs text-zinc-500">Hoàn tiền xác minh</dt><dd className="mt-2"><BankBadge value={session.refundStatus} refund /></dd></div></dl><p className="mt-4 text-xs text-zinc-500">Hạn phiên: {bankDate(session.expiresAt)}{session.isExpired || bankSessionExpired(session.expiresAt, now) ? ' · Đã hết hạn chuyển tiền' : ''}</p>{session.rejectionReason && <p className="mt-3 text-sm text-amber-800 dark:text-amber-300">{session.rejectionReason}</p>}</>}{summary && <dl className="mt-5 grid max-w-3xl gap-3 rounded-lg border border-slate-200 bg-slate-50 p-4 sm:grid-cols-3">{[['Cần hoàn', summary.totalObligationAmount], ['Đã hoàn', summary.totalRefundedAmount], ['Còn chờ hoàn', summary.totalPendingRefundAmount]].map(([label, amount]) => <div key={String(label)}><dt className="text-xs text-zinc-500">{label}</dt><dd className="mt-1 text-base font-semibold tabular-nums">{bankMoney(amount)}</dd></div>)}</dl>}</>}{effectiveReference && <p className="mt-4 text-xs text-zinc-500">Mã phiên: <BankCopy key={effectiveReference} value={effectiveReference} label="mã phiên xác minh" /></p>}{checkoutUrl && <div className="mt-5 rounded-xl border border-sky-200 bg-sky-50/40 p-4 dark:border-sky-900 dark:bg-sky-950/20"><p className="text-sm font-semibold">{payment?.amount != null ? 'Xác minh bằng ' + bankMoney(payment.amount) : 'Tiếp tục thanh toán xác minh'}</p><p className="mt-2 text-sm leading-6 text-zinc-600 dark:text-zinc-300">Chuyển từ đúng tài khoản vừa đăng ký. Hãy hoàn tất trước {bankDate(payment?.expiresAt)}. Kết quả và tiền hoàn được cập nhật sau khi hệ thống đối soát.</p><BankPaymentQr value={payment?.qrCode} /><a href={checkoutUrl} target="_blank" rel="noopener noreferrer" className={`${primaryButton} mt-4 min-h-11 text-sm`}>Mở thanh toán PayOS<ExternalLink size={16} /></a></div>}{(session || checkout) && bankSessionExpired(session?.expiresAt || checkout?.expiresAt, now) && <p className="mt-4 text-sm text-amber-800 dark:text-amber-300">Liên kết thanh toán đã hết hạn. Không sử dụng lại mã hoặc QR cũ.</p>}<div className="mt-5 flex flex-wrap gap-2">{!verified && <button type="button" onClick={initiate} disabled={!!busy || !!action || statusLoading || !status || !!statusError || !!accountsError || !!checkoutUrl || paymentRecorded} className={`${primaryButton} min-h-11 text-sm`}>{busy === 'initiate' ? <Loader2 size={16} className="motion-safe:animate-spin" /> : <ShieldCheck size={16} />}{initiateError ? 'Thử khởi tạo lại' : session && session.sessionStatus === 'ACTIVE' && !session.isExpired && !bankSessionExpired(session.expiresAt, now) ? 'Tiếp tục phiên xác minh' : 'Bắt đầu xác minh'}</button>}<button type="button" className={bankButton} disabled={statusLoading || !!busy || !!action} onClick={async () => { await loadAccounts(); await loadStatus(selected.id); await loadHistory(); }}><RefreshCw size={16} />Kiểm tra kết quả</button></div><p className="mt-3 text-xs leading-5 text-zinc-500 dark:text-zinc-400">Hệ thống tự kiểm tra mỗi 5 giây khi trang đang mở và còn giao dịch cần xử lý; kết quả được cập nhật ngay trên trang. Việc quay lại từ PayOS chưa đồng nghĩa xác minh hoặc hoàn tiền đã thành công.</p></section>}
     <section className={card} aria-labelledby="customer-bank-history-title"><div className="flex flex-wrap items-center justify-between gap-3"><div><h2 id="customer-bank-history-title" className="font-semibold">Lịch sử xác minh & hoàn tiền</h2><p className="mt-1 text-sm text-zinc-500 dark:text-zinc-400">Khoản chuyển xác minh ngân hàng; tiền hoàn cọc hợp đồng được theo dõi tại hợp đồng thuê.</p></div><button type="button" className={bankButton} disabled={historyLoading} onClick={() => void loadHistory()}><RefreshCw size={16} />Làm mới lịch sử</button></div><div className="mt-4"><BankError message={historyError} retry={() => void loadHistory()} busy={historyLoading} /></div><div aria-busy={historyLoading} className="mt-4">{historyLoading && !history ? <p role="status" className="py-6 text-sm text-zinc-500">Đang tải lịch sử…</p> : history?.items.length ? <div className="overflow-x-auto"><table className="w-full min-w-[1120px] text-left text-sm"><caption className="sr-only">Lịch sử phiên xác minh và số tiền đã nhận, đã hoàn</caption><thead className="border-b border-zinc-200 text-xs text-zinc-500 dark:border-zinc-800"><tr>{['Tài khoản / Phiên xác minh', 'Kết quả', 'Thực nhận', 'Đã hoàn / Còn chờ', 'Trạng thái hoàn'].map(label => <th key={label} scope="col" className="px-3 py-3 font-medium">{label}</th>)}</tr></thead><tbody className="divide-y divide-zinc-100 dark:divide-zinc-800">{history.items.map(item => <tr key={item.sessionId} className="transition-colors duration-150 hover:bg-slate-50"><td className="min-w-[480px] px-3 py-4 align-middle"><div className="flex items-baseline gap-2 whitespace-nowrap"><p className="font-semibold">{item.bankName && item.accountNumberMasked ? item.bankName + ' · ' + item.accountNumberMasked : 'Chưa có thông tin tài khoản'}</p>{item.accountName && <p className="text-xs text-slate-600">{item.accountName}</p>}</div><div className="mt-1 flex items-center gap-3 whitespace-nowrap font-mono text-[11px] text-slate-600"><p>{item.sessionReference}</p><p>{bankDate(item.createdAt)}</p><p>Hạn: {bankDate(item.expiresAt)}</p></div><div className="mt-2 flex items-center gap-2">{item.accountId && accounts.some(account => account.id === item.accountId) && <button type="button" disabled={!!busy || !!action || statusLoading || loading || !!accountsError} className={`${bankButton} text-xs`} onClick={() => { const account = accounts.find(account => account.id === item.accountId); if (account) selectAccount(account); }}>Xem tài khoản của phiên</button>}</div></td><td className="px-3 py-4 align-middle"><BankBadge value={item.verificationStatus} /><p className="mt-2 text-xs text-zinc-500">{bankStatusLabelForSession(item.sessionStatus)}</p></td><td className="px-3 py-4 align-middle font-semibold tabular-nums">{item.paymentReceived ? bankMoney(item.receivedAmount) : 'Chưa ghi nhận'}</td><td className="px-3 py-4 align-middle font-semibold tabular-nums">{bankMoney(item.totalRefundedAmount)}<p className="mt-1 text-xs text-zinc-500">Chờ: {bankMoney(item.totalPendingRefundAmount)}</p></td><td className="px-3 py-4 align-middle"><BankBadge value={item.refundStatus} refund /></td></tr>)}</tbody></table></div> : !historyError && <p className="py-8 text-center text-sm text-zinc-500">Chưa có phiên xác minh ngân hàng.</p>}</div>{history && <BankPagination page={history.page} pages={history.pages} total={history.total} busy={historyLoading || !!historyError} onPage={setPage} />}</section>
   </main>;

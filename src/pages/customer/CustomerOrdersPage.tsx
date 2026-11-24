@@ -1,6 +1,6 @@
 // @refresh reset
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation } from 'react-router-dom';
+import { useLocation, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronDown,
@@ -334,12 +334,12 @@ export const CustomerOrdersPage: React.FC = () => {
     const targetCode = orderToCancel.orderNumber || (orderToCancel as any).orderCode || targetId;
     try {
       const response = await api.post(`/orders/${targetId}/cancel`, {
-        reason: 'Khách hàng hủy đơn khi chưa hoàn tất thanh toán/tiếp nhận',
+        reason: 'Khách hàng yêu cầu hủy đơn',
       });
       const updatedOrder = response.data?.data;
       publishOrderEvent('ORDER_CANCELLED', {
         order: updatedOrder || { ...orderToCancel, status: 'CANCELLED' },
-        reason: 'Khách hàng hủy đơn khi chưa hoàn tất thanh toán/tiếp nhận',
+        reason: 'Khách hàng yêu cầu hủy đơn',
       });
       setOrders((current) => current.map((order) => {
         const oId = order.id || (order as any).orderId;
@@ -519,8 +519,8 @@ export const CustomerOrdersPage: React.FC = () => {
                 const isRefundPending = isCancelled && String(order.paymentStatus || '').toUpperCase() === 'REFUND_PENDING';
                 const isRefunded = isCancelled && String(order.paymentStatus || '').toUpperCase() === 'REFUNDED';
                 const isUnpaid = !isCancelled && (order.paymentStatus === 'UNPAID' || (order.paymentStatus !== 'PAID' && order.paymentMethod !== 'COD' && order.paymentMethod !== 'CASH_ON_DELIVERY'));
-                // Khách hàng có thể tự hủy đơn khi đơn đang ở trạng thái PENDING (chờ cửa hàng tiếp nhận)
-                const canCancel = !isCancelled && currentStatus === 'PENDING';
+                // Khách hàng có thể tự hủy đơn khi đơn ở PENDING hoặc CONFIRMED (trước khi cửa hàng đóng gói)
+                const canCancel = !isCancelled && ['PENDING', 'CONFIRMED'].includes(currentStatus);
                 const canPayNow = isUnpaid && order.paymentMethod === 'PAYOS';
                 const itemSummary = order.items.slice(0, 2).map((item) => `${item.quantity}× ${item.productName}`).join(', ');
                 return (
@@ -598,6 +598,22 @@ export const CustomerOrdersPage: React.FC = () => {
                                       : String(order.paymentStatus || '').toUpperCase() === 'PAID' ? 'Đã thanh toán thành công qua PayOS' : 'Thanh toán trực tuyến PayOS (Chờ thanh toán)'}
                                   </span>
                                 </div>
+                                {isRefundPending && (
+                                  <div className="mt-2.5 p-3 rounded-xl bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                                    <div className="text-xs text-sky-900 dark:text-sky-200">
+                                      <p className="font-semibold">Nhận tiền hoàn qua chuyển khoản PayOS</p>
+                                      <p className="text-[11px] text-sky-700 dark:text-sky-300 mt-0.5">
+                                        Vui lòng liên kết tài khoản ngân hàng chính chủ để Admin duyệt lệnh chi Payout.
+                                      </p>
+                                    </div>
+                                    <Link
+                                      to="/customer/banking"
+                                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#287DA8] text-white text-xs font-semibold hover:bg-[#20668a] transition shadow-xs shrink-0"
+                                    >
+                                      <span>Thêm STK nhận hoàn</span>
+                                    </Link>
+                                  </div>
+                                )}
                               </div>
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-200/70 flex justify-between text-sm font-bold text-slate-900 dark:border-zinc-700 dark:text-white"><span>Tổng thanh toán</span><span className="tabular-nums">{formatPrice(order.totalAmount)}</span></div>
@@ -608,6 +624,8 @@ export const CustomerOrdersPage: React.FC = () => {
                                     ? canCancel
                                       ? 'Đơn hàng chưa hoàn tất thanh toán. Bạn có thể thanh toán ngay hoặc hủy đơn hàng.'
                                       : 'Đơn hàng chưa hoàn tất thanh toán. Bạn có thể thanh toán ngay. Nếu cần hủy, vui lòng liên hệ cửa hàng.'
+                                    : currentStatus === 'CONFIRMED'
+                                    ? 'Đơn hàng đã được tiếp nhận. Bạn vẫn có thể hủy đơn trước khi cửa hàng bắt đầu đóng gói.'
                                     : 'Đơn hàng đang chờ xử lý, bạn vẫn có thể hủy đơn nếu muốn thay đổi.'}
                                 </p>
                                 <div className="order-actions flex flex-wrap items-center gap-2 self-end sm:self-auto">
@@ -703,7 +721,7 @@ export const CustomerOrdersPage: React.FC = () => {
                                 </div>
                               </div>
                             )}
-                            {['CONFIRMED', 'PREPARING', 'SHIPPING'].includes(currentStatus) && (
+                            {['PREPARING', 'SHIPPING'].includes(currentStatus) && (
                               <div className="mt-4 pt-3 border-t border-slate-200/70 dark:border-zinc-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
                                 <span className="text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5">
                                   <CheckCircle2 className="w-4 h-4 shrink-0 text-blue-500" />
@@ -806,7 +824,7 @@ export const CustomerOrdersPage: React.FC = () => {
             >
               <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center dark:bg-rose-950/35 dark:text-rose-400"><CircleAlert className="w-5 h-5" /></div>
               <h2 id="cancel-order-title" className="mt-4 text-lg font-bold tracking-tight text-slate-900 dark:text-white">Hủy đơn hàng?</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-zinc-400">Bạn sắp hủy đơn <span className="font-semibold text-slate-700 dark:text-zinc-200">#{orderToCancel.orderNumber}</span>. Thao tác này không thể hoàn tác.</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-zinc-400">Bạn sắp hủy đơn <span className="font-semibold text-slate-700 dark:text-zinc-200">#{orderToCancel.orderNumber}</span>.{orderToCancel.paymentStatus === 'PAID' ? ' Khoản tiền đã thanh toán qua PayOS sẽ được lập yêu cầu hoàn trả tự động.' : ' Thao tác này không thể hoàn tác.'}</p>
               <div className="mt-5 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
                 <button type="button" disabled={isCancelling} onClick={() => setOrderToCancel(null)} className="px-3.5 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800">Giữ lại đơn</button>
                 <button type="button" disabled={isCancelling} onClick={confirmCancellation} className="inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg bg-rose-600 text-xs font-semibold text-white shadow-sm transition hover:bg-rose-700 disabled:opacity-60">

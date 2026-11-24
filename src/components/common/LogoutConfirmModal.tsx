@@ -75,10 +75,12 @@ export const LogoutConfirmModal: React.FC<LogoutConfirmModalProps> = ({
   };
 
   // Get user avatar from localStorage or user object
-  const uid = user?.id || 'store-owner';
+  const uid = user?.id || (user as any)?.userId || 'store-owner';
   const avatarUrl =
-    (typeof window !== 'undefined' ? localStorage.getItem(`sob_avatar_${uid}`) : null) ||
+    (user as any)?.avatarUrl ||
     (user as any)?.avatar ||
+    ((user as any)?.role === 'STORE_OWNER' && (user as any)?.store?.logoUrl ? (user as any).store.logoUrl : null) ||
+    (typeof window !== 'undefined' ? localStorage.getItem(`sob_avatar_${uid}`) : null) ||
     null;
 
   const getRoleLabel = (role?: string) => {
