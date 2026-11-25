@@ -22,7 +22,9 @@ import { driverCard, driverInput, driverPrimary, driverSecondary, DriverDialog, 
 
 const paymentLabel = (order: any) => deliveryPaymentMethod(order) === 'COD' ? 'Thu tiền mặt' : 'Chuyển khoản';
 
-export const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'failed'; userId: string; role: string; onClose: () => void; onDone: (message: string) => Promise<void> }> = ({ order, mode, userId, role, onClose, onDone }) => {
+export const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'failed'; userId: string; role: string; storeId?: string; onClose: () => void; onDone: (message: string) => Promise<void> }> = ({ order, mode, userId, role, storeId, onClose, onDone }) => {
+  const [liveOrder, setLiveOrder] = useState<any>(order);
+  const [collectCashFallback, setCollectCashFallback] = useState(false);
   const [imageUrl, setImageUrl] = useState('');
   const [previewUrl, setPreviewUrl] = useState('');
   const [uploading, setUploading] = useState(false);
@@ -35,6 +37,48 @@ export const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'f
   const lock = useRef(false);
   const alive = useRef(true);
   useEffect(() => { alive.current = true; return () => { alive.current = false; }; }, []);
+  useEffect(() => {
+    setLiveOrder(order);
+    setAmount(String(order.totalAmount || 0));
+    setCollectCashFallback(false);
+  }, [order]);
+  useEffect(() => {
+    let cleanup: (() => void) | undefined;
+    let active = true;
+    import('../../services/socket')
+      .then(({ getSocket, subscribeToStore }) => {
+        if (!active) return;
+        const targetStoreId = storeId || String(liveOrder?.storeId || '');
+        if (targetStoreId) subscribeToStore(targetStoreId);
+        const socket = getSocket();
+        const targetOrderId = String(liveOrder?.id || liveOrder?.orderId || '');
+        const handlePaymentUpdate = (payload: any) => {
+          const incoming = payload?.order || payload;
+          const incomingId = String(incoming?.orderId || incoming?.id || '');
+          if (!targetOrderId || !incomingId || incomingId !== targetOrderId) return;
+          setLiveOrder((prev: any) => ({
+            ...prev,
+            ...(incoming?.paymentMethod ? { paymentMethod: incoming.paymentMethod } : {}),
+            ...(incoming?.paymentStatus ? { paymentStatus: incoming.paymentStatus } : {}),
+            ...(incoming?.orderStatus || incoming?.status ? { status: incoming.orderStatus || incoming.status } : {}),
+          }));
+          if (String(incoming?.paymentStatus || '').toUpperCase() === 'PAID') {
+            setCollectCashFallback(false);
+          }
+        };
+        socket.on('ORDER_PAYMENT_METHOD_CHANGED', handlePaymentUpdate);
+        socket.on('ORDER_PAYMENT_CONFIRMED', handlePaymentUpdate);
+        cleanup = () => {
+          socket.off('ORDER_PAYMENT_METHOD_CHANGED', handlePaymentUpdate);
+          socket.off('ORDER_PAYMENT_CONFIRMED', handlePaymentUpdate);
+        };
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+      cleanup?.();
+    };
+  }, [liveOrder?.id, liveOrder?.orderId, liveOrder?.storeId, storeId]);
   const upload = async (file: File | null) => {
     if (lock.current || !file) return;
     const invalid = evidenceFileError(file);
@@ -106,23 +150,56 @@ export const DeliveryResultDialog: React.FC<{ order: any; mode: 'delivered' | 'f
       if (!alive.current) return;
       if (!canRecordDelivery(latest, userId, role)) throw new Error('Đơn này đã thay đổi trạng thái hoặc người giao. Đóng hộp thoại và tải lại danh sách.');
       if (mode === 'delivered') {
-        const payload = buildDeliveryPayload(latest, imageUrl, amount, confirmed, gps);
-        await driversService.completeDelivery(order.id, payload);
+        const latestIsPaid = String(latest?.paymentStatus || '').toUpperCase() === 'PAID';
+        const latestMethod = deliveryPaymentMethod(latest);
+        const overrideMethod =
+          !latestIsPaid && latestMethod !== 'COD' && collectCashFallback ? 'COD' : undefined;
+        const payload = buildDeliveryPayload(latest, imageUrl, amount, confirmed, gps, overrideMethod);
+        await driversService.completeDelivery(liveOrder.id, payload);
       } else {
-        await driversService.failDelivery(order.id, { failureReasonCode: reason, failureNote: note.trim() || undefined, evidenceImageUrl: imageUrl });
+        await driversService.failDelivery(liveOrder.id, { failureReasonCode: reason, failureNote: note.trim() || undefined, evidenceImageUrl: imageUrl });
       }
-      if (alive.current) await onDone(mode === 'delivered' ? `Đã xác nhận giao đơn ${order.orderNumber || order.id}.` : `Đã ghi nhận kết quả đơn ${order.orderNumber || order.id}.`);
+      if (alive.current) await onDone(mode === 'delivered' ? `Đã xác nhận giao đơn ${liveOrder.orderNumber || liveOrder.id}.` : `Đã ghi nhận kết quả đơn ${liveOrder.orderNumber || liveOrder.id}.`);
     } catch (issue) { if (alive.current) setError(driverError(issue)); }
     finally { lock.current = false; if (alive.current) setSaving(false); }
   };
-  const cash = deliveryPaymentMethod(order) === 'COD';
+  const activePaymentStatus = String(liveOrder.paymentStatus || '').toUpperCase();
+  const isPaidOnline = activePaymentStatus === 'PAID';
+  const orderIsCod = deliveryPaymentMethod(liveOrder) === 'COD';
+  const cash = orderIsCod || (!isPaidOnline && collectCashFallback);
   return <DriverDialog title={mode === 'delivered' ? 'Xác nhận đã giao hàng' : 'Ghi nhận chưa giao được'} busy={saving || uploading} onClose={onClose}>
     <form onSubmit={submit} className="space-y-4">
-      <div className="rounded-xl bg-zinc-50 p-3 text-sm dark:bg-zinc-800/70"><p className="font-semibold">Đơn {order.orderNumber || `#${order.id}`}</p><p className="mt-1 text-zinc-500">{order.customerName || 'Khách hàng'} · {money(order.totalAmount)}</p></div>
+      <div className="rounded-xl bg-zinc-50 p-3 text-sm dark:bg-zinc-800/70"><p className="font-semibold">Đơn {liveOrder.orderNumber || `#${liveOrder.id}`}</p><p className="mt-1 text-zinc-500">{liveOrder.customerName || 'Khách hàng'} · {money(liveOrder.totalAmount)}</p></div>
       {error && <DriverNotice>{error}</DriverNotice>}
       {mode === 'delivered' ? <>
-        <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">{cash ? 'Kiểm tra tiền đã thu và thêm ảnh giao hàng trước khi hoàn tất.' : 'Thanh toán chuyển khoản phải được hệ thống xác nhận trước khi hoàn tất giao hàng.'}</p>
-        {cash ? <><label className="block text-sm font-medium">Số tiền mặt đã thu (đồng)<input type="number" inputMode="numeric" min="0" step="1" required value={amount} onChange={event => { setAmount(event.target.value); setConfirmed(false); }} disabled={saving} className={driverInput} /></label><label className="flex cursor-pointer items-start gap-2 rounded-xl border border-zinc-200 p-3 text-sm leading-6 dark:border-zinc-700"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} disabled={saving} className="mt-1 h-4 w-4 accent-[#287DA8]" /><span>Tôi đã thu đủ {money(order.totalAmount)} và giao hàng cho người nhận.</span></label></> : <DriverNotice success={String(order.paymentStatus).toUpperCase() === 'PAID'}>{String(order.paymentStatus).toUpperCase() === 'PAID' ? 'Hệ thống đã xác nhận thanh toán.' : 'Chưa xác nhận thanh toán. Trạng thái sẽ được kiểm tra lại khi bạn gửi kết quả.'}</DriverNotice>}
+        <p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">{cash ? 'Kiểm tra tiền đã thu và thêm ảnh giao hàng trước khi hoàn tất.' : 'Thanh toán chuyển khoản phải được hệ thống xác nhận trước khi hoàn tất giao hàng, hoặc chọn thu tiền mặt (COD) tại cửa nhà nếu khách đổi phương thức.'}</p>
+        {!orderIsCod && !isPaidOnline && (
+          <div className="flex flex-wrap gap-2 rounded-xl border border-sky-200 bg-sky-50/70 p-2.5 dark:border-sky-900/50 dark:bg-sky-950/30">
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                setCollectCashFallback(false);
+                setConfirmed(false);
+              }}
+              className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition ${!collectCashFallback ? 'bg-[#287DA8] text-white shadow-xs' : 'bg-white text-zinc-600 dark:bg-zinc-900 dark:text-zinc-300'}`}
+            >
+              Chờ thanh toán PayOS
+            </button>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={() => {
+                setCollectCashFallback(true);
+                setAmount(String(liveOrder.totalAmount || 0));
+              }}
+              className={`flex-1 rounded-lg px-3 py-2 text-xs font-semibold transition ${collectCashFallback ? 'bg-emerald-600 text-white shadow-xs' : 'bg-white text-zinc-700 dark:bg-zinc-900 dark:text-zinc-300'}`}
+            >
+              Khách đổi trả Tiền mặt (COD) khi nhận hàng
+            </button>
+          </div>
+        )}
+        {cash ? <><label className="block text-sm font-medium">Số tiền mặt đã thu (đồng)<input type="number" inputMode="numeric" min="0" step="1" required value={amount} onChange={event => { setAmount(event.target.value); setConfirmed(false); }} disabled={saving} className={driverInput} /></label><label className="flex cursor-pointer items-start gap-2 rounded-xl border border-zinc-200 p-3 text-sm leading-6 dark:border-zinc-700"><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} disabled={saving} className="mt-1 h-4 w-4 accent-[#287DA8]" /><span>Tôi đã thu đủ {money(liveOrder.totalAmount)} và giao hàng cho người nhận.</span></label></> : <DriverNotice success={isPaidOnline}>{isPaidOnline ? 'Hệ thống đã xác nhận thanh toán.' : 'Chưa xác nhận thanh toán PayOS. Trạng thái sẽ được kiểm tra lại khi bạn gửi kết quả.'}</DriverNotice>}
       </> : <><label className="block text-sm font-medium">Lý do<select value={reason} onChange={event => setReason(event.target.value as DeliveryFailureCode)} disabled={saving} className={driverInput}>{failureReasons.map(item => <option key={item.value} value={item.value}>{item.label}</option>)}</select></label><label className="block text-sm font-medium">Ghi chú thêm <span className="font-normal text-zinc-400">(không bắt buộc)</span><textarea rows={3} maxLength={1000} value={note} onChange={event => setNote(event.target.value)} disabled={saving} className={driverInput} placeholder="Thông tin giúp cửa hàng hỗ trợ khách..." /></label></>}
       <div><p className="text-sm font-medium">Ảnh bằng chứng <span className="text-rose-600">*</span></p><label className={`mt-2 flex min-h-24 cursor-pointer items-center justify-center gap-3 rounded-xl border border-dashed border-zinc-300 p-4 text-sm text-zinc-600 dark:border-zinc-600 dark:text-zinc-300 ${saving || uploading ? 'pointer-events-none opacity-60' : 'hover:border-[#287DA8] hover:bg-sky-50/40 dark:hover:bg-sky-950/20'}`}>
         {uploading ? <Loader2 className="h-5 w-5 animate-spin motion-reduce:animate-none" /> : <Camera className="h-5 w-5" />}<span>{uploading ? 'Đang tải ảnh...' : imageUrl ? 'Đổi ảnh bằng chứng' : 'Chụp hoặc chọn ảnh'}<small className="mt-1 block text-xs text-zinc-400">JPG, PNG, WEBP, GIF · tối đa 1,5 MB</small></span><input type="file" accept="image/jpeg,image/png,image/webp,image/gif" capture="environment" disabled={saving || uploading} onChange={event => { const file = event.target.files?.[0] || null; event.target.value = ''; void upload(file); }} className="sr-only" />
@@ -195,8 +272,33 @@ export const DriverDeliveryPage: React.FC = () => {
     const refresh = () => { if (!document.hidden && !paused.current) void load(); };
     const timer = window.setInterval(refresh, 30000);
     window.addEventListener('focus', refresh);
-    return () => { window.clearInterval(timer); window.removeEventListener('focus', refresh); };
-  }, [load]);
+    let cleanup: (() => void) | undefined;
+    let active = true;
+    if (storeId) {
+      import('../../services/socket')
+        .then(({ getSocket, subscribeToStore }) => {
+          if (!active) return;
+          subscribeToStore(storeId);
+          const socket = getSocket();
+          const handleRealtimePayment = () => {
+            if (!paused.current) void load();
+          };
+          socket.on('ORDER_PAYMENT_METHOD_CHANGED', handleRealtimePayment);
+          socket.on('ORDER_PAYMENT_CONFIRMED', handleRealtimePayment);
+          cleanup = () => {
+            socket.off('ORDER_PAYMENT_METHOD_CHANGED', handleRealtimePayment);
+            socket.off('ORDER_PAYMENT_CONFIRMED', handleRealtimePayment);
+          };
+        })
+        .catch(() => {});
+    }
+    return () => {
+      active = false;
+      cleanup?.();
+      window.clearInterval(timer);
+      window.removeEventListener('focus', refresh);
+    };
+  }, [load, storeId]);
   const run = async (operation: () => Promise<any>, success: string) => {
     if (actionLock.current) return false;
     actionLock.current = true; setBusy(true); setNotice(''); setErrors(value => ({ ...value, action: '' }));
@@ -267,6 +369,6 @@ export const DriverDeliveryPage: React.FC = () => {
       <details className={driverCard} onToggle={event => setOnlineOpen(event.currentTarget.open)}><summary className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-zinc-800 dark:text-zinc-200"><Users className="h-4 w-4 text-[#287DA8]" />Nhân viên đang sẵn sàng nhận đơn</summary>{onlineOpen && <div className="mt-4">{errors.online ? <DriverNotice>{errors.online}</DriverNotice> : loading ? <DriverLoading /> : online.length ? <ul className="grid gap-3 sm:grid-cols-2">{online.map(driver => <li key={driver.driverId} className="flex flex-wrap items-center justify-between gap-2 rounded-xl bg-zinc-50 p-3 dark:bg-zinc-800/60"><span className="text-sm font-medium text-zinc-800 dark:text-zinc-200">{driver.fullName || `Nhân viên #${driver.driverId}`}</span>{driver.phone && <a className="text-sm text-[#287DA8]" href={`tel:${driver.phone.replace(/[^\d+]/g, '')}`}>{driver.phone}</a>}</li>)}</ul> : <p className="text-sm text-zinc-500">Chưa có nhân viên bật sẵn sàng nhận đơn.</p>}</div>}</details>
     </>}
     {claim && <DriverDialog title="Nhận giao đơn hàng" onClose={() => setClaim(null)} busy={busy}><p className="text-sm leading-6 text-zinc-600 dark:text-zinc-300">Bạn sẽ nhận giao đơn <strong className="text-zinc-900 dark:text-white">{claim.orderNumber || `#${claim.id}`}</strong> cho {claim.customerName || 'khách hàng'}. Đơn sẽ chuyển sang đang giao khi hệ thống xác nhận.</p>{errors.action && <div className="mt-3"><DriverNotice>{errors.action}</DriverNotice></div>}<div className="mt-5 flex justify-end gap-2"><button className={driverSecondary} disabled={busy} onClick={() => setClaim(null)}>Quay lại</button><button className={driverPrimary} disabled={busy} onClick={() => void run(() => driversService.claimOrder(claim.id), 'Đã nhận đơn. Bạn có thể theo dõi trong Đơn của tôi.').then(success => { if (success) { setTab('mine'); setFilter('SHIPPING'); setPage(1); } })}>{busy && <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" />}Xác nhận nhận đơn</button></div></DriverDialog>}
-    {result && <DeliveryResultDialog order={result.order} mode={result.mode} userId={userId} role={role} onClose={() => setResult(null)} onDone={async message => { setResult(null); setNotice(message); await load(); }} />}
+    {result && <DeliveryResultDialog order={result.order} mode={result.mode} userId={userId} role={role} storeId={storeId} onClose={() => setResult(null)} onDone={async message => { setResult(null); setNotice(message); await load(); }} />}
   </main>;
 };

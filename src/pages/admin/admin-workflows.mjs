@@ -83,6 +83,24 @@ export async function syncIdentitySession(client, id) {
   await client.get(`/identity-verifications/sessions/${encodeURIComponent(id)}/decision`).then(checkedData);
   return getIdentitySession(client, id);
 }
+export async function reviewIdentitySession(client, id, payload) {
+  if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Mã phiên không hợp lệ.');
+  if (!['APPROVE', 'DECLINE'].includes(payload?.decision)) throw new Error('Quyết định xét duyệt không hợp lệ.');
+  const reason = String(payload?.reason || '').trim();
+  if (reason.length < 3) throw new Error('Lý do xét duyệt phải có ít nhất 3 ký tự.');
+  await client.post(`/identity-verifications/sessions/${encodeURIComponent(id)}/review`, {
+    decision: payload.decision,
+    reason,
+    ...(payload.acceptOcrNameAsVerified !== undefined ? { acceptOcrNameAsVerified: Boolean(payload.acceptOcrNameAsVerified) } : {}),
+  }).then(checkedData);
+  return getIdentitySession(client, id);
+}
+export async function revokeUserIdentity(client, userId, reason) {
+  if (!/^[1-9]\d*$/.test(String(userId))) throw new Error('Mã người dùng không hợp lệ.');
+  const cleanReason = String(reason || '').trim();
+  if (cleanReason.length < 5) throw new Error('Lý do thu hồi định danh phải có ít nhất 5 ký tự.');
+  return checkedData(await client.post(`/identity-verifications/users/${encodeURIComponent(userId)}/revoke`, { reason: cleanReason }));
+}
 export async function deleteIdentitySession(client, id) {
   if (!/^[1-9]\d*$/.test(String(id))) throw new Error('Mã phiên không hợp lệ.');
   return checkedData(await client.delete(`/identity-verifications/sessions/${encodeURIComponent(id)}`));
@@ -97,5 +115,11 @@ export async function activateRentalContract(client, id) {
   const cleanId = String(id).trim(); if (!/^[1-9]\d*$/.test(cleanId)) throw new Error('Nhập mã số hợp đồng hợp lệ.');
   const result = checkedData(await client.post(`/rentals/${encodeURIComponent(cleanId)}/activate`));
   if (result?.status !== 'ACTIVE') throw new Error('Máy chủ chưa xác nhận hợp đồng được kích hoạt. Hãy kiểm tra lại.');
+  return result;
+}
+export async function cancelRentalContractByAdmin(client, id) {
+  const cleanId = String(id).trim(); if (!/^[1-9]\d*$/.test(cleanId)) throw new Error('Nhập mã số hợp đồng hợp lệ.');
+  const result = checkedData(await client.patch(`/admin/rentals/${encodeURIComponent(cleanId)}/status`, { status: 'CANCELLED' }));
+  if (result?.status !== 'CANCELLED') throw new Error('Máy chủ chưa xác nhận hủy hợp đồng. Hãy kiểm tra lại.');
   return result;
 }

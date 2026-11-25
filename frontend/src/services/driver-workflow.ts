@@ -67,11 +67,15 @@ export function buildDeliveryPayload(
   collected: string,
   moneyConfirmed: boolean,
   gps?: { latitude: number; longitude: number } | null,
+  overridePaymentMethod?: 'COD' | 'VIETQR' | 'PAYOS' | null,
 ) {
-  const paymentMethod = deliveryPaymentMethod(order);
+  const isAlreadyPaid = String(order?.paymentStatus).toUpperCase() === 'PAID';
+  const orderPaymentMethod = deliveryPaymentMethod(order);
+  const paymentMethod =
+    overridePaymentMethod === 'COD' && !isAlreadyPaid ? 'COD' : orderPaymentMethod;
   const collectedAmount = Number(collected);
   if (!paymentMethod) throw new Error('Phương thức thanh toán chưa được hỗ trợ. Liên hệ quản lý cửa hàng.');
-  if (paymentMethod !== 'COD' && String(order.paymentStatus).toUpperCase() !== 'PAID') throw new Error('Chưa xác nhận được thanh toán chuyển khoản. Tải lại đơn để kiểm tra trước khi giao.');
+  if (paymentMethod !== 'COD' && !isAlreadyPaid) throw new Error('Chưa xác nhận được thanh toán chuyển khoản. Tải lại đơn để kiểm tra trước khi giao.');
   if (paymentMethod === 'COD' && (!moneyConfirmed || !collected.trim() || !Number.isFinite(collectedAmount) || Math.abs(collectedAmount - Number(order.totalAmount)) > 0.01)) throw new Error('Xác nhận đã thu đủ số tiền mặt của đơn hàng.');
   
   const isObjectKey = imageUrl.startsWith('stores/');

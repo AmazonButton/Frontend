@@ -63,6 +63,12 @@ function screen(prefix, file, exported, { role = 'STORE_OWNER', tab = '', sectio
         vm.runInNewContext(authCompiled, { exports: authExports, Object, Array, Set, Map, String, Boolean });
         return authExports;
       }
+      if (name.endsWith('/utils/kyc.mjs') || name.endsWith('/utils/kyc')) {
+        const kycExports = {};
+        const kycCompiled = ts.transpileModule(readFileSync(new URL(`${prefix}utils/kyc.mjs`, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText;
+        vm.runInNewContext(kycCompiled, { exports: kycExports, Object, Array, Set, Map, String, Boolean });
+        return kycExports;
+      }
       if (name.endsWith('/api') || name.endsWith('/services')) return { api: { get: async path => { requests.push(path); return { data: { success: true, data: [] } }; } } };
       if (name.endsWith('/order-events')) return { normalizeOrder: value => value };
       if (name.endsWith('.css')) return {};

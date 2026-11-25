@@ -1,6 +1,7 @@
 import React from 'react';
 
 import { CheckCircle2, Clock3, XCircle } from 'lucide-react';
+import { getKycStatusLabel } from '../../utils/kyc.mjs';
 
 export const card = 'rounded-2xl border border-zinc-200/80 bg-white p-6 shadow-sm dark:border-zinc-800/80 dark:bg-zinc-900';
 
@@ -14,7 +15,10 @@ export const StatusPill: React.FC<{ value?: string }> = ({ value }) => {
     normalized.includes('REJECT') ||
     normalized.includes('FAIL') ||
     normalized.includes('DECLIN') ||
-    normalized.includes('CANCEL');
+    normalized.includes('CANCEL') ||
+    normalized === 'REVOKED' ||
+    normalized === 'EXPIRED' ||
+    normalized === 'ABANDONED';
 
   const tone = isApproved
     ? 'bg-emerald-50 text-emerald-700 ring-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-400'
@@ -27,7 +31,7 @@ export const StatusPill: React.FC<{ value?: string }> = ({ value }) => {
       {isApproved && <CheckCircle2 className="h-3 w-3" />}
       {isDeclined && <XCircle className="h-3 w-3" />}
       {!isApproved && !isDeclined && <Clock3 className="h-3 w-3" />}
-      {value || 'PENDING'}
+      {getKycStatusLabel(value)}
     </span>
   );
 };

@@ -25,9 +25,11 @@ import { useOrderSync } from '../../hooks/useOrderSync';
 import { getUserStoreId } from '../../services/order-reconciliation';
 import { getOrderItemsSummary, getOrderNotificationMessage, ORDER_NOTIFICATION_DURATION } from '../../services/order-notifications';
 import { subscribeRentalChannelEvents } from '../../services/rental-notifications';
+import { notificationsService } from '../../services/notifications.service';
 
 export interface AppNotification {
   id: string;
+  dbNotificationId?: string;
   type:
     | 'ORDER_CREATED'
     | 'ORDER_CANCELLED'
@@ -37,7 +39,15 @@ export interface AppNotification {
     | 'DEVICES_ALLOCATED'
     | 'DEVICE_ASSIGNED'
     | 'STORE_PENDING'
-    | 'WITHDRAWAL_PENDING';
+    | 'WITHDRAWAL_PENDING'
+    | 'ORDER_REJECTED_STORE_INACTIVE'
+    | 'DEPOSIT_REFUND_COMPLETED'
+    | 'STORE_MISSED_IOT_ORDER'
+    | 'STORE_SUBSCRIPTION_EXPIRED'
+    | 'DELIVERY_INELIGIBLE'
+    | 'RENTAL_EXPIRED'
+    | 'RENTAL_RETURN_REQUESTED'
+    | 'DEPOSIT_REFUND_APPROVED';
   roleScope: 'CUSTOMER' | 'STORE' | 'ADMIN';
   title: string;
   orderNumber?: string;
@@ -51,6 +61,7 @@ export interface AppNotification {
   customerPhone?: string;
   deliveryAddress?: string;
   storeName?: string;
+  storeId?: string;
   status?: string;
   isRead: boolean;
   timestamp: string; // ISO string
@@ -405,12 +416,54 @@ export const NotificationBellPopover: React.FC = () => {
           }
         }
 
+        // ========================================================
+        // 4. DB INBOX NOTIFICATIONS (GET /api/v1/notifications)
+        // ========================================================
+        if (isOpen || isSourceEligible('db_notifications')) {
+          try {
+            const dbInbox = await notificationsService.listNotifications({ page: 1, pageSize: 20 });
+            lastFetchedMapRef.current.set(`${identityKey}:db_notifications`, Date.now());
+            const scope: AppNotification['roleScope'] = isAdmin ? 'ADMIN' : isStore ? 'STORE' : 'CUSTOMER';
+            dbInbox.items.forEach((dbItem) => {
+              const notifId = String(dbItem.notificationId || '');
+              if (!notifId) return;
+              const rawType = String(dbItem.type || 'SYSTEM').toUpperCase();
+              realNotifs.push({
+                id: `db_${notifId}`,
+                dbNotificationId: notifId,
+                type: rawType as AppNotification['type'],
+                roleScope: scope,
+                title: dbItem.title || 'Thông báo hệ thống',
+                itemsSummary: dbItem.body || '',
+                storeName: dbItem.data?.storeName,
+                storeId: dbItem.data?.storeId ? String(dbItem.data.storeId) : undefined,
+                reason: dbItem.data?.errorCode,
+                status: rawType,
+                isRead: Boolean(dbItem.readAt),
+                timestamp: dbItem.createdAt || new Date().toISOString(),
+              });
+            });
+          } catch {
+            // Non-critical DB inbox fetch
+          }
+        }
+
         if (isMounted && inFlightKeyRef.current === identityKey && realNotifs.length > 0) {
           setNotifications((prev) => {
-            const existingIds = new Set(prev.map((n) => n.id));
+            const dbStateById = new Map(
+              realNotifs
+                .filter((n) => n.dbNotificationId)
+                .map((n) => [n.id, n.isRead]),
+            );
+            const updatedPrev = prev.map((existing) =>
+              dbStateById.has(existing.id)
+                ? { ...existing, isRead: Boolean(dbStateById.get(existing.id)) }
+                : existing,
+            );
+            const existingIds = new Set(updatedPrev.map((n) => n.id));
             const newToAdd = realNotifs.filter((n) => !existingIds.has(n.id));
-            if (newToAdd.length === 0) return prev;
-            return [...newToAdd, ...prev].sort(
+            if (newToAdd.length === 0 && updatedPrev.every((n, i) => n === prev[i])) return prev;
+            return [...newToAdd, ...updatedPrev].sort(
               (a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime()
             );
           });
@@ -433,7 +486,7 @@ export const NotificationBellPopover: React.FC = () => {
         inFlightKeyRef.current = null;
       }
     };
-  }, [user?.id, user?.role, (user as any)?.storeId, token, isLoading, isAdmin, isStore, isCustomer]);
+  }, [user?.id, user?.role, (user as any)?.storeId, token, isLoading, isAdmin, isStore, isCustomer, isOpen]);
 
   // Realtime Socket Listeners: Strict Role Scoping
   useEffect(() => {
@@ -937,12 +990,16 @@ export const NotificationBellPopover: React.FC = () => {
   const markAllAsRead = (e: React.MouseEvent) => {
     e.stopPropagation();
     setNotifications((prev) => prev.map((n) => ({ ...n, isRead: true })));
+    void notificationsService.markAllAsRead().catch(() => {});
   };
 
   const handleNotificationClick = (notif: AppNotification) => {
     setNotifications((prev) =>
       prev.map((n) => (n.id === notif.id ? { ...n, isRead: true } : n))
     );
+    if (notif.dbNotificationId && !notif.isRead) {
+      void notificationsService.markAsRead(notif.dbNotificationId).catch(() => {});
+    }
     setIsOpen(false);
 
     if (isAdmin) {
@@ -959,6 +1016,10 @@ export const NotificationBellPopover: React.FC = () => {
     }
 
     if (isStore) {
+      if (['STORE_MISSED_IOT_ORDER', 'STORE_SUBSCRIPTION_EXPIRED'].includes(notif.type)) {
+        navigate('/store/service-plans');
+        return;
+      }
       if (notif.type === 'DEVICES_ALLOCATED') {
         navigate('/store/devices');
         return;
@@ -968,6 +1029,14 @@ export const NotificationBellPopover: React.FC = () => {
     }
 
     if (isCustomer) {
+      if (['DEPOSIT_REFUND_COMPLETED', 'RENTAL_EXPIRED', 'RENTAL_RETURN_REQUESTED', 'DEPOSIT_REFUND_APPROVED'].includes(notif.type)) {
+        navigate('/customer/rentals');
+        return;
+      }
+      if (['ORDER_REJECTED_STORE_INACTIVE', 'DELIVERY_INELIGIBLE'].includes(notif.type)) {
+        navigate('/customer/home');
+        return;
+      }
       navigate(`/customer/orders?orderId=${encodeURIComponent(notif.orderId || '')}&order=${encodeURIComponent(notif.orderNumber || '')}`);
       return;
     }
@@ -1091,6 +1160,8 @@ export const NotificationBellPopover: React.FC = () => {
                   const isNewOrder = notif.type === 'ORDER_CREATED';
                   const isDelivered = notif.type === 'ORDER_DELIVERED';
                   const isCancel = notif.type === 'ORDER_CANCELLED';
+                  const isStoreAlert = ['STORE_MISSED_IOT_ORDER', 'STORE_SUBSCRIPTION_EXPIRED', 'ORDER_REJECTED_STORE_INACTIVE', 'DELIVERY_INELIGIBLE', 'RENTAL_EXPIRED'].includes(notif.type);
+                  const isRefundSuccess = notif.type === 'DEPOSIT_REFUND_COMPLETED' || notif.type === 'DEPOSIT_REFUND_APPROVED';
 
                   return (
                     <div
@@ -1103,13 +1174,13 @@ export const NotificationBellPopover: React.FC = () => {
                       {/* Left Icon */}
                       <div
                         className={`w-7 h-7 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
-                          isStorePending
+                          isStorePending || isStoreAlert
                             ? 'bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-400'
                             : isWithdPending
                             ? 'bg-sky-50 text-sky-600 dark:bg-sky-950/40 dark:text-sky-400'
                             : isDevice
                             ? 'bg-blue-50 text-[#0E6BA8] dark:bg-blue-950/40 dark:text-sky-400'
-                            : isDelivered
+                            : isDelivered || isRefundSuccess
                             ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
                             : isNewOrder
                             ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-400'
@@ -1118,9 +1189,11 @@ export const NotificationBellPopover: React.FC = () => {
                             : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-300'
                         }`}
                       >
-                        {isStorePending ? (
+                        {isStoreAlert ? (
+                          <AlertCircle className="w-3.5 h-3.5" />
+                        ) : isStorePending ? (
                           <Store className="w-3.5 h-3.5" />
-                        ) : isWithdPending ? (
+                        ) : isWithdPending || isRefundSuccess ? (
                           <Wallet className="w-3.5 h-3.5" />
                         ) : isDevice ? (
                           <Cpu className="w-3.5 h-3.5" />
@@ -1148,7 +1221,7 @@ export const NotificationBellPopover: React.FC = () => {
                         </div>
 
                         {/* Row 2: Subtitle / Product info */}
-                        <div className="text-xs text-slate-700 dark:text-zinc-300 font-medium truncate mt-0.5">
+                        <div className={`text-xs text-slate-700 dark:text-zinc-300 font-medium mt-0.5 ${notif.dbNotificationId ? 'whitespace-normal break-words line-clamp-2' : 'truncate'}`}>
                           <span>{notif.itemsSummary || notif.productName || (isStorePending ? 'Chờ phê duyệt' : 'Nhu yếu phẩm')}</span>
                           {!notif.itemsSummary && notif.quantity && notif.quantity > 1 ? ` (${notif.quantity}x)` : ''}
                           {notif.totalAmount !== undefined && (
@@ -1162,7 +1235,13 @@ export const NotificationBellPopover: React.FC = () => {
                         {notif.customerName && <p className="mt-1 text-[11px] text-slate-500 break-words">{notif.customerName}{notif.customerPhone ? ` · ${notif.customerPhone}` : ''}</p>}
                         {notif.deliveryAddress && <p className="mt-1 text-[11px] text-slate-500 whitespace-pre-line break-words">{notif.deliveryAddress}</p>}
                         <div className="text-[11px] text-slate-400 dark:text-zinc-500 mt-0.5 truncate">
-                          {isStorePending ? (
+                          {notif.type === 'STORE_MISSED_IOT_ORDER' || notif.type === 'STORE_SUBSCRIPTION_EXPIRED' ? (
+                            <span className="text-amber-600 dark:text-amber-400 font-medium">Bấm để gia hạn gói dịch vụ cửa hàng ngay →</span>
+                          ) : notif.type === 'DEPOSIT_REFUND_COMPLETED' || notif.type === 'DEPOSIT_REFUND_APPROVED' ? (
+                            <span className="text-emerald-600 dark:text-emerald-400 font-medium">Bấm để xem hợp đồng & trạng thái hoàn cọc →</span>
+                          ) : notif.type === 'ORDER_REJECTED_STORE_INACTIVE' || notif.type === 'DELIVERY_INELIGIBLE' ? (
+                            <span className="text-amber-600 dark:text-amber-400 font-medium">Bấm để kiểm tra nút bấm & cửa hàng phục vụ →</span>
+                          ) : isStorePending ? (
                             <span className="text-amber-600 dark:text-amber-400 font-medium">Bấm để xem hồ sơ và phê duyệt đại lý →</span>
                           ) : isWithdPending ? (
                             <span className="text-sky-600 dark:text-sky-400 font-medium">Bấm để xem và xử lý lệnh chi tiền →</span>

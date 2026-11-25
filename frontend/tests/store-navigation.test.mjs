@@ -63,6 +63,12 @@ function screen(prefix, file, exported, { role = 'STORE_OWNER', tab = '', sectio
         vm.runInNewContext(authCompiled, { exports: authExports, Object, Array, Set, Map, String, Boolean });
         return authExports;
       }
+      if (name.endsWith('/utils/kyc.mjs') || name.endsWith('/utils/kyc')) {
+        const kycExports = {};
+        const kycCompiled = ts.transpileModule(readFileSync(new URL(`${prefix}utils/kyc.mjs`, import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2020, esModuleInterop: true } }).outputText;
+        vm.runInNewContext(kycCompiled, { exports: kycExports, Object, Array, Set, Map, String, Boolean });
+        return kycExports;
+      }
       if (name.endsWith('/api') || name.endsWith('/services')) return { api: { get: async path => { requests.push(path); return { data: { success: true, data: [] } }; } } };
       if (name.endsWith('/order-events')) return { normalizeOrder: value => value };
       if (name.endsWith('.css')) return {};
@@ -229,11 +235,11 @@ for (const prefix of ['../src/', '../frontend/src/']) {
     assert.equal(exports.route.type, 'verification-screen');
   });
 
-  test(`${prefix}store sidebar exposes core operations without removed delivery and shift links`, () => {
+  test(`${prefix}store sidebar exposes one revenue entry plus consolidated delivery and shift operations`, () => {
     const app = screen(prefix, 'layouts/Sidebar.tsx', 'Sidebar');
     const links = app.nodes.filter(node => node.type === 'a').map(node => node.props.to);
-    for (const removed of ['/store/device-templates', '/store/wallet', '/store/rentals', '/store/profile?tab=SECURITY', '/driver/deliveries', '/driver/shifts']) assert.ok(!links.includes(removed));
-    for (const kept of ['/store/dashboard', '/store/devices', '/store/products']) assert.ok(links.includes(kept));
+    for (const removed of ['/store/device-templates', '/store/wallet', '/store/rentals', '/store/profile?tab=SECURITY']) assert.ok(!links.includes(removed));
+    for (const kept of ['/store/dashboard', '/store/devices', '/store/products', '/driver/deliveries', '/driver/shifts']) assert.ok(links.includes(kept));
     assert.equal(app.nodes.filter(node => node.type === 'store-finance-navigation').length, 2);
     assert.equal(app.nodes.filter(node => node.type === 'store-revenue-navigation').length, 2);
   });

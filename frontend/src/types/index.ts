@@ -35,6 +35,10 @@ export interface User {
   capabilities?: RoleCapabilities | null;
   platformMemberships?: PlatformMembershipInfo[];
   emailVerified?: boolean;
+  kycStatus?: string;
+  verifiedLegalName?: string | null;
+  verifiedDocumentMasked?: string | null;
+  kycVerifiedAt?: string | null;
   avatarUrl?: string | null;
   avatar?: string | null;
   storeId?: string | null;

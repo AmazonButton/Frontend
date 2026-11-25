@@ -24,6 +24,7 @@ import { api } from '../../services';
 import { useAuth } from '../../context/AuthContext';
 import { card, primaryButton, StatusPill } from '../../pages/operations/OperationPrimitives';
 import { CustomerVerificationDetails } from './CustomerVerificationDetails';
+import { getKycReviewReasonMeta, resolveCustomerKycState } from '../../utils/kyc.mjs';
 
 export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({ embedded = false }) => {
   const { user, refreshUser } = useAuth();
@@ -75,19 +76,48 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
       try {
         const res = await api.get(`/identity-verifications/sessions/${sessionId}/decision`);
         const payload = res.data?.data || res.data || {};
-        const status = String(payload.status || payload.decision?.status || '').toUpperCase();
+        const effectiveStatus = String(
+          payload.decision?.effectiveStatus || payload.status || payload.decision?.status || ''
+        ).toUpperCase();
+        const reason = payload.reviewReason || payload.decision?.reviewReason || null;
+        const verifiedIdentity = payload.decision?.verifiedIdentity || null;
 
-        if (status.includes('APPROV') || status.includes('SUCCESS')) {
+        if (effectiveStatus === 'APPROVED' || effectiveStatus.includes('APPROV') && effectiveStatus !== 'IN_REVIEW') {
           await load(true);
           setMessage('Xác minh danh tính thành công! Hồ sơ của bạn đã được chứng thực hoàn tất.');
           setMessageType('success');
           setTrackingSessionId(null);
           await refreshUser?.();
-        } else if (status.includes('DECLIN') || status.includes('REJECT') || status.includes('FAIL')) {
+        } else if (effectiveStatus === 'IN_REVIEW' || effectiveStatus.includes('REVIEW')) {
           await load(true);
-          setMessage('Phiên xác minh không hoàn tất hoặc chưa đạt yêu cầu từ Didit. Bạn có thể tạo phiên mới để thử lại.');
-          setMessageType('error');
+          await refreshUser?.();
           setTrackingSessionId(null);
+          const meta = getKycReviewReasonMeta(
+            reason,
+            {
+              fullName: verifiedIdentity?.fullName,
+              documentNumberMasked: verifiedIdentity?.documentNumberMasked,
+            },
+            user?.fullName || null
+          );
+          setMessage(
+            meta?.description ||
+              'Hồ sơ xác minh đang được chuyển sang trạng thái chờ xem xét đối soát. Vui lòng kiểm tra thông tin chi tiết bên dưới.'
+          );
+          setMessageType('error');
+        } else if (
+          effectiveStatus.includes('DECLIN') ||
+          effectiveStatus.includes('REJECT') ||
+          effectiveStatus.includes('FAIL') ||
+          effectiveStatus === 'EXPIRED' ||
+          effectiveStatus === 'ABANDONED' ||
+          effectiveStatus === 'REVOKED'
+        ) {
+          await load(true);
+          await refreshUser?.();
+          setTrackingSessionId(null);
+          setMessage('Phiên xác minh chưa đạt yêu cầu, đã hết hạn hoặc bị thu hồi. Bạn có thể tạo phiên mới để thử lại bằng CCCD chính chủ.');
+          setMessageType('error');
         } else {
           if (!silent) {
             setMessage('Didit đang xử lý đối soát hoặc bạn chưa chụp giấy tờ. Vui lòng bấm lại sau ít giây.');
@@ -104,37 +134,45 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
         isSyncingRef.current = false;
       }
     },
-    [load, refreshUser]
+    [load, refreshUser, user?.fullName]
   );
 
   const latest = sessions[0];
-  const isApproved =
-    String(latest?.status || '').toUpperCase().includes('APPROV') ||
-    String((user as any)?.kycStatus || '').toUpperCase().includes('APPROV');
-  const isPending =
-    !isApproved &&
-    (String(latest?.status || '').toUpperCase().includes('PENDING') || starting);
-  const isDeclined =
-    !isApproved &&
-    !isPending &&
-    latest &&
-    (String(latest.status || '').toUpperCase().includes('DECLIN') ||
-      String(latest.status || '').toUpperCase().includes('REJECT') ||
-      String(latest.status || '').toUpperCase().includes('FAIL'));
+  const kycState = resolveCustomerKycState(latest, user, starting);
+  const { isApproved, isInReview, isPending, isDeclined, isRevoked, reviewMeta } = kycState;
 
-  // Auto-sync on window focus if latest session is pending (throttled to at most once per 30s)
+  // Auto-sync on window focus if tracking or latest session is pending (throttled to at most once per 2.5s)
   useEffect(() => {
     const onFocus = () => {
       const now = Date.now();
-      if (now - lastSyncTimeRef.current < 30000) return;
-      if (latest && String(latest.status).toUpperCase() === 'PENDING') {
-        lastSyncTimeRef.current = now;
-        syncDecision(latest.id || latest.sessionId, true);
+      if (now - lastSyncTimeRef.current < 2500) return;
+      lastSyncTimeRef.current = now;
+      const sid = trackingSessionId || (latest && String(latest.status).toUpperCase() === 'PENDING' ? (latest.id || latest.sessionId) : null);
+      if (sid) {
+        syncDecision(sid, true);
+      } else {
+        load(true);
       }
     };
     window.addEventListener('focus', onFocus);
     return () => window.removeEventListener('focus', onFocus);
-  }, [latest?.id, latest?.sessionId, latest?.status, syncDecision]);
+  }, [latest?.id, latest?.sessionId, latest?.status, trackingSessionId, syncDecision, load]);
+
+  // Listen for callback completion message from Didit tab/window
+  useEffect(() => {
+    const onMessage = (e: MessageEvent) => {
+      if (e.data?.type === 'DIDIT_VERIFICATION_COMPLETE') {
+        const sid = trackingSessionId || (latest?.id || latest?.sessionId);
+        if (sid) {
+          syncDecision(sid, false);
+        } else {
+          load(false);
+        }
+      }
+    };
+    window.addEventListener('message', onMessage);
+    return () => window.removeEventListener('message', onMessage);
+  }, [trackingSessionId, latest?.id, latest?.sessionId, syncDecision, load]);
 
   // Polling check while tracking (max 6 attempts at 10s intervals)
   useEffect(() => {
@@ -164,6 +202,10 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
       const sid = data.sessionId || data.id || data.diditSessionId;
 
       if (verifyUrl) {
+        try {
+          sessionStorage.setItem('didit_return_url', window.location.pathname + window.location.search);
+        } catch {}
+
         const verificationWindow = window.open(verifyUrl, 'didit-verification');
         if (!verificationWindow) {
           setMessage('Trình duyệt đang chặn cửa sổ xác minh. Hãy cho phép pop-up rồi thử lại.');
@@ -171,7 +213,6 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
           return;
         }
 
-        verificationWindow.opener = null;
         if (sid) setTrackingSessionId(String(sid));
         setMessage('Trang xác minh Didit đã được mở ở tab mới. Hãy hoàn tất chụp giấy tờ và khuôn mặt, sau đó quay lại đây.');
         setMessageType('info');
@@ -230,6 +271,44 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
             </div>
           </div>
         </section>
+      ) : isInReview ? (
+        <section data-page-motion className="relative overflow-hidden rounded-2xl border border-amber-500/30 bg-gradient-to-br from-amber-700 via-orange-700 to-amber-900 p-6 text-white shadow-sm">
+          <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
+            <div>
+              <div className="mb-2 flex items-center gap-2 text-amber-100">
+                <ShieldAlert className="h-5 w-5 text-amber-300" />
+                <span className="text-xs font-bold uppercase tracking-[0.16em]">Cần xem xét đối soát</span>
+              </div>
+              <Title className="text-2xl font-bold tracking-tight text-white">
+                {reviewMeta?.title || 'Hồ sơ xác minh đang chờ kiểm tra'}
+              </Title>
+              <p className="mt-2 max-w-xl text-sm text-amber-50/95">
+                {reviewMeta?.description ||
+                  'Hồ sơ của bạn đang chờ Quản trị viên xem xét hoặc bạn có thể tạo phiên mới để xác minh bằng CCCD chính chủ.'}
+              </p>
+            </div>
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                onClick={start}
+                disabled={starting}
+                className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2.5 text-xs font-bold text-amber-900 shadow-sm hover:bg-amber-50 disabled:opacity-60 transition"
+              >
+                <BadgeCheck className="h-4 w-4" />
+                {starting ? 'Đang khởi tạo...' : 'Xác minh lại bằng CCCD chính chủ'}
+              </button>
+              {latest && (
+                <button
+                  onClick={() => syncDecision(latest.id || latest.sessionId)}
+                  disabled={syncing}
+                  className="inline-flex items-center gap-2 rounded-lg border border-amber-200/40 bg-amber-950/30 px-3.5 py-2.5 text-xs font-semibold text-white hover:bg-amber-950/50 disabled:opacity-60 transition"
+                >
+                  <RotateCw className={`h-3.5 w-3.5 ${syncing ? 'animate-spin' : ''}`} />
+                  {syncing ? 'Đang đồng bộ...' : 'Kiểm tra lại'}
+                </button>
+              )}
+            </div>
+          </div>
+        </section>
       ) : isPending ? (
         <section data-page-motion className="relative overflow-hidden rounded-2xl border border-[#287DA8]/25 bg-gradient-to-br from-[#0E6BA8] to-[#287DA8] p-6 text-white shadow-sm">
           <div className="flex flex-col justify-between gap-5 sm:flex-row sm:items-center">
@@ -263,9 +342,13 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
                 <ShieldCheck className="h-5 w-5" />
                 <span className="text-xs font-bold uppercase tracking-[0.16em]">Bảo vệ tài khoản</span>
               </div>
-              <Title className="text-2xl font-bold tracking-tight text-white">Xác minh danh tính</Title>
+              <Title className="text-2xl font-bold tracking-tight text-white">
+                {isRevoked ? 'Trạng thái định danh đã bị thu hồi' : 'Xác minh danh tính'}
+              </Title>
               <p className="mt-2 max-w-xl text-sm text-sky-50">
-                Hoàn tất eKYC để tăng độ tin cậy và mở các tính năng yêu cầu xác minh.
+                {isRevoked
+                  ? reviewMeta?.description || 'Tài khoản cần thực hiện xác minh lại danh tính bằng CCCD chính chủ.'
+                  : 'Hoàn tất eKYC để tăng độ tin cậy và mở các tính năng yêu cầu xác minh.'}
               </p>
             </div>
             <button
@@ -274,7 +357,7 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
               className="rounded-lg bg-white px-4 py-2.5 text-xs font-bold text-[#0E6BA8] shadow-sm hover:bg-sky-50 disabled:opacity-60 transition"
             >
               <BadgeCheck className="mr-2 inline h-4 w-4" />
-              {starting ? 'Đang khởi tạo...' : 'Bắt đầu xác minh'}
+              {starting ? 'Đang khởi tạo...' : isRevoked ? 'Xác minh lại ngay' : 'Bắt đầu xác minh'}
             </button>
           </div>
         </section>
@@ -360,9 +443,13 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
                   <p className="text-xs text-zinc-500">
                     {isApproved
                       ? 'Xác thực danh tính điện tử thành công qua nhà cung cấp Didit.'
-                      : isDeclined
-                        ? 'Phiên xác minh chưa đạt yêu cầu hoặc đã hết hạn.'
-                        : 'Cập nhật trạng thái từ nhà cung cấp xác minh.'}
+                      : isInReview
+                        ? reviewMeta?.title || 'Hồ sơ đang được tạm giữ để đối soát thông tin chủ sở hữu.'
+                        : isRevoked
+                          ? reviewMeta?.title || 'Trạng thái định danh của tài khoản đã bị thu hồi.'
+                          : isDeclined
+                            ? reviewMeta?.title || 'Phiên xác minh chưa đạt yêu cầu hoặc đã hết hạn.'
+                            : 'Cập nhật trạng thái từ nhà cung cấp xác minh.'}
                   </p>
                 </div>
               </div>
@@ -376,17 +463,18 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
                   </div>
                   <div className="grid grid-cols-2 gap-3 text-xs">
                     <div>
-                      <p className="text-zinc-500 dark:text-zinc-400">Họ và tên</p>
+                      <p className="text-zinc-500 dark:text-zinc-400">Họ tên pháp lý (CCCD)</p>
                       <p className="font-semibold text-zinc-800 dark:text-zinc-100">
-                        {latest?.metadata?.fullName || (user as any)?.fullName || 'Hồ sơ đã chứng thực'}
+                        {(user as any)?.verifiedLegalName || latest?.metadata?.fullName || (user as any)?.fullName || 'Hồ sơ đã chứng thực'}
                       </p>
                     </div>
                     <div>
                       <p className="text-zinc-500 dark:text-zinc-400">Số giấy tờ</p>
                       <p className="font-semibold text-zinc-800 dark:text-zinc-100">
-                        {latest?.metadata?.documentNumber
-                          ? '•••• ' + String(latest.metadata.documentNumber).slice(-4)
-                          : '•••••••• (Bảo mật)'}
+                        {(user as any)?.verifiedDocumentMasked ||
+                          (latest?.metadata?.documentNumberMasked || latest?.metadata?.documentNumber
+                            ? '•••• ' + String(latest.metadata.documentNumberMasked || latest.metadata.documentNumber).slice(-4)
+                            : '•••••••• (Bảo mật)')}
                       </p>
                     </div>
                     <div>
@@ -398,9 +486,58 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
                     <div>
                       <p className="text-zinc-500 dark:text-zinc-400">Thời gian duyệt</p>
                       <p className="font-semibold text-zinc-800 dark:text-zinc-100">
-                        {formatDate(latest?.completedAt || latest?.createdAt)}
+                        {formatDate((user as any)?.kycVerifiedAt || latest?.completedAt || latest?.createdAt)}
                       </p>
                     </div>
+                  </div>
+                </div>
+              )}
+
+              {/* In Review / Mismatch / Duplicate Details Box */}
+              {isInReview && (
+                <div className="rounded-xl border border-amber-300/80 bg-amber-50/70 p-4 dark:border-amber-900/50 dark:bg-amber-950/25">
+                  <div className="flex items-start gap-2.5 text-amber-950 dark:text-amber-200">
+                    <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-600 dark:text-amber-400" />
+                    <div className="min-w-0 flex-1 space-y-2 text-xs">
+                      <p className="font-bold">
+                        {reviewMeta?.title || 'Hồ sơ cần đối soát lại thông tin'}
+                      </p>
+                      <p className="leading-relaxed text-amber-900/90 dark:text-amber-200/90">
+                        {reviewMeta?.description || 'Thông tin giấy tờ chưa khớp tự động với tài khoản.'}
+                      </p>
+                      {(reviewMeta?.expectedName || reviewMeta?.ocrName || reviewMeta?.docMasked) && (
+                        <div className="grid grid-cols-1 gap-2 rounded-lg border border-amber-200/80 bg-white/80 p-2.5 sm:grid-cols-2 dark:border-amber-900/40 dark:bg-zinc-900/60">
+                          {reviewMeta?.expectedName && (
+                            <div>
+                              <span className="text-[10px] uppercase tracking-wide text-zinc-500">Tên tài khoản</span>
+                              <p className="font-semibold text-zinc-900 dark:text-zinc-100">{reviewMeta.expectedName}</p>
+                            </div>
+                          )}
+                          {reviewMeta?.ocrName && (
+                            <div>
+                              <span className="text-[10px] uppercase tracking-wide text-zinc-500">Tên trên CCCD (OCR)</span>
+                              <p className="font-semibold text-zinc-900 dark:text-zinc-100">{reviewMeta.ocrName}</p>
+                            </div>
+                          )}
+                          {reviewMeta?.docMasked && (
+                            <div>
+                              <span className="text-[10px] uppercase tracking-wide text-zinc-500">Số CCCD đã quét</span>
+                              <p className="font-mono font-semibold text-zinc-900 dark:text-zinc-100">{reviewMeta.docMasked}</p>
+                            </div>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  <div className="mt-3 flex flex-wrap gap-2">
+                    <button
+                      onClick={start}
+                      disabled={starting}
+                      className={primaryButton}
+                    >
+                      <BadgeCheck className="h-3.5 w-3.5" />
+                      {starting ? 'Đang khởi tạo...' : 'Tạo phiên mới bằng CCCD chính chủ'}
+                    </button>
                   </div>
                 </div>
               )}
@@ -435,11 +572,14 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
                 </div>
               )}
 
-              {/* Declined Action Box */}
-              {isDeclined && (
+              {/* Declined / Revoked Action Box */}
+              {(isDeclined || isRevoked) && (
                 <div className="rounded-xl border border-rose-200 bg-rose-50/60 p-4 dark:border-rose-900/40 dark:bg-rose-950/20">
                   <p className="text-xs text-rose-800 dark:text-rose-300">
-                    Phiên xác minh này chưa thành công. Bạn có thể bấm bắt đầu để tạo phiên xác minh mới.
+                    {reviewMeta?.description ||
+                      (isRevoked
+                        ? 'Trạng thái định danh của tài khoản đã bị thu hồi. Vui lòng xác minh lại bằng CCCD chính chủ.'
+                        : 'Phiên xác minh này chưa thành công. Bạn có thể bấm bắt đầu để tạo phiên xác minh mới.')}
                   </p>
                   <button
                     onClick={start}

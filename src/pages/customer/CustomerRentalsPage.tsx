@@ -72,6 +72,12 @@ export const CustomerRentalsPage: React.FC = () => {
   const [payingContract, setPayingContract] = useState<CustomerRentalContract | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
 
+  // Cancel contract before handover modal state
+  const [cancellingContract, setCancellingContract] = useState<CustomerRentalContract | null>(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [isCancellingRental, setIsCancellingRental] = useState(false);
+  const [returningId, setReturningId] = useState<string | null>(null);
+
   // Fetch packages and my rentals
   const fetchData = useCallback(async () => {
     const request = ++dataRequest.current;
@@ -258,6 +264,53 @@ export const CustomerRentalsPage: React.FC = () => {
       toast.error(err.response?.data?.message || err.message || 'Thanh toán chưa thành công.');
     } finally {
       setIsProcessingPayment(false);
+    }
+  };
+
+  const handleConfirmCancelRental = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cancellingContract) return;
+    setIsCancellingRental(true);
+    const id = cancellingContract.rentalId || cancellingContract.id;
+    try {
+      const res = await rentalsService.cancelRental(id!, cancelReason || undefined);
+      toast.success(
+        res?.message ||
+          (cancellingContract.status === 'PENDING_HANDOVER'
+            ? 'Hủy hợp đồng thuê trước khi bàn giao thành công! Yêu cầu hoàn 100% tiền cọc đã được tạo.'
+            : 'Đã hủy hợp đồng thuê thành công.')
+      );
+      setCancellingContract(null);
+      setCancelReason('');
+      await fetchData();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Không thể hủy hợp đồng thuê lúc này.');
+    } finally {
+      setIsCancellingRental(false);
+    }
+  };
+
+  const handleRequestReturn = async (contract: CustomerRentalContract) => {
+    const custodyButtons = Array.isArray(contract.buttons)
+      ? contract.buttons.filter(
+          (b: any) => String(b?.inventoryState || b?.custodyStatus || '').toUpperCase() === 'IN_CUSTOMER_CUSTODY'
+        )
+      : [];
+    const targetBtn = custodyButtons[0];
+    if (!targetBtn) {
+      toast.error('Thiết bị chưa được bàn giao cho bạn nên chưa thể gửi yêu cầu trả nút.');
+      return;
+    }
+    const id = String(contract.rentalId || contract.id);
+    setReturningId(id);
+    try {
+      const res = await rentalsService.requestReturn(id, targetBtn.buttonId || targetBtn.id);
+      toast.success(res?.message || 'Đã gửi yêu cầu trả nút bấm & hoàn cọc!');
+      await fetchData();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Không thể gửi yêu cầu trả nút lúc này.');
+    } finally {
+      setReturningId(null);
     }
   };
 
@@ -633,9 +686,48 @@ export const CustomerRentalsPage: React.FC = () => {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 {myRentals.map((contract) => {
-                  const isPending = contract.status === 'PENDING_PAYMENT';
-                  const isActive = contract.status === 'ACTIVE';
-                  const isPaid = contract.status === 'PAID';
+                  const statusUpper = String(contract.status || '').toUpperCase();
+                  const isPending = statusUpper === 'PENDING_PAYMENT';
+                  const isPendingHandover = statusUpper === 'PENDING_HANDOVER';
+                  const isActive = statusUpper === 'ACTIVE';
+                  const isPaid = statusUpper === 'PAID';
+                  const isCancelled = statusUpper === 'CANCELLED';
+                  const isExpired = statusUpper === 'EXPIRED';
+                  const canCancelBeforeHandover = isPending || isPendingHandover;
+                  const hasCustodyButtons =
+                    isActive &&
+                    Array.isArray(contract.buttons) &&
+                    contract.buttons.some(
+                      (btn: any) =>
+                        String(btn?.inventoryState || btn?.custodyStatus || '').toUpperCase() ===
+                        'IN_CUSTOMER_CUSTODY'
+                    );
+
+                  const statusLabel = isActive
+                    ? 'ĐANG HOẠT ĐỘNG'
+                    : isPending
+                    ? 'CHỜ THANH TOÁN'
+                    : isPendingHandover
+                    ? 'Chờ bàn giao thiết bị'
+                    : isPaid
+                    ? 'ĐÃ THANH TOÁN'
+                    : isCancelled
+                    ? 'Đã hủy'
+                    : isExpired
+                    ? 'Hết hạn'
+                    : contract.status;
+
+                  const badgeClass = isActive
+                    ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
+                    : isPending
+                    ? 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800 animate-pulse'
+                    : isPendingHandover
+                    ? 'bg-sky-50 text-sky-700 border border-sky-200 dark:bg-sky-950/40 dark:text-sky-300 dark:border-sky-800'
+                    : isPaid
+                    ? 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800'
+                    : isCancelled
+                    ? 'bg-rose-50 text-rose-700 border border-rose-200 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-800'
+                    : 'bg-slate-100 text-slate-600 border border-slate-200 dark:bg-zinc-800 dark:text-zinc-400';
 
                   return (
                     <div
@@ -660,24 +752,8 @@ export const CustomerRentalsPage: React.FC = () => {
                         </div>
 
                         {/* Status Badge */}
-                        <span
-                          className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${
-                            isActive
-                              ? 'bg-emerald-50 text-emerald-700 border border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300 dark:border-emerald-800'
-                              : isPending
-                              ? 'bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-800 animate-pulse'
-                              : isPaid
-                              ? 'bg-blue-50 text-blue-700 border border-blue-200 dark:bg-blue-950/40 dark:text-blue-300 dark:border-blue-800'
-                              : 'bg-slate-100 text-slate-600 border border-slate-200 dark:bg-zinc-800 dark:text-zinc-400'
-                          }`}
-                        >
-                          {isActive
-                            ? 'ĐANG HOẠT ĐỘNG'
-                            : isPending
-                            ? 'CHỜ THANH TOÁN'
-                            : isPaid
-                            ? 'ĐÃ THANH TOÁN'
-                            : contract.status}
+                        <span className={`text-[10px] font-bold px-2.5 py-1 rounded-full uppercase tracking-wider ${badgeClass}`}>
+                          {statusLabel}
                         </span>
                       </div>
 
@@ -697,6 +773,23 @@ export const CustomerRentalsPage: React.FC = () => {
                           </span>
                         </div>
                       </div>
+
+                      {isPendingHandover && (
+                        <div className="p-3 rounded-2xl bg-sky-50/80 dark:bg-sky-950/30 border border-sky-200/80 dark:border-sky-900 text-[11px] text-sky-900 dark:text-sky-200 space-y-1">
+                          <p className="font-semibold">Hợp đồng đang chờ bàn giao thiết bị từ cửa hàng/kỹ thuật viên.</p>
+                          <p>
+                            Nếu đổi ý trước khi nhận nút, bạn có thể hủy hợp đồng để được hoàn 100% tiền cọc. Nhớ kiểm tra mục{' '}
+                            <button
+                              type="button"
+                              onClick={() => navigate('/customer/banking')}
+                              className="font-semibold underline hover:text-[#0E6BA8]"
+                            >
+                              Ngân hàng hoàn tiền
+                            </button>{' '}
+                            để Admin duyệt lệnh chi Payout nhanh chóng.
+                          </p>
+                        </div>
+                      )}
 
                       {/* Assigned Devices (if any) */}
                       {contract.buttons && contract.buttons.length > 0 && (
@@ -719,15 +812,29 @@ export const CustomerRentalsPage: React.FC = () => {
                       )}
 
                       {/* Action buttons */}
-                      <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-zinc-800/80">
+                      <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 dark:border-zinc-800/80">
                         {isPending && (
                           <button
                             type="button"
                             onClick={() => setPayingContract(contract)}
-                            className="flex-1 py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                            className="flex-1 min-w-[160px] py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                           >
                             <CreditCard className="w-3.5 h-3.5" />
                             <span>Thanh Toán Ngay ({Number(contract.totalRentAmount || 0).toLocaleString('vi-VN')} ₫)</span>
+                          </button>
+                        )}
+
+                        {canCancelBeforeHandover && (
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setCancellingContract(contract);
+                              setCancelReason('');
+                            }}
+                            className="flex-1 min-w-[160px] py-2 px-3 rounded-xl border border-rose-200 bg-rose-50 hover:bg-rose-100 text-rose-700 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-300 font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                          >
+                            <X className="w-3.5 h-3.5" />
+                            <span>Hủy hợp đồng & hoàn cọc</span>
                           </button>
                         )}
 
@@ -735,10 +842,22 @@ export const CustomerRentalsPage: React.FC = () => {
                           <button
                             type="button"
                             onClick={() => navigate('/customer/home')}
-                            className="flex-1 py-2 px-3 rounded-xl bg-[#0E6BA8] hover:bg-[#0c598c] text-white font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                            className="flex-1 min-w-[140px] py-2 px-3 rounded-xl bg-[#0E6BA8] hover:bg-[#0c598c] text-white font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
                           >
                             <Smartphone className="w-3.5 h-3.5" />
                             <span>Xem Nút Tại Trang Chủ</span>
+                          </button>
+                        )}
+
+                        {hasCustodyButtons && (
+                          <button
+                            type="button"
+                            disabled={returningId === String(contract.rentalId || contract.id)}
+                            onClick={() => handleRequestReturn(contract)}
+                            className="py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer disabled:opacity-50"
+                          >
+                            <RefreshCw className={`w-3.5 h-3.5 ${returningId === String(contract.rentalId || contract.id) ? 'animate-spin' : ''}`} />
+                            <span>Yêu cầu trả nút</span>
                           </button>
                         )}
                       </div>
@@ -1060,6 +1179,85 @@ export const CustomerRentalsPage: React.FC = () => {
                   Thanh toán sau (Lưu ở danh sách hợp đồng)
                 </button>
               </div>
+            </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* ========================================================================= */}
+      {/* CANCEL BEFORE HANDOVER MODAL                                              */}
+      {/* ========================================================================= */}
+      <AnimatePresence>
+        {cancellingContract && (
+          <div className="fixed inset-0 z-[115] flex items-center justify-center p-3 sm:p-4 overscroll-contain responsive-modal overflow-y-auto">
+            <motion.div
+              initial={{ opacity: 0 }}
+              animate={{ opacity: 1 }}
+              exit={{ opacity: 0 }}
+              onClick={() => !isCancellingRental && setCancellingContract(null)}
+              className="fixed inset-0 bg-slate-950/60 dark:bg-black/75 backdrop-blur-md cursor-pointer"
+            />
+            <motion.div
+              initial={{ opacity: 0, scale: 0.94, y: 16 }}
+              animate={{ opacity: 1, scale: 1, y: 0 }}
+              exit={{ opacity: 0, scale: 0.95, y: 12 }}
+              className="relative z-10 w-full sm:max-w-md bg-white dark:bg-zinc-900 rounded-3xl border border-slate-200 dark:border-zinc-800 shadow-2xl p-6 space-y-4"
+            >
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 text-rose-500" />
+                  <span>Hủy hợp đồng #{cancellingContract.rentalCode}?</span>
+                </h3>
+                <button
+                  type="button"
+                  disabled={isCancellingRental}
+                  onClick={() => setCancellingContract(null)}
+                  className="w-7 h-7 rounded-full bg-slate-100 hover:bg-slate-200 dark:bg-zinc-800 text-slate-500 flex items-center justify-center cursor-pointer"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <form onSubmit={handleConfirmCancelRental} className="space-y-4">
+                <p className="text-xs text-slate-600 dark:text-zinc-300 leading-relaxed">
+                  {String(cancellingContract.status || '').toUpperCase() === 'PENDING_HANDOVER'
+                    ? 'Hợp đồng chưa bàn giao thiết bị. Khi hủy, hệ thống sẽ thu hồi phân bổ nút bấm và tạo yêu cầu hoàn 100% tiền cọc. Vui lòng kiểm tra mục Ngân hàng hoàn tiền để Admin duyệt lệnh chi Payout.'
+                    : 'Hợp đồng đang chờ thanh toán sẽ bị hủy vĩnh viễn.'}
+                </p>
+
+                <div>
+                  <label className="block text-[11px] font-medium text-slate-700 dark:text-zinc-300 mb-1">
+                    Lý do hủy (Tùy chọn)
+                  </label>
+                  <input
+                    type="text"
+                    value={cancelReason}
+                    disabled={isCancellingRental}
+                    onChange={(e) => setCancelReason(e.target.value)}
+                    placeholder="VD: Đổi nhu cầu sử dụng, đặt nhầm gói..."
+                    className="w-full px-3 py-2 text-xs rounded-xl bg-slate-50 dark:bg-zinc-800 border border-slate-200 dark:border-zinc-700 text-slate-900 dark:text-white outline-none focus:border-[#0E6BA8]"
+                  />
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    disabled={isCancellingRental}
+                    onClick={() => setCancellingContract(null)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 text-xs font-semibold text-slate-600 dark:text-zinc-300 hover:bg-slate-50"
+                  >
+                    Giữ lại hợp đồng
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isCancellingRental}
+                    className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-semibold flex items-center gap-1.5 disabled:opacity-50"
+                  >
+                    {isCancellingRental && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    <span>Xác nhận hủy & hoàn cọc</span>
+                  </button>
+                </div>
+              </form>
             </motion.div>
           </div>
         )}

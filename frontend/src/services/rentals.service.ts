@@ -43,7 +43,7 @@ export interface CustomerRentalContract {
   depositAmount: number | string;
   startDate: string;
   endDate: string;
-  status: 'PENDING_PAYMENT' | 'PAID' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED' | string;
+  status: 'PENDING_PAYMENT' | 'PAID' | 'PENDING_HANDOVER' | 'ACTIVE' | 'EXPIRED' | 'TERMINATED' | 'CANCELLED' | string;
   createdAt?: string;
   package?: RentalPackageItem;
   buttons?: any[];
@@ -175,6 +175,26 @@ export const rentalsService = {
    */
   async activateRental(id: string | number): Promise<any> {
     const res = await api.post(`/rentals/${id}/activate`);
+    return res.data;
+  },
+
+  /**
+   * Hủy hợp đồng thuê trước khi bàn giao thiết bị & hoàn 100% tiền cọc (POST /api/v1/rentals/:id/cancel)
+   */
+  async cancelRental(id: string | number, reason?: string): Promise<any> {
+    const res = await api.post(`/rentals/${encodeURIComponent(String(id))}/cancel`, {
+      ...(reason && reason.trim() ? { reason: reason.trim() } : {}),
+    });
+    return res.data;
+  },
+
+  /**
+   * Khách hàng gửi yêu cầu trả nút bấm (chỉ khi nút đang ở IN_CUSTOMER_CUSTODY)
+   */
+  async requestReturn(id: string | number, buttonId: string | number): Promise<any> {
+    const res = await api.post(`/rentals/${encodeURIComponent(String(id))}/return-requests`, {
+      buttonId: String(buttonId),
+    });
     return res.data;
   },
 

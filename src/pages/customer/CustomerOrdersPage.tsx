@@ -46,6 +46,7 @@ const statusMeta: Record<string, { label: string; badge: string; icon: React.Ele
   OUT_FOR_DELIVERY: { label: 'Đang giao', badge: 'bg-blue-50 text-blue-700 border-blue-200', icon: Truck },
   READY_FOR_DELIVERY: { label: 'Sẵn sàng giao', badge: 'bg-blue-50 text-blue-700 border-blue-200', icon: PackageCheck },
   SHIPPING: { label: 'Đang giao', badge: 'bg-blue-50 text-blue-700 border-blue-200', icon: Truck },
+  DELIVERY_FAILED: { label: 'Giao hàng thất bại', badge: 'bg-rose-50 text-rose-700 border-rose-200', icon: CircleAlert },
   COMPLETED: { label: 'Đã giao', badge: 'bg-emerald-50 text-emerald-700 border-emerald-200', icon: PackageCheck },
   CANCELLED: { label: 'Đã hủy', badge: 'bg-rose-50 text-rose-700 border-rose-200', icon: CircleAlert },
   REJECTED: { label: 'Không thể xử lý', badge: 'bg-rose-50 text-rose-700 border-rose-200', icon: CircleAlert },
@@ -170,6 +171,14 @@ export const CustomerOrdersPage: React.FC = () => {
   };
 
   const orderRequests = useRef({ generation: 0, flight: null as Promise<void> | null, queued: false });
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     const params = new URLSearchParams(location.search);
@@ -247,8 +256,10 @@ export const CustomerOrdersPage: React.FC = () => {
     try {
       await flight;
     } finally {
-      if (requests.generation === generation) {
+      if (requests.flight === flight) {
         requests.flight = null;
+      }
+      if (isMountedRef.current) {
         setIsLoading(false);
         setIsRefreshing(false);
       }
@@ -266,6 +277,23 @@ export const CustomerOrdersPage: React.FC = () => {
     const socket = getSocket();
 
     const handleStatusChanged = (payload: any) => {
+      const incoming = payload?.order || payload;
+      const targetId = String(incoming?.orderId || incoming?.id || '');
+      const nextStatus = incoming?.orderStatus || incoming?.status;
+      const nextPaymentStatus = incoming?.paymentStatus;
+      if (targetId && (nextStatus || nextPaymentStatus)) {
+        setOrders((prev) =>
+          prev.map((o) =>
+            String(o.id || (o as any).orderId) === targetId
+              ? {
+                  ...o,
+                  ...(nextStatus ? { status: nextStatus, orderStatus: nextStatus } : {}),
+                  ...(nextPaymentStatus ? { paymentStatus: nextPaymentStatus } : {}),
+                }
+              : o,
+          ),
+        );
+      }
       loadOrders();
     };
 
@@ -294,6 +322,26 @@ export const CustomerOrdersPage: React.FC = () => {
     };
 
     const handlePaymentConfirmed = (payload: any) => {
+      const incoming = payload?.order || payload;
+      const incomingId = String(incoming?.orderId || incoming?.id || '');
+      const incomingCode = String(incoming?.orderNumber || incoming?.orderCode || '');
+      if (incomingId || incomingCode) {
+        setOrders((prev) =>
+          prev.map((o) => {
+            const oId = String(o.id || (o as any).orderId || '');
+            const oCode = String(o.orderNumber || (o as any).orderCode || '');
+            if ((incomingId && oId === incomingId) || (incomingCode && oCode === incomingCode)) {
+              return {
+                ...o,
+                paymentStatus: 'PAID',
+                status: o.status === 'PENDING' ? 'CONFIRMED' : o.status,
+                orderStatus: o.orderStatus === 'PENDING' ? 'CONFIRMED' : o.orderStatus,
+              };
+            }
+            return o;
+          }),
+        );
+      }
       loadOrders();
       const orderNum = payload?.orderNumber || payload?.orderCode || '';
       if (orderNum) {
@@ -301,13 +349,58 @@ export const CustomerOrdersPage: React.FC = () => {
       }
     };
 
+    const handlePaymentMethodChanged = (payload: any) => {
+      const incoming = payload?.order || payload;
+      const targetId = String(incoming?.orderId || incoming?.id || '');
+      if (targetId && incoming?.paymentMethod) {
+        setOrders((prev) =>
+          prev.map((o) =>
+            String(o.id || (o as any).orderId) === targetId
+              ? {
+                  ...o,
+                  paymentMethod: incoming.paymentMethod,
+                  paymentStatus: incoming.paymentStatus || o.paymentStatus,
+                }
+              : o,
+          ),
+        );
+      }
+      loadOrders();
+    };
+
+    const handleOrderRefunded = (payload: any) => {
+      const targetId = String(payload?.orderId || payload?.order?.orderId || payload?.order?.id || '');
+      if (targetId) {
+        setOrders((prev) =>
+          prev.map((o) =>
+            String(o.id || (o as any).orderId) === targetId
+              ? {
+                  ...o,
+                  paymentStatus: payload?.orderPaymentStatus || 'REFUNDED',
+                }
+              : o,
+          ),
+        );
+      }
+      toast.success('Hoàn tiền đơn hàng đã được xác nhận thành công!');
+      void loadOrders();
+    };
+
+    const handleWindowFocus = () => {
+      if (document.visibilityState === 'visible') {
+        void loadOrders();
+      }
+    };
+
     socket.on('ORDER_STATUS_CHANGED', handleStatusChanged);
     socket.on('ORDER_CREATED', handleOrderCreated);
     socket.on('ORDER_CANCELLED', handleOrderCancelled);
     socket.on('ORDER_PAYMENT_CONFIRMED', handlePaymentConfirmed);
+    socket.on('ORDER_PAYMENT_METHOD_CHANGED', handlePaymentMethodChanged);
+    socket.on('ORDER_REFUNDED', handleOrderRefunded);
     socket.on('ORDER_DELIVERED', handleStatusChanged);
     window.addEventListener(ORDER_EVENT, handleOrderCreated);
-    window.addEventListener('focus', handleOrderCreated);
+    window.addEventListener('focus', handleWindowFocus);
 
     return () => {
       orderRequests.current.generation += 1;
@@ -317,14 +410,31 @@ export const CustomerOrdersPage: React.FC = () => {
       socket.off('ORDER_CREATED', handleOrderCreated);
       socket.off('ORDER_CANCELLED', handleOrderCancelled);
       socket.off('ORDER_PAYMENT_CONFIRMED', handlePaymentConfirmed);
+      socket.off('ORDER_PAYMENT_METHOD_CHANGED', handlePaymentMethodChanged);
+      socket.off('ORDER_REFUNDED', handleOrderRefunded);
       socket.off('ORDER_DELIVERED', handleStatusChanged);
       window.removeEventListener(ORDER_EVENT, handleOrderCreated);
-      window.removeEventListener('focus', handleOrderCreated);
+      window.removeEventListener('focus', handleWindowFocus);
     };
   }, [loadOrders, user?.id, user?.role, user?.customerProfileId]);
 
   const getOrderStatus = (o: any) => dashboardOrderStatus(o);
   useDashboardRefresh(() => loadOrders(), 'customer-orders:' + user?.id + ':' + user?.customerProfileId, true);
+
+  useEffect(() => {
+    const hasActiveOrders = orders.some((o) =>
+      ['PENDING', 'CONFIRMED', 'PREPARING', 'READY_FOR_DELIVERY', 'SHIPPING'].includes(
+        dashboardOrderStatus(o),
+      ),
+    );
+    if (!hasActiveOrders) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void loadOrders();
+      }
+    }, 6000);
+    return () => clearInterval(interval);
+  }, [orders, loadOrders]);
 
   const confirmCancellation = async () => {
     if (!orderToCancel) return;
@@ -337,14 +447,20 @@ export const CustomerOrdersPage: React.FC = () => {
         reason: 'Khách hàng yêu cầu hủy đơn',
       });
       const updatedOrder = response.data?.data;
+      const nextStatus = updatedOrder?.orderStatus || updatedOrder?.status || 'CANCELLED';
+      const nextPaymentStatus =
+        updatedOrder?.paymentStatus ||
+        (String(orderToCancel.paymentStatus || '').toUpperCase() === 'PAID'
+          ? 'REFUND_PENDING'
+          : orderToCancel.paymentStatus);
       publishOrderEvent('ORDER_CANCELLED', {
-        order: updatedOrder || { ...orderToCancel, status: 'CANCELLED' },
+        order: updatedOrder || { ...orderToCancel, status: nextStatus, paymentStatus: nextPaymentStatus },
         reason: 'Khách hàng yêu cầu hủy đơn',
       });
       setOrders((current) => current.map((order) => {
         const oId = order.id || (order as any).orderId;
         return oId === targetId
-          ? { ...order, ...updatedOrder, status: 'CANCELLED', orderStatus: 'CANCELLED' }
+          ? { ...order, ...updatedOrder, status: nextStatus, orderStatus: nextStatus, paymentStatus: nextPaymentStatus }
           : order;
       }));
       setExpandedOrder(null);
@@ -372,7 +488,7 @@ export const CustomerOrdersPage: React.FC = () => {
       const currentStatus = getOrderStatus(order);
       const filterMatches =
         filter === 'ALL' ||
-        (filter === 'ACTIVE' && isActiveOrder(currentStatus)) ||
+        (filter === 'ACTIVE' && (isActiveOrder(currentStatus) || currentStatus === 'DELIVERY_FAILED')) ||
         (filter === 'COMPLETED' && currentStatus === 'COMPLETED') ||
         (filter === 'CANCELLED' && ['CANCELLED', 'REJECTED'].includes(currentStatus));
       const searchMatches = !normalizedQuery || [
@@ -516,12 +632,19 @@ export const CustomerOrdersPage: React.FC = () => {
                 const isExpanded = expandedOrder === order.id;
 
                 const isCancelled = ['CANCELLED', 'REJECTED'].includes(currentStatus);
-                const isRefundPending = isCancelled && String(order.paymentStatus || '').toUpperCase() === 'REFUND_PENDING';
-                const isRefunded = isCancelled && String(order.paymentStatus || '').toUpperCase() === 'REFUNDED';
-                const isUnpaid = !isCancelled && (order.paymentStatus === 'UNPAID' || (order.paymentStatus !== 'PAID' && order.paymentMethod !== 'COD' && order.paymentMethod !== 'CASH_ON_DELIVERY'));
-                // Khách hàng có thể tự hủy đơn khi đơn ở PENDING hoặc CONFIRMED (trước khi cửa hàng đóng gói)
-                const canCancel = !isCancelled && ['PENDING', 'CONFIRMED'].includes(currentStatus);
-                const canPayNow = isUnpaid && order.paymentMethod === 'PAYOS';
+                const isDeliveryFailed = currentStatus === 'DELIVERY_FAILED';
+                const payStatusUpper = String(order.paymentStatus || '').toUpperCase();
+                const payMethodUpper = String(order.paymentMethod || '').toUpperCase();
+                const isRefundPending = isCancelled && payStatusUpper === 'REFUND_PENDING';
+                const isRefunded = isCancelled && payStatusUpper === 'REFUNDED';
+                const isPaid = payStatusUpper === 'PAID';
+                const isCod = ['COD', 'CASH_ON_DELIVERY'].includes(payMethodUpper);
+                const isUnpaid = !isCancelled && !isPaid && !['REFUND_PENDING', 'REFUNDED'].includes(payStatusUpper);
+                const canSwitchPayment = isUnpaid && ['PENDING', 'CONFIRMED', 'PREPARING', 'READY_FOR_DELIVERY', 'SHIPPING'].includes(currentStatus);
+                // Khách hàng có thể tự hủy đơn khi đơn ở PENDING, CONFIRMED hoặc DELIVERY_FAILED (Hướng B)
+                const canCancel = !isCancelled && ['PENDING', 'CONFIRMED', 'DELIVERY_FAILED'].includes(currentStatus);
+                const canPayNow = canSwitchPayment && !isCod;
+                const canSwitchToPayos = canSwitchPayment && isCod;
                 const itemSummary = order.items.slice(0, 2).map((item) => `${item.quantity}× ${item.productName}`).join(', ');
                 return (
                   <motion.article key={order.id || order.orderNumber || index} initial={{ opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: Math.min(index * 0.035, 0.22) }}>
@@ -614,21 +737,87 @@ export const CustomerOrdersPage: React.FC = () => {
                                     </Link>
                                   </div>
                                 )}
+                                {isRefunded && (
+                                  <div className="mt-2.5 p-3 rounded-xl bg-emerald-50 dark:bg-emerald-950/30 border border-emerald-200 dark:border-emerald-900 flex items-center gap-2.5 text-xs text-emerald-900 dark:text-emerald-200">
+                                    <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+                                    <div>
+                                      <p className="font-semibold">Đã hoàn tiền thành công về tài khoản</p>
+                                      <p className="text-[11px] text-emerald-700 dark:text-emerald-300 mt-0.5">
+                                        Giao dịch chi hoàn qua PayOS Payout đã được đối soát hoàn tất.
+                                      </p>
+                                    </div>
+                                  </div>
+                                )}
                               </div>
                             </div>
                             <div className="mt-4 pt-3 border-t border-slate-200/70 flex justify-between text-sm font-bold text-slate-900 dark:border-zinc-700 dark:text-white"><span>Tổng thanh toán</span><span className="tabular-nums">{formatPrice(order.totalAmount)}</span></div>
-                            {(canCancel || canPayNow) && (
+                            {(canCancel || canPayNow || canSwitchToPayos) && (
                               <div className="mt-4 pt-3 border-t border-slate-200/70 dark:border-zinc-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-                                <p className="text-[11px] text-slate-400">
-                                  {canPayNow
+                                <p className="text-[11px] text-slate-500 dark:text-zinc-400 leading-relaxed">
+                                  {isDeliveryFailed
+                                    ? isPaid
+                                      ? 'Giao hàng chưa thành công. Bạn có thể hủy đơn để hệ thống tự động chuyển sang quy trình hoàn tiền (REFUND_PENDING) qua PayOS Payout; nếu không giao lại, hệ thống sẽ tự động hủy & kích hoạt hoàn tiền sau 24 giờ.'
+                                      : 'Giao hàng chưa thành công. Bạn có thể tự hủy đơn này nếu không muốn chờ cửa hàng giao lại.'
+                                    : canPayNow
                                     ? canCancel
-                                      ? 'Đơn hàng chưa hoàn tất thanh toán. Bạn có thể thanh toán ngay hoặc hủy đơn hàng.'
-                                      : 'Đơn hàng chưa hoàn tất thanh toán. Bạn có thể thanh toán ngay. Nếu cần hủy, vui lòng liên hệ cửa hàng.'
+                                      ? 'Đơn hàng chưa hoàn tất thanh toán PayOS. Bạn có thể quét QR thanh toán ngay, đổi sang Tiền mặt (COD) hoặc hủy đơn hàng.'
+                                      : 'Đơn hàng chưa thanh toán PayOS. Bạn có thể thanh toán ngay qua QR hoặc đổi sang Tiền mặt (COD) khi nhận hàng.'
+                                    : canSwitchToPayos
+                                    ? 'Đơn đang chọn Tiền mặt (COD). Bạn có thể thanh toán trước qua PayOS / QR bất kỳ lúc nào trước khi nhận hàng.'
                                     : currentStatus === 'CONFIRMED'
                                     ? 'Đơn hàng đã được tiếp nhận. Bạn vẫn có thể hủy đơn trước khi cửa hàng bắt đầu đóng gói.'
                                     : 'Đơn hàng đang chờ xử lý, bạn vẫn có thể hủy đơn nếu muốn thay đổi.'}
                                 </p>
                                 <div className="order-actions flex flex-wrap items-center gap-2 self-end sm:self-auto">
+                                  {canSwitchToPayos && (
+                                    <button
+                                      type="button"
+                                      disabled={isCreatingPayosLink === String(order.id || (order as any).orderId)}
+                                      onClick={async (event) => {
+                                        event.stopPropagation();
+                                        const oId = String(order.id || (order as any).orderId);
+                                        const oCode = order.orderNumber || (order as any).orderCode || oId;
+                                        const oAmount = Number(order.totalAmount || 0);
+                                        setIsCreatingPayosLink(oId);
+                                        try {
+                                          toast.info('Đang chuyển sang PayOS và tạo mã quét QR...');
+                                          await paymentsService.selectOrderPaymentMethod(oId, 'PAYOS');
+                                          const res = await api.post('/payments/payos/create-link', {
+                                            orderId: oId,
+                                          });
+                                          const data = res.data?.data || res.data;
+                                          const checkoutUrl = data?.checkoutUrl;
+                                          const qrCode = data?.qrCode;
+                                          const paymentLinkId = data?.paymentLinkId;
+                                          await loadOrders();
+                                          if (checkoutUrl || qrCode) {
+                                            setPayosModalData({
+                                              orderId: oId,
+                                              orderNumber: oCode,
+                                              amount: oAmount,
+                                              qrCode,
+                                              checkoutUrl,
+                                              paymentLinkId,
+                                            });
+                                          } else {
+                                            toast.error('Không tìm thấy liên kết thanh toán PayOS.');
+                                          }
+                                        } catch (err: any) {
+                                          toast.error(err.response?.data?.message || 'Không thể chuyển sang thanh toán PayOS lúc này.');
+                                        } finally {
+                                          setIsCreatingPayosLink(null);
+                                        }
+                                      }}
+                                      className="inline-flex items-center justify-center gap-1.5 rounded-lg bg-[#0E6BA8] px-3.5 py-2 text-xs font-semibold text-white shadow-xs transition hover:bg-[#0B5586] disabled:opacity-60"
+                                    >
+                                      {isCreatingPayosLink === String(order.id || (order as any).orderId) ? (
+                                        <RefreshCw className="w-3.5 h-3.5 animate-spin" />
+                                      ) : (
+                                        <CreditCard className="w-3.5 h-3.5" />
+                                      )}
+                                      Thanh toán trước qua PayOS / QR
+                                    </button>
+                                  )}
                                   {canPayNow && (
                                     <>
                                       <button
@@ -686,7 +875,7 @@ export const CustomerOrdersPage: React.FC = () => {
                                           setIsSwitchingCod(oId);
                                           try {
                                             await paymentsService.selectOrderPaymentMethod(oId, 'COD');
-                                            toast.success(`Đã chuyển đơn hàng #${oCode} sang thanh toán Tiền mặt (COD)! Cửa hàng sẽ chuẩn bị đơn hàng.`);
+                                            toast.success(`Đã chuyển đơn hàng #${oCode} sang thanh toán Tiền mặt (COD)! Cửa hàng sẽ tiếp tục xử lý đơn hàng.`);
                                             await loadOrders();
                                           } catch (err: any) {
                                             toast.error(err.response?.data?.message || 'Không thể đổi sang tiền mặt lúc này.');
@@ -721,14 +910,14 @@ export const CustomerOrdersPage: React.FC = () => {
                                 </div>
                               </div>
                             )}
-                            {['PREPARING', 'SHIPPING'].includes(currentStatus) && (
+                            {['PREPARING', 'READY_FOR_DELIVERY', 'SHIPPING'].includes(currentStatus) && (
                               <div className="mt-4 pt-3 border-t border-slate-200/70 dark:border-zinc-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
                                 <span className="text-blue-600 dark:text-blue-400 font-medium flex items-center gap-1.5">
                                   <CheckCircle2 className="w-4 h-4 shrink-0 text-blue-500" />
-                                  {currentStatus === 'CONFIRMED'
-                                    ? 'Cửa hàng đã xác nhận đơn hàng và đang chuẩn bị giao.'
-                                    : currentStatus === 'PREPARING'
+                                  {currentStatus === 'PREPARING'
                                     ? 'Đơn hàng đang được đóng gói chuẩn bị giao.'
+                                    : currentStatus === 'READY_FOR_DELIVERY'
+                                    ? 'Đơn hàng đã sẵn sàng chờ tài xế nhận giao.'
                                     : 'Đơn hàng đang trên đường giao đến bạn.'}
                                 </span>
                                 <span className="text-[11px] text-slate-400 dark:text-zinc-500">
@@ -824,7 +1013,12 @@ export const CustomerOrdersPage: React.FC = () => {
             >
               <div className="w-10 h-10 rounded-xl bg-rose-50 text-rose-600 flex items-center justify-center dark:bg-rose-950/35 dark:text-rose-400"><CircleAlert className="w-5 h-5" /></div>
               <h2 id="cancel-order-title" className="mt-4 text-lg font-bold tracking-tight text-slate-900 dark:text-white">Hủy đơn hàng?</h2>
-              <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-zinc-400">Bạn sắp hủy đơn <span className="font-semibold text-slate-700 dark:text-zinc-200">#{orderToCancel.orderNumber}</span>.{orderToCancel.paymentStatus === 'PAID' ? ' Khoản tiền đã thanh toán qua PayOS sẽ được lập yêu cầu hoàn trả tự động.' : ' Thao tác này không thể hoàn tác.'}</p>
+              <p className="mt-2 text-sm leading-6 text-slate-500 dark:text-zinc-400">
+                Bạn sắp hủy đơn <span className="font-semibold text-slate-700 dark:text-zinc-200">#{orderToCancel.orderNumber}</span>.
+                {String(orderToCancel.paymentStatus || '').toUpperCase() === 'PAID'
+                  ? ' Khoản tiền đã thanh toán qua PayOS sẽ tự động chuyển sang quy trình hoàn tiền (REFUND_PENDING) và lên danh sách chi trả PayOS Payout cho Admin giải ngân về tài khoản ngân hàng của bạn.'
+                  : ' Thao tác này không thể hoàn tác.'}
+              </p>
               <div className="mt-5 flex flex-col-reverse sm:flex-row sm:justify-end gap-2">
                 <button type="button" disabled={isCancelling} onClick={() => setOrderToCancel(null)} className="px-3.5 py-2 rounded-lg text-xs font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-50 dark:text-zinc-300 dark:hover:bg-zinc-800">Giữ lại đơn</button>
                 <button type="button" disabled={isCancelling} onClick={confirmCancellation} className="inline-flex items-center justify-center gap-2 px-3.5 py-2 rounded-lg bg-rose-600 text-xs font-semibold text-white shadow-sm transition hover:bg-rose-700 disabled:opacity-60">

@@ -32,9 +32,46 @@ export interface MarketplacePlacedOrder {
   order: any;
 }
 
+export const STORE_ORDER_BLOCKED_CODES = new Set([
+  'STORE_SUBSCRIPTION_EXPIRED',
+  'STORE_INACTIVE',
+  'STORE_CUSTOMER_BLOCKED',
+]);
+
+export function extractStoreOrderError(error: any): { errorCode?: string; message: string } {
+  const data = error?.response?.data;
+  const errorCode = data?.errorCode || data?.code;
+  const serverMsg = Array.isArray(data?.errors) && data.errors.length
+    ? data.errors.join('; ')
+    : (data?.message || error?.message);
+
+  if (errorCode === 'STORE_SUBSCRIPTION_EXPIRED') {
+    return {
+      errorCode,
+      message: serverMsg || 'Cửa hàng hiện đang tạm ngưng nhận đơn do gói dịch vụ duy trì kệ đã hết hạn.',
+    };
+  }
+  if (errorCode === 'STORE_INACTIVE') {
+    return {
+      errorCode,
+      message: serverMsg || 'Cửa hàng này hiện đang tạm ngưng hoạt động.',
+    };
+  }
+  if (errorCode === 'STORE_CUSTOMER_BLOCKED') {
+    return {
+      errorCode,
+      message: serverMsg || 'Tài khoản của bạn hiện không thể đặt hàng tại cửa hàng này.',
+    };
+  }
+  return {
+    ...(errorCode ? { errorCode: String(errorCode) } : {}),
+    message: serverMsg || 'Chưa đặt được đơn. Vui lòng thử lại.',
+  };
+}
+
 export interface MarketplaceCheckoutResult {
   placed: MarketplacePlacedOrder[];
-  failed: { storeId: string; storeName: string; message: string }[];
+  failed: { storeId: string; storeName: string; message: string; errorCode?: string }[];
 }
 
 const pendingKeys = new Map<string, string>();
@@ -99,10 +136,12 @@ export async function checkoutAcrossStores<T extends MarketplaceCartLine>(option
       pendingKeys.delete(attempt.storageKey);
       try { options.storage?.removeItem(attempt.storageKey); } catch { /* Non-critical cleanup. */ }
     } catch (error: any) {
+      const parsed = extractStoreOrderError(error);
       result.failed.push({
         storeId: group.storeId,
         storeName: group.storeName,
-        message: error?.response?.data?.message || error?.message || 'Chưa đặt được đơn. Vui lòng thử lại.',
+        message: parsed.message,
+        ...(parsed.errorCode ? { errorCode: parsed.errorCode } : {}),
       });
     }
   }

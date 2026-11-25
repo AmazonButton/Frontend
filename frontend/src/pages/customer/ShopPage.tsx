@@ -4,7 +4,7 @@ import { DiscountPrice } from '../../components/products/DiscountPrice';
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
 import { useLocation } from 'react-router-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { ArrowRight, CheckCircle2, Minus, PackageCheck, Plus, RefreshCw, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
+import { ArrowRight, Banknote, CheckCircle2, Minus, PackageCheck, Plus, QrCode, RefreshCw, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
 import { api, apiSessionMarker, isTokenExpired } from '../../services/api';
 import { getSocket } from '../../services/socket';
 import { toast } from '../../context/ToastContext';
@@ -13,7 +13,13 @@ import { PayOSOrderQrModal } from '../../components/orders/PayOSOrderQrModal';
 import { normalizeOrder, publishOrderEvent } from '../../services/order-events';
 import { StorefrontReceipt } from '../../components/orders/StorefrontReceipt';
 import { MarketplaceReceipt } from '../../components/orders/MarketplaceReceipt';
-import { checkoutAcrossStores, groupCartByStore, hasPendingMarketplaceCheckout } from '../../services/marketplace-checkout';
+import {
+  checkoutAcrossStores,
+  extractStoreOrderError,
+  groupCartByStore,
+  hasPendingMarketplaceCheckout,
+  STORE_ORDER_BLOCKED_CODES,
+} from '../../services/marketplace-checkout';
 import type { MarketplaceCheckoutResult } from '../../services/marketplace-checkout';
 import { Order } from '../../types';
 import { getShippingContactErrors, normalizeShippingContact, ShippingContactField } from '../../services/shipping-contact-validation';
@@ -98,12 +104,22 @@ export const ShopPage: React.FC = () => {
     deliveryAddress: '',
     paymentMethod: isCustomerLoggedIn ? 'PAYOS' : 'CASH_ON_DELIVERY',
   });
+  const [codPayAheadWithQr, setCodPayAheadWithQr] = useState(false);
   const [deliveryLocation, setDeliveryLocation] = useState<DeliveryLocation | null>(null);
   const [cartBump, setCartBump] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [recoveryOrder, setRecoveryOrder] = useState<PayOSRecoveryOrder | null>(null);
   const [receipt, setReceipt] = useState<Order | null>(null);
   const [marketplaceResult, setMarketplaceResult] = useState<MarketplaceCheckoutResult | null>(null);
+  const [rejectedStoreAlert, setRejectedStoreAlert] = useState<{ storeId: string; storeName: string; message: string; errorCode?: string } | null>(null);
+  const removeStoreFromCart = (storeIdToRemove: string) => {
+    setCart((old) => old.filter((line) => String(line.product.storeId) !== String(storeIdToRemove)));
+    setRejectedStoreAlert((prev) => (prev && prev.storeId === String(storeIdToRemove) ? null : prev));
+    setMarketplaceResult((prev) =>
+      prev ? { ...prev, failed: prev.failed.filter((f) => String(f.storeId) !== String(storeIdToRemove)) } : null
+    );
+    setNotice('Đã xóa các sản phẩm của cửa hàng không còn nhận đơn khỏi giỏ hàng.');
+  };
   const [contactTouched, setContactTouched] = useState<Record<ShippingContactField, boolean>>({ customerName: false, customerPhone: false, deliveryAddress: false });
   const contactErrors = getShippingContactErrors(form);
   const visibleContactError = (field: ShippingContactField) => contactTouched[field] ? contactErrors[field] : undefined;
@@ -272,6 +288,49 @@ export const ShopPage: React.FC = () => {
     };
   }, [fetchCatalog]);
 
+  useEffect(() => {
+    const socket = getSocket();
+    const handleOrderPaymentUpdate = (payload: any) => {
+      const incoming = payload?.order || payload;
+      const pId = String(incoming?.orderId || incoming?.id || '');
+      const pCode = String(incoming?.orderNumber || incoming?.orderCode || '');
+      setReceipt((prev) => {
+        if (!prev) return prev;
+        const currentId = String(prev.id);
+        const currentCode = String(prev.orderNumber || prev.id);
+        if ((pId && currentId === pId) || (pCode && currentCode === pCode)) {
+          return {
+            ...prev,
+            paymentStatus: incoming?.paymentStatus || 'PAID',
+            status: incoming?.orderStatus || incoming?.status || (prev.status === 'PENDING' ? 'CONFIRMED' : prev.status),
+            orderStatus: incoming?.orderStatus || incoming?.status || (prev.orderStatus === 'PENDING' ? 'CONFIRMED' : prev.orderStatus),
+          };
+        }
+        return prev;
+      });
+    };
+    socket.on('ORDER_PAYMENT_CONFIRMED', handleOrderPaymentUpdate);
+    socket.on('ORDER_STATUS_CHANGED', handleOrderPaymentUpdate);
+    return () => {
+      socket.off('ORDER_PAYMENT_CONFIRMED', handleOrderPaymentUpdate);
+      socket.off('ORDER_STATUS_CHANGED', handleOrderPaymentUpdate);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!receipt || receipt.paymentStatus === 'PAID') return;
+    const interval = setInterval(async () => {
+      try {
+        const res = await api.get(`/orders/${receipt.id}`);
+        const data = res.data?.data || res.data;
+        if (data?.paymentStatus === 'PAID') {
+          setReceipt((prev) => (prev ? { ...prev, paymentStatus: 'PAID', status: data.orderStatus || data.status || prev.status, orderStatus: data.orderStatus || data.status || prev.orderStatus } : null));
+        }
+      } catch {}
+    }, 5000);
+    return () => clearInterval(interval);
+  }, [receipt]);
+
   const categories = useMemo(() => ['Tất cả', ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))], [products]);
   const shownProducts = useMemo(
     () => products.filter((p) => category === 'Tất cả' || p.category === category),
@@ -394,7 +453,7 @@ export const ShopPage: React.FC = () => {
       setCheckoutOpen(false);
       setCartOpen(false);
       publishOrderEvent('ORDER_CREATED', { order });
-      if (form.paymentMethod === 'PAYOS') {
+      if (form.paymentMethod === 'PAYOS' || (form.paymentMethod === 'CASH_ON_DELIVERY' && codPayAheadWithQr && isCustomerLoggedIn)) {
         // The deployed API validates this DTO strictly. Customer information is
         // already stored on the order, so only send fields required to create
         // the PayOS payment link; otherwise it rejects buyerName/buyerPhone
@@ -467,14 +526,36 @@ export const ShopPage: React.FC = () => {
       setNotice(`Đặt hàng thành công! Mã đơn ${order.orderNumber}. Thanh toán tiền mặt khi nhận hàng.`);
     } catch (e: any) {
       const errorData = e?.response?.data;
-      const message = Array.isArray(errorData?.errors) && errorData.errors.length
+      const fallbackMsg = Array.isArray(errorData?.errors) && errorData.errors.length
         ? errorData.errors.join('; ')
         : (errorData?.message || e?.message || 'Đặt hàng chưa thành công. Vui lòng thử lại.');
-      if (placedOrder && form.paymentMethod === 'PAYOS') {
+      const parsed = typeof extractStoreOrderError === 'function'
+        ? extractStoreOrderError(e)
+        : { errorCode: errorData?.errorCode || errorData?.code, message: fallbackMsg };
+      const blockedCodes = typeof STORE_ORDER_BLOCKED_CODES !== 'undefined'
+        ? STORE_ORDER_BLOCKED_CODES
+        : new Set(['STORE_SUBSCRIPTION_EXPIRED', 'STORE_INACTIVE', 'STORE_CUSTOMER_BLOCKED']);
+
+      if (placedOrder && (form.paymentMethod === 'PAYOS' || codPayAheadWithQr)) {
         setReceipt(placedOrder);
-        setNotice(`Đơn #${placedOrder.orderNumber} đã được tạo nhưng chưa mở được PayOS: ${message} Vui lòng tiếp tục thanh toán từ lịch sử đơn hàng, không đặt lại đơn.`);
+        setNotice(
+          form.paymentMethod === 'PAYOS'
+            ? `Đơn #${placedOrder.orderNumber} đã được tạo nhưng chưa mở được PayOS: ${parsed.message} Vui lòng tiếp tục thanh toán từ lịch sử đơn hàng, không đặt lại đơn.`
+            : `Đơn #${placedOrder.orderNumber} đã được tạo thành công (COD). Chưa mở được PayOS: ${parsed.message}. Quý khách có thể thanh toán tiền mặt cho shipper hoặc mở lại mã QR từ chi tiết đơn hàng.`
+        );
       } else {
-        setNotice(message);
+        setNotice(parsed.message);
+        if (parsed.errorCode && blockedCodes.has(parsed.errorCode) && selectedStore && typeof setRejectedStoreAlert === 'function') {
+          const storeLabel = selectedCart[0]?.product?.store?.name || `Cửa hàng #${selectedStore}`;
+          setRejectedStoreAlert({
+            storeId: String(selectedStore),
+            storeName: storeLabel,
+            message: parsed.message,
+            errorCode: parsed.errorCode,
+          });
+          setCheckoutOpen(false);
+          setCartOpen(true);
+        }
       }
     } finally { setBusy(false); }
   };
@@ -776,6 +857,19 @@ export const ShopPage: React.FC = () => {
             </div>
 
             <div className="flex-1 overflow-auto p-5">
+              {rejectedStoreAlert && (
+                <div role="alert" className="mb-3 rounded-xl border border-rose-200 bg-rose-50 p-3 text-xs leading-5 text-rose-900 space-y-2">
+                  <p className="font-semibold">{rejectedStoreAlert.storeName}: Không thể đặt hàng</p>
+                  <p>{rejectedStoreAlert.message}</p>
+                  <button
+                    type="button"
+                    onClick={() => removeStoreFromCart(rejectedStoreAlert.storeId)}
+                    className="inline-flex items-center rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-semibold text-white hover:bg-rose-700"
+                  >
+                    Xóa sản phẩm của cửa hàng này khỏi giỏ
+                  </button>
+                </div>
+              )}
               {cart.length > 0 && (
                 <div className="mb-3 rounded-xl border border-sky-100 bg-sky-50 p-3 text-xs leading-5 text-slate-600">
                   Tích chọn sản phẩm từ nhiều cửa hàng để đặt cùng lúc. Mỗi cửa hàng sẽ nhận một đơn riêng; thanh toán và giao hàng được xử lý theo từng đơn.
@@ -1098,30 +1192,131 @@ export const ShopPage: React.FC = () => {
                   <small className="text-slate-500">Quét mã VietQR / Chuyển khoản ngân hàng</small>
                 </span>
               </motion.label>
-              <motion.label
-                whileHover={{ scale: 1.01 }}
-                whileTap={{ scale: 0.99 }}
-                className={`flex cursor-pointer items-center gap-3 rounded-xl border p-3 transition-colors ${
-                  form.paymentMethod === 'CASH_ON_DELIVERY' ? 'border-teal-600 bg-[#EAF4F9]' : 'border-slate-200 hover:bg-slate-50'
+              <div
+                className={`rounded-xl border transition-colors ${
+                  form.paymentMethod === 'CASH_ON_DELIVERY' ? 'border-[#287DA8] bg-[#EAF4F9]/60 shadow-xs' : 'border-slate-200 hover:bg-slate-50'
                 }`}
               >
-                <input
-                  type="radio"
-                  name="payment"
-                  checked={form.paymentMethod === 'CASH_ON_DELIVERY'}
-                  onChange={() => setForm({ ...form, paymentMethod: 'CASH_ON_DELIVERY' })}
-                  className="accent-[#287DA8]"
-                />
-                <span className="flex-1">
-                  <div className="flex items-center justify-between">
-                    <b className="block text-sm text-slate-900">Tiền mặt khi nhận hàng (COD)</b>
-                    <span className="rounded-md border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700">
-                      Khuyên dùng
-                    </span>
-                  </div>
-                  <small className="text-slate-500">Thanh toán cho shipper khi nhận hàng</small>
-                </span>
-              </motion.label>
+                <motion.label
+                  whileHover={{ scale: 1.005 }}
+                  whileTap={{ scale: 0.995 }}
+                  className="flex cursor-pointer items-center gap-3 p-3"
+                >
+                  <input
+                    type="radio"
+                    name="payment"
+                    checked={form.paymentMethod === 'CASH_ON_DELIVERY'}
+                    onChange={() => setForm({ ...form, paymentMethod: 'CASH_ON_DELIVERY' })}
+                    className="accent-[#287DA8]"
+                  />
+                  <span className="flex-1">
+                    <div className="flex items-center justify-between">
+                      <b className="block text-sm text-slate-900">Tiền mặt khi nhận hàng (COD)</b>
+                    </div>
+                    <small className="text-slate-500">Thanh toán khi nhận hàng hoặc quét VietQR trả trước</small>
+                  </span>
+                </motion.label>
+
+                <AnimatePresence>
+                  {form.paymentMethod === 'CASH_ON_DELIVERY' && (
+                    <motion.div
+                      initial={{ opacity: 0, height: 0 }}
+                      animate={{ opacity: 1, height: 'auto' }}
+                      exit={{ opacity: 0, height: 0 }}
+                      transition={{ duration: 0.24, ease: 'easeOut' }}
+                      className="overflow-hidden border-t border-slate-200/60 bg-slate-50/70 p-3 pt-2.5 rounded-b-xl space-y-2.5"
+                    >
+                      <div className="flex items-center justify-between text-xs font-medium text-slate-600">
+                        <span>Hình thức thanh toán:</span>
+                      </div>
+
+                      <div className="relative grid grid-cols-2 gap-1 rounded-xl bg-slate-200/70 p-1 text-xs">
+                        <button
+                          type="button"
+                          onClick={() => setCodPayAheadWithQr(false)}
+                          className={`relative flex items-center justify-center py-2 font-medium transition-colors duration-200 cursor-pointer ${
+                            !codPayAheadWithQr
+                              ? 'text-[#287DA8] font-bold'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {!codPayAheadWithQr && (
+                            <motion.div
+                              layoutId="codTabIndicator"
+                              className="absolute inset-0 rounded-lg bg-white shadow-xs"
+                              transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                            />
+                          )}
+                          <span className="relative z-10 flex items-center justify-center gap-1.5">
+                            <Banknote size={15} />
+                            <span>Tiền mặt lúc nhận</span>
+                          </span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (!isCustomerLoggedIn) {
+                              toast.info('Vui lòng đăng nhập để tạo mã QR thanh toán trước.');
+                            }
+                            setCodPayAheadWithQr(true);
+                          }}
+                          className={`relative flex items-center justify-center py-2 font-medium transition-colors duration-200 cursor-pointer ${
+                            codPayAheadWithQr
+                              ? 'text-[#287DA8] font-bold'
+                              : 'text-slate-600 hover:text-slate-900'
+                          }`}
+                        >
+                          {codPayAheadWithQr && (
+                            <motion.div
+                              layoutId="codTabIndicator"
+                              className="absolute inset-0 rounded-lg bg-white shadow-xs"
+                              transition={{ type: 'spring', stiffness: 450, damping: 32 }}
+                            />
+                          )}
+                          <span className="relative z-10 flex items-center justify-center gap-1.5">
+                            <QrCode size={15} />
+                            <span>Quét mã VietQR</span>
+                          </span>
+                        </button>
+                      </div>
+
+                      <AnimatePresence mode="wait">
+                        {codPayAheadWithQr ? (
+                          <motion.div
+                            key="qr-guide"
+                            initial={{ opacity: 0, y: -4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -4 }}
+                            transition={{ duration: 0.2 }}
+                            className="flex items-start gap-2.5 rounded-xl bg-sky-50/90 p-2.5 text-[11.5px] text-sky-950 border border-sky-200/80"
+                          >
+                            <QrCode size={16} className="text-[#287DA8] shrink-0 mt-0.5" />
+                            <div className="space-y-0.5">
+                              <p className="font-semibold text-slate-900">Mã VietQR sẽ hiển thị ngay khi xác nhận đơn</p>
+                              <p className="text-slate-600 leading-relaxed text-[11px]">
+                                Quét chuyển khoản trước để shipper giao không cần thu tiền. Nếu chưa kịp chuyển, đơn hàng vẫn được lưu dạng COD để bạn trả tiền mặt khi nhận.
+                              </p>
+                            </div>
+                          </motion.div>
+                        ) : (
+                          <motion.div
+                            key="cash-guide"
+                            initial={{ opacity: 0, y: -4 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={{ opacity: 0, y: -4 }}
+                            transition={{ duration: 0.2 }}
+                            className="flex items-center gap-2 rounded-xl bg-white p-2.5 text-[11.5px] text-slate-600 border border-slate-200/70"
+                          >
+                            <Banknote size={15} className="text-slate-400 shrink-0" />
+                            <span>Vui lòng chuẩn bị tiền mặt thanh toán cho shipper khi nhận hàng.</span>
+                          </motion.div>
+                        )}
+                      </AnimatePresence>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+              </div>
             </div>
 
             <div className="mt-5 border-t border-slate-200 pt-4 lg:mt-auto lg:pt-5">
@@ -1138,13 +1333,26 @@ export const ShopPage: React.FC = () => {
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
               disabled={busy}
-              className="mt-4 w-full rounded-xl bg-[#287DA8] py-3 font-bold text-white shadow-sm transition hover:bg-[#206588] disabled:opacity-60"
+              className="mt-4 w-full rounded-xl bg-[#287DA8] py-3 font-bold text-white shadow-sm transition hover:bg-[#206588] disabled:opacity-60 flex items-center justify-center gap-2 cursor-pointer"
             >
-              {selectedGroups.length > 1 ? (busy ? 'Đang đặt hàng tại các cửa hàng...' : `Đặt ${selectedGroups.length} đơn hàng`) : busy
-                ? form.paymentMethod === 'PAYOS' ? 'Đang chuyển đến PayOS...' : 'Đang đặt hàng...'
-                : form.paymentMethod === 'PAYOS'
-                  ? 'Thanh toán PayOS'
-                  : 'Xác nhận đặt hàng'}
+              {selectedGroups.length > 1 ? (
+                busy ? 'Đang đặt hàng tại các cửa hàng...' : `Đặt ${selectedGroups.length} đơn hàng`
+              ) : busy ? (
+                form.paymentMethod === 'PAYOS'
+                  ? 'Đang chuyển đến PayOS...'
+                  : codPayAheadWithQr
+                    ? 'Đang đặt hàng & tạo mã QR...'
+                    : 'Đang đặt hàng...'
+              ) : form.paymentMethod === 'PAYOS' ? (
+                'Thanh toán PayOS'
+              ) : codPayAheadWithQr ? (
+                <>
+                  <QrCode size={16} />
+                  Xác nhận đặt hàng & Quét mã QR
+                </>
+              ) : (
+                'Xác nhận đặt hàng'
+              )}
             </motion.button>
             <p className="mt-3 flex items-center justify-center gap-1 text-center text-[11px] text-slate-400">
               <CheckCircle2 size={13} className="text-teal-600" />
@@ -1174,8 +1382,38 @@ export const ShopPage: React.FC = () => {
         setNotice(`Đơn hàng #${recoveryOrder?.orderNumber || orderId} đã được hủy theo yêu cầu của bạn.`);
       }}
     />
-    {receipt && <StorefrontReceipt order={receipt} loggedIn={isCustomerLoggedIn} paymentError={receipt.paymentMethod === 'PAYOS' && receipt.paymentStatus !== 'PAID' ? notice : undefined} onClose={() => setReceipt(null)} />}
-    {marketplaceResult && <MarketplaceReceipt result={marketplaceResult} onClose={() => {
+    {receipt && (
+      <StorefrontReceipt
+        order={receipt}
+        loggedIn={isCustomerLoggedIn}
+        paymentError={receipt.paymentMethod === 'PAYOS' && receipt.paymentStatus !== 'PAID' ? notice : undefined}
+        onClose={() => setReceipt(null)}
+        onPayAhead={async (orderToPay) => {
+          const oId = String(orderToPay.id);
+          const oCode = orderToPay.orderNumber || oId;
+          const oAmount = Number(orderToPay.totalAmount || 0);
+          try {
+            toast.info('Đang tạo mã QR PayOS...');
+            const res = await api.post('/payments/payos/create-link', { orderId: oId });
+            const data = res.data?.data || res.data;
+            if (data?.checkoutUrl || data?.qrCode) {
+              setPayosModalData({
+                orderId: oId,
+                orderNumber: String(data.orderCode || oCode),
+                amount: Number(data.amount || oAmount),
+                qrCode: data.qrCode,
+                checkoutUrl: data.checkoutUrl,
+                paymentLinkId: data.paymentLinkId,
+                order: orderToPay,
+              });
+            }
+          } catch (err: any) {
+            toast.error(err.response?.data?.message || 'Không thể mở mã QR PayOS lúc này.');
+          }
+        }}
+      />
+    )}
+    {marketplaceResult && <MarketplaceReceipt result={marketplaceResult} onRemoveStore={removeStoreFromCart} onClose={() => {
       if (marketplaceResult.failed.length) setCartOpen(true);
       setMarketplaceResult(null);
     }} onPayOrder={async (placed) => {
@@ -1204,7 +1442,12 @@ export const ShopPage: React.FC = () => {
     {payosModalData && (
       <PayOSOrderQrModal
         isOpen={Boolean(payosModalData)}
-        onClose={() => setPayosModalData(null)}
+        onClose={() => {
+          if (payosModalData?.order) {
+            setReceipt(payosModalData.order);
+          }
+          setPayosModalData(null);
+        }}
         orderId={payosModalData.orderId}
         orderNumber={payosModalData.orderNumber}
         amount={payosModalData.amount}

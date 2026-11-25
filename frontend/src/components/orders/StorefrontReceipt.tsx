@@ -1,13 +1,21 @@
 import React from 'react';
 import { Link } from 'react-router-dom';
-import { CheckCircle2, X } from 'lucide-react';
+import { CheckCircle2, QrCode, X } from 'lucide-react';
 import { Order } from '../../types';
 import { ShippingContact } from './ShippingContact';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 
-export const StorefrontReceipt: React.FC<{ order: Order; onClose: () => void; loggedIn: boolean; paymentError?: string }> = ({ order, onClose, loggedIn, paymentError }) => {
+export const StorefrontReceipt: React.FC<{
+  order: Order;
+  onClose: () => void;
+  loggedIn: boolean;
+  paymentError?: string;
+  onPayAhead?: (order: Order) => void;
+}> = ({ order, onClose, loggedIn, paymentError, onPayAhead }) => {
   useBodyScrollLock(true);
   const awaitingPayment = order.paymentMethod === 'PAYOS' && order.paymentStatus !== 'PAID';
+  const isUnpaidCod = order.paymentMethod === 'CASH_ON_DELIVERY' && order.paymentStatus !== 'PAID';
+
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4 responsive-modal overflow-y-auto">
       <section role="dialog" aria-modal="true" aria-labelledby="receipt-title" className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl dark:bg-zinc-900">
@@ -36,6 +44,25 @@ export const StorefrontReceipt: React.FC<{ order: Order; onClose: () => void; lo
               </span>
             )}
           </div>
+          {onPayAhead && loggedIn && (isUnpaidCod || awaitingPayment) && (
+            <div className="mt-3 rounded-xl border border-sky-200 bg-sky-50/80 p-3 dark:border-sky-900/60 dark:bg-sky-950/30">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-sky-900 dark:text-sky-200">
+                  {isUnpaidCod ? 'Thanh toán trước không cần tiền mặt?' : 'Quét mã VietQR để thanh toán'}
+                </span>
+                <span className="inline-flex items-center gap-1 rounded bg-sky-200/70 px-1.5 py-0.5 text-[10px] font-bold text-sky-800 dark:bg-sky-900 dark:text-sky-300">
+                  <QrCode className="h-3 w-3" /> VietQR
+                </span>
+              </div>
+              <button
+                type="button"
+                onClick={() => onPayAhead(order)}
+                className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-[#287DA8] px-3 py-2 text-xs font-semibold text-white shadow-xs hover:bg-[#206588] transition cursor-pointer"
+              >
+                <QrCode className="h-4 w-4" /> Quét mã QR PayOS trả trước ngay
+              </button>
+            </div>
+          )}
         </div>
         {loggedIn ? <Link to="/customer/orders" onClick={onClose} className="block rounded-xl bg-[#287DA8] px-4 py-3 text-center font-semibold text-white">Theo dõi và quản lý đơn hàng</Link> : <p className="text-sm text-slate-500">Vui lòng giữ mã đơn và liên hệ cửa hàng khi cần thay đổi hoặc hủy đơn.</p>}
         <button type="button" onClick={onClose} className="mt-3 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">Tiếp tục mua sắm</button>

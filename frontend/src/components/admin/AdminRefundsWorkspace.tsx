@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { motion, useReducedMotion, AnimatePresence } from 'framer-motion';
 import {
   AlertCircle,
@@ -140,6 +140,15 @@ export const AdminRefundsWorkspace: React.FC = () => {
   const [payoutNote, setPayoutNote] = useState('');
   const [submittingPayout, setSubmittingPayout] = useState(false);
   const [syncingId, setSyncingId] = useState<string | null>(null);
+  const loadingRef = useRef(false);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
+      mountedRef.current = false;
+    };
+  }, []);
 
   useEffect(() => {
     if (!activeDetailItem?.orderId) {
@@ -161,16 +170,22 @@ export const AdminRefundsWorkspace: React.FC = () => {
     return () => { mounted = false; };
   }, [activeDetailItem?.orderId]);
 
-  const loadData = useCallback(async (isRefresh = false) => {
+  const loadData = useCallback(async (isRefresh = false, force = false) => {
+    if (loadingRef.current && !force) return;
+    loadingRef.current = true;
     if (isRefresh) setRefreshing(true);
     else setLoading(true);
     try {
+      const apiStatusFilter = statusFilter === 'SETTLED' ? 'REFUNDED' : statusFilter;
       const res = await adminPaymentRefundsService.listObligations({
         pageSize: 100,
-        status: statusFilter !== 'ALL' ? statusFilter : undefined,
+        status: apiStatusFilter !== 'ALL' ? apiStatusFilter : undefined,
       });
-      setItems(res.items);
+      if (mountedRef.current) {
+        setItems(res.items);
+      }
     } catch (err: any) {
+      if (!mountedRef.current) return;
       const is403 = err?.response?.status === 403;
       const msg = is403
         ? 'Tài khoản hiện tại không có quyền SUPER_ADMIN. Tính năng Đối soát & Hoàn tiền PayOS yêu cầu quyền Quản trị tối cao (SUPER_ADMIN) để bảo mật dòng tiền của hệ thống.'
@@ -180,21 +195,23 @@ export const AdminRefundsWorkspace: React.FC = () => {
         success: false,
       });
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      loadingRef.current = false;
+      if (mountedRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [statusFilter]);
 
   useEffect(() => {
-    void loadData();
+    void loadData(false, true);
 
-    const onFocus = () => {
+    const onVisible = () => {
       if (document.visibilityState === 'visible') {
         void loadData(true);
       }
     };
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
 
     const interval = setInterval(() => {
       if (document.visibilityState === 'visible') {
@@ -203,8 +220,7 @@ export const AdminRefundsWorkspace: React.FC = () => {
     }, 10000);
 
     return () => {
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onFocus);
+      document.removeEventListener('visibilitychange', onVisible);
       clearInterval(interval);
     };
   }, [loadData]);
@@ -212,9 +228,9 @@ export const AdminRefundsWorkspace: React.FC = () => {
   // Derived metrics
   const metrics = useMemo(() => {
     const totalCount = items.length;
-    const pendingItems = items.filter(i => ['PENDING', 'DISPATCHING', 'PROCESSING', 'PENDING_RECIPIENT_VERIFICATION'].includes(i.status));
+    const pendingItems = items.filter(i => ['PENDING', 'DISPATCHING', 'PROCESSING', 'PROCESSING_PAYOUT', 'PENDING_RECIPIENT_VERIFICATION', 'READY_FOR_PAYOUT'].includes(i.status));
     const pendingAmount = pendingItems.reduce((acc, curr) => acc + (Number(curr.refundAmount) || 0), 0);
-    const settledItems = items.filter(i => i.status === 'SETTLED');
+    const settledItems = items.filter(i => ['SETTLED', 'REFUNDED'].includes(i.status));
     const settledAmount = settledItems.reduce((acc, curr) => acc + (Number(curr.refundAmount) || 0), 0);
     const reconcileCount = items.filter(i => ['PENDING_RECONCILIATION', 'FAILED'].includes(i.status)).length;
     return {
@@ -231,15 +247,22 @@ export const AdminRefundsWorkspace: React.FC = () => {
   const filteredItems = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     return items.filter(item => {
-      if (statusFilter !== 'ALL' && item.status !== statusFilter) return false;
+      if (statusFilter !== 'ALL') {
+        if (statusFilter === 'REFUNDED' || statusFilter === 'SETTLED') {
+          if (!['REFUNDED', 'SETTLED'].includes(item.status)) return false;
+        } else if (item.status !== statusFilter) {
+          return false;
+        }
+      }
       if (typeFilter !== 'ALL' && item.obligationType !== typeFilter) return false;
       if (!q) return true;
       const oblId = String(item.obligationId || '').toLowerCase();
       const orderId = String(item.orderId || '').toLowerCase();
+      const orderCode = String(item.order?.orderCode || '').toLowerCase();
       const name = String(item.targetAccountName || '').toLowerCase();
       const masked = String(item.targetAccountMasked || '').toLowerCase();
       const bin = String(item.targetBankBin || '').toLowerCase();
-      return oblId.includes(q) || orderId.includes(q) || name.includes(q) || masked.includes(q) || bin.includes(q);
+      return oblId.includes(q) || orderId.includes(q) || orderCode.includes(q) || name.includes(q) || masked.includes(q) || bin.includes(q);
     });
   }, [items, searchQuery, statusFilter, typeFilter]);
 
@@ -252,13 +275,17 @@ export const AdminRefundsWorkspace: React.FC = () => {
       const res = await adminPaymentRefundsService.initiatePayout(activePayoutItem.obligationId, {
         note: payoutNote.trim() || undefined,
       });
+      const returnedObl = res?.data || res;
+      const isSettledNow = ['REFUNDED', 'SETTLED'].includes(returnedObl?.status);
       setNotice({
-        text: res?.message || `Đã gửi lệnh chi trả hoàn tiền cho nghĩa vụ #${activePayoutItem.obligationId} thành công.`,
+        text: isSettledNow
+          ? `Đã chi hoàn tiền và tất toán nghĩa vụ #${activePayoutItem.obligationId} thành công.`
+          : res?.message || `Đã gửi lệnh chi trả cho nghĩa vụ #${activePayoutItem.obligationId}. Hệ thống đang chờ xác nhận đối soát từ PayOS.`,
         success: true,
       });
       setActivePayoutItem(null);
       setPayoutNote('');
-      await loadData(true);
+      await loadData(true, true);
     } catch (err: any) {
       setNotice({
         text: err?.response?.data?.message || 'Không thể khởi tạo lệnh chi tiền qua PayOS. Vui lòng kiểm tra lại.',
@@ -282,11 +309,25 @@ export const AdminRefundsWorkspace: React.FC = () => {
     setSyncingId(item.obligationId);
     try {
       const res = await adminPaymentRefundsService.syncObligation(item.obligationId);
-      setNotice({
-        text: res?.message || `Đã đồng bộ trạng thái đối soát nghĩa vụ #${item.obligationId} với PayOS.`,
-        success: true,
-      });
-      await loadData(true);
+      const syncData = res?.data ?? res;
+      const syncedObl = syncData?.obligation ?? syncData;
+      const isSettled =
+        syncData?.settled === true || ['REFUNDED', 'SETTLED'].includes(syncedObl?.status);
+      const latestFailure =
+        syncedObl?.failureReason || syncedObl?.payoutAttempts?.[0]?.failureReason;
+      if (isSettled) {
+        setNotice({
+          text: `Đã đối soát thành công! Nghĩa vụ #${item.obligationId} đã chuyển sang Đã hoàn tất (Đã hoàn tiền).`,
+          success: true,
+        });
+      } else {
+        const label = STATUS_MAP[syncedObl?.status]?.label || syncedObl?.status || 'Chờ đối soát';
+        setNotice({
+          text: `Nghĩa vụ #${item.obligationId} vẫn đang ở trạng thái ${label}.${latestFailure ? ` Lý do: ${latestFailure}` : ' Worker IP tĩnh (Node-3) chưa nhận được xác nhận tất toán cuối cùng từ PayOS — vui lòng kiểm tra Worker Node-3 hoặc xem chi tiết chứng từ.'}`,
+          success: false,
+        });
+      }
+      await loadData(true, true);
     } catch (err: any) {
       setNotice({
         text: err?.response?.data?.message || 'Chưa thể đồng bộ trạng thái từ PayOS. Vui lòng kiểm tra lại sau.',
@@ -404,7 +445,7 @@ export const AdminRefundsWorkspace: React.FC = () => {
           <div className="flex items-center gap-2">
             <button
               type="button"
-              onClick={() => void loadData(true)}
+              onClick={() => void loadData(true, true)}
               disabled={loading || refreshing}
               className={`${adminSecondary} !py-2 text-xs`}
             >
@@ -449,7 +490,7 @@ export const AdminRefundsWorkspace: React.FC = () => {
               <option value="PENDING">Chờ chi trả (Pending)</option>
               <option value="PENDING_RECIPIENT_VERIFICATION">Chờ xác minh tài khoản</option>
               <option value="DISPATCHING">Đang gửi lệnh (Dispatching)</option>
-              <option value="SETTLED">Đã hoàn tất (Settled)</option>
+              <option value="REFUNDED">Đã hoàn tất (Đã hoàn tiền)</option>
               <option value="PENDING_RECONCILIATION">Chờ đối soát (Reconciliation)</option>
               <option value="FAILED">Thất bại (Failed)</option>
             </select>
@@ -528,8 +569,8 @@ export const AdminRefundsWorkspace: React.FC = () => {
                     'READY_FOR_PAYOUT',
                     'PENDING_RECIPIENT_VERIFICATION',
                     'FAILED',
-                    'PENDING_RECONCILIATION',
                   ].includes(item.status);
+                  const rowFailureReason = item.failureReason || item.payoutAttempts?.[0]?.failureReason;
                   const isSyncing = syncingId === item.obligationId;
 
                   return (
@@ -611,9 +652,9 @@ export const AdminRefundsWorkspace: React.FC = () => {
                             {item.verificationNote}
                           </p>
                         )}
-                        {item.failureReason && (
-                          <p className="mt-1 text-[10px] text-rose-600 dark:text-rose-400 font-medium max-w-xs mx-auto truncate" title={item.failureReason}>
-                            ⚠️ {item.failureReason}
+                        {rowFailureReason && (
+                          <p className="mt-1 text-[10px] text-rose-600 dark:text-rose-400 font-medium max-w-xs mx-auto truncate" title={rowFailureReason}>
+                            ⚠️ {rowFailureReason}
                           </p>
                         )}
                       </td>
@@ -1098,7 +1139,7 @@ export const AdminRefundsWorkspace: React.FC = () => {
             })()}
 
             <div className="flex items-center justify-end gap-2 pt-2 border-t border-zinc-200 dark:border-zinc-800">
-              {['PENDING', 'READY_FOR_PAYOUT', 'PENDING_RECIPIENT_VERIFICATION', 'FAILED', 'PENDING_RECONCILIATION'].includes(activeDetailItem.status) && (
+              {['PENDING', 'READY_FOR_PAYOUT', 'PENDING_RECIPIENT_VERIFICATION', 'FAILED'].includes(activeDetailItem.status) && (
                 <button
                   type="button"
                   onClick={() => {

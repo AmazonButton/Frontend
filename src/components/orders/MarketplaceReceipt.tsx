@@ -2,16 +2,19 @@ import React from 'react';
 import { Link } from 'react-router-dom';
 import { CheckCircle2, X } from 'lucide-react';
 import type { MarketplaceCheckoutResult } from '../../services/marketplace-checkout';
+import { STORE_ORDER_BLOCKED_CODES } from '../../services/marketplace-checkout';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 
 export function MarketplaceReceipt({
   result,
   onClose,
   onPayOrder,
+  onRemoveStore,
 }: {
   result: MarketplaceCheckoutResult;
   onClose: () => void;
   onPayOrder?: (order: any) => void;
+  onRemoveStore?: (storeId: string) => void;
 }) {
   useBodyScrollLock(true);
   return (
@@ -53,8 +56,27 @@ export function MarketplaceReceipt({
         </div>
         {result.failed.length > 0 && <div role="alert" className="mb-4 rounded-xl bg-amber-50 p-4 text-sm text-amber-900">
           <p className="font-semibold">{result.failed.length} cửa hàng chưa xác nhận đặt hàng</p>
-          {result.failed.map((failure) => <p key={failure.storeId} className="mt-2">{failure.storeName}: {failure.message}</p>)}
-          <p className="mt-2">Các sản phẩm này vẫn được giữ trong giỏ. Khi thử lại, hệ thống dùng lại mã yêu cầu để tránh tạo trùng nếu lần trước bị mất kết nối.</p>
+          <div className="mt-2 space-y-2.5">
+            {result.failed.map((failure) => {
+              const isBlockedOrExpired = Boolean(failure.errorCode && STORE_ORDER_BLOCKED_CODES.has(failure.errorCode));
+              return (
+                <div key={failure.storeId} className="rounded-lg border border-amber-200/80 bg-white/80 p-3">
+                  <p className="font-semibold text-amber-950">{failure.storeName}</p>
+                  <p className="mt-1 text-xs leading-relaxed text-amber-900">{failure.message}</p>
+                  {isBlockedOrExpired && onRemoveStore && (
+                    <button
+                      type="button"
+                      onClick={() => onRemoveStore(failure.storeId)}
+                      className="mt-2 inline-flex items-center rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-xs font-semibold text-rose-700 hover:bg-rose-100"
+                    >
+                      Xóa sản phẩm của cửa hàng khỏi giỏ
+                    </button>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <p className="mt-2.5 text-xs">Các sản phẩm chưa đặt được vẫn đang nằm trong giỏ. Nếu cửa hàng đã ngừng bán hoặc hết hạn gói, hãy bấm xóa nhanh khỏi giỏ hàng.</p>
         </div>}
         <Link to="/customer/orders" onClick={onClose} className="block rounded-xl bg-[#287DA8] px-4 py-3 text-center font-semibold text-white">Theo dõi và thanh toán các đơn</Link>
         <button type="button" onClick={onClose} className="mt-3 w-full rounded-xl border border-slate-200 px-4 py-3 text-sm">{result.failed.length ? 'Quay lại giỏ hàng' : 'Tiếp tục mua sắm'}</button>

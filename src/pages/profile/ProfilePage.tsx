@@ -162,6 +162,24 @@ export const ProfilePage: React.FC = () => {
   const isMatching = newPassword.length > 0 && newPassword === confirmPassword;
 
   useEffect(() => {
+    if (requestedTab === 'IDENTITY') {
+      const returnUrl = (typeof window !== 'undefined' ? sessionStorage.getItem('didit_return_url') : null) || '/customer/verification';
+      try {
+        sessionStorage.removeItem('didit_return_url');
+      } catch {}
+
+      if (typeof window !== 'undefined' && window.opener && !window.opener.closed) {
+        try {
+          window.opener.postMessage({ type: 'DIDIT_VERIFICATION_COMPLETE' }, '*');
+          window.close();
+          return;
+        } catch {}
+      }
+
+      navigate(returnUrl, { replace: true });
+      return;
+    }
+
     if (isStoreOwner && requestedTab === 'DEVICES') {
       navigate('/store/devices', { replace: true });
     } else if (isStoreOwner && requestedTab === 'ORDERS') {

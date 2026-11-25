@@ -118,6 +118,10 @@ export function normalizeAuthUser(rawUser: any): User {
       ? rawUser.platformMemberships
       : undefined,
     storeId: resolvedStoreId || null,
+    kycStatus: rawUser?.kycStatus || 'UNVERIFIED',
+    verifiedLegalName: rawUser?.verifiedLegalName || null,
+    verifiedDocumentMasked: rawUser?.verifiedDocumentMasked || null,
+    kycVerifiedAt: rawUser?.kycVerifiedAt || null,
     avatarUrl: rawUser?.avatarUrl || rawUser?.avatar || rawUser?.picture || null,
     avatar: rawUser?.avatarUrl || rawUser?.avatar || rawUser?.picture || null,
     customerProfileId:
