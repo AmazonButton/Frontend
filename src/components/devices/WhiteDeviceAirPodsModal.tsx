@@ -211,7 +211,13 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
           }
         } catch (catalogErr: any) {
           if (active()) {
-            setNotice(`Kết nối Wi-Fi "${ssid.trim()}" thành công${result.ip ? ` (${result.ip})` : ''}! ${pairingError(catalogErr)}`);
+            const status = catalogErr?.response?.status;
+            if (!isOwnedRecord(record) || status === 403) {
+              setStep('PAIRING');
+              setNotice(`Kết nối Wi-Fi "${ssid.trim()}" thành công${result.ip ? ` (${result.ip})` : ''}! Nút chưa gắn vào tài khoản của bạn — nhập mã ghép nối của cửa hàng để nhận nút và mở danh sách sản phẩm.`);
+            } else {
+              setNotice(`Kết nối Wi-Fi "${ssid.trim()}" thành công${result.ip ? ` (${result.ip})` : ''}! ${pairingError(catalogErr)}`);
+            }
           }
           return;
         }
