@@ -14,7 +14,27 @@ export function deferApiRequests(delayMs: number): number {
   return retryUntil;
 }
 
+export function clearApiCooldown(): void {
+  retryUntil = 0;
+  try { localStorage.removeItem(storageKey); } catch { /* Memory fallback. */ }
+}
+
+export function isUpstreamInfra429(error: any): boolean {
+  if (error?.response?.status !== 429) return false;
+  const headers = error?.response?.headers;
+  const read = (name: string) =>
+    String(headers?.get?.(name) ?? headers?.[name] ?? headers?.[name.toLowerCase()] ?? '').toLowerCase();
+  const renderRouting = read('x-render-routing');
+  const cfMitigated = read('cf-mitigated');
+  const contentType = read('content-type');
+  if (renderRouting.includes('hibernate') || renderRouting.includes('rate-limited')) return true;
+  if (cfMitigated.includes('challenge')) return true;
+  if ((contentType.includes('text/plain') || contentType.includes('text/html')) && typeof error?.response?.data === 'string') return true;
+  return false;
+}
+
 export function recordRateLimit(error: any): number {
+  if (isUpstreamInfra429(error)) return 0;
   const headers = error?.response?.headers;
   const read = (name: string) => headers?.get?.(name) ?? headers?.[name] ?? headers?.[name.toLowerCase()];
   const retryAfter = read('retry-after');

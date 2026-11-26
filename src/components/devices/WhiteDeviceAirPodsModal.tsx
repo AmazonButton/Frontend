@@ -6,7 +6,7 @@ import { Bluetooth, Check, CheckCircle2, Eye, EyeOff, Loader2, RefreshCw, Wifi, 
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { connectBle, finishPairedProduct, DEVICE_SYNC_EVENT, deviceData, deviceId, deviceProductIds, readConnectionDraft, readScopedDevice, rememberBleReceipt, rescanBleWifiNetworks, saveConnectionDraft, saveDeviceProduct, sendBleWifi } from '../../services/device-connection';
+import { claimDeviceViaBle, connectBle, finishPairedProduct, DEVICE_SYNC_EVENT, deviceData, deviceId, deviceProductIds, readConnectionDraft, readScopedDevice, rememberBleReceipt, rescanBleWifiNetworks, saveConnectionDraft, saveDeviceProduct, sendBleWifi } from '../../services/device-connection';
 import { clearPairingProgress, savePairingProgress, confirmAtomicPairing, createPairingSession, loadPairingStore, lookupPairingDevice, pairingError, parsePairingInput, readOwnedPairedDevice, verifyPairingSession } from '../../pages/customer/device-pairing.mjs';
 
 interface WhiteDeviceAirPodsModalProps {
@@ -103,10 +103,26 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     try { saveConnectionDraft(localStorage, user, lookup); } catch { setNotice('Trình duyệt chưa lưu được tiến trình. Thiết bị đã có trên máy chủ vẫn được giữ nguyên.'); }
     setManualCode(lookup.deviceId);
     if (customer && !lookup.isClaimed) {
+      if (ble) {
+        try {
+          const claimed = await claimDeviceViaBle(api, lookup.deviceId, user, buttonName || 'Nút bấm của tôi');
+          if (!active()) return;
+          setRecord({ ...claimed, isClaimed: true });
+          setButtonName(claimed.customName || claimed.name || 'Nút bấm của tôi');
+          setSelectedProductId(deviceProductIds(claimed)[0] || '');
+          publish(claimed);
+          setStep('WIFI_CONFIG');
+          setNotice(`Đã nhận diện và liên kết nút ${claimed.deviceId} qua Bluetooth. Nhập tên Wi-Fi 2.4GHz và mật khẩu để nạp trực tiếp cho nút.`);
+          return;
+        } catch (claimErr: any) {
+          if (!active()) return;
+          setRecord(lookup); setStep('WIFI_CONFIG');
+          setNotice(`Đã kết nối BLE ${lookup.deviceId}. (${pairingError(claimErr)}) — bạn vẫn có thể nạp Wi-Fi trước.`);
+          return;
+        }
+      }
       setRecord(lookup); setStep('WIFI_CONFIG');
-      setNotice(ble
-        ? `Đã kết nối nút ${lookup.deviceId}. Nhập tên Wi-Fi 2.4GHz và mật khẩu để nạp trực tiếp cho nút.`
-        : `Đã nhận diện nút ${lookup.deviceId}. Kết nối Bluetooth tới nút rồi nhập Wi-Fi 2.4GHz để nạp.`);
+      setNotice(`Đã nhận diện nút ${lookup.deviceId}. Kết nối Bluetooth tới nút để hoàn tất liên kết và nạp Wi-Fi 2.4GHz.`);
       return;
     }
     const saved = await readScopedDevice(api, lookup.deviceId, user);
@@ -138,13 +154,27 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
       item?.isClaimed ||
       (user?.customerProfileId && String(item?.customerId || '') === String(user.customerProfileId)),
     );
+  const ensureBleClaimed = async (): Promise<any> => {
+    try {
+      return await readScopedDevice(api, record.deviceId, user);
+    } catch (readErr: any) {
+      if (connection.current?.server?.connected && !isOwnedRecord(record)) {
+        const claimed = await claimDeviceViaBle(api, record.deviceId, user, buttonName || 'Nút bấm của tôi');
+        publish(claimed);
+        return claimed;
+      }
+      throw readErr;
+    }
+  };
   const loadCatalog = async () => run('catalog', async active => {
     if (!customer || !record) return;
-    const current = await readScopedDevice(api, record.deviceId, user);
+    const current = await ensureBleClaimed();
     const store = deviceData(await api.get(`/stores/${encodeURIComponent(current.storeId)}`));
     if (String(store.storeId || store.id) !== String(current.storeId) || store.status !== 'ACTIVE') throw new Error('Cửa hàng của nút chưa sẵn sàng.');
     if (!active()) return;
     setRecord({ ...current, isClaimed: true });
+    setButtonName(prev => prev || current.customName || current.name || 'Nút bấm của tôi');
+    setSelectedProductId(prev => prev || deviceProductIds(current)[0] || '');
     setCatalog((store.products || []).filter((p: any) => p.status === 'ACTIVE' && (!p.storeId || String(p.storeId) === String(current.storeId))));
     setStep('SELECT_PRODUCT');
   });
@@ -200,10 +230,12 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
         setWifiVerifiedIp(result.ip || 'OK');
         if (isOwnedRecord(record)) publish(record);
         try {
-          const current = await readScopedDevice(api, record.deviceId, user);
+          const current = await ensureBleClaimed();
           const store = deviceData(await api.get(`/stores/${encodeURIComponent(current.storeId)}`));
           if (active() && String(store.storeId || store.id) === String(current.storeId) && store.status === 'ACTIVE') {
             setRecord({ ...current, isClaimed: true });
+            setButtonName(prev => prev || current.customName || current.name || 'Nút bấm của tôi');
+            setSelectedProductId(prev => prev || deviceProductIds(current)[0] || '');
             setCatalog((store.products || []).filter((p: any) => p.status === 'ACTIVE' && (!p.storeId || String(p.storeId) === String(current.storeId))));
             setStep('SELECT_PRODUCT');
             setNotice(`Kết nối Wi-Fi "${ssid.trim()}" thành công${result.ip ? ` (${result.ip})` : ''}! Chọn sản phẩm của cửa hàng để gán cho nút.`);

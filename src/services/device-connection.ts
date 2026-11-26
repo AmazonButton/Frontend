@@ -45,6 +45,17 @@ export async function readScopedDevice(client: any, id: string, user: any) {
   if (raw.deviceId !== id) throw new Error('Mã thiết bị từ máy chủ không khớp nút đang kết nối.');
   return assertDeviceScope(raw, user);
 }
+export async function claimDeviceViaBle(client: any, id: string, user: any, buttonName?: string) {
+  if (user?.role !== 'CUSTOMER') throw new Error('Chỉ tài khoản khách hàng mới có thể liên kết nút qua Bluetooth.');
+  const raw = deviceData(
+    await client.post(`/devices/${encodeURIComponent(deviceId(id))}/ble-claim`, {
+      bleConnected: true,
+      ...(buttonName?.trim() ? { buttonName: buttonName.trim() } : {}),
+    }),
+  );
+  if (raw.deviceId !== id) throw new Error('Mã thiết bị từ máy chủ không khớp nút đang kết nối.');
+  return assertDeviceScope(raw, user);
+}
 export async function bleService(server: any) {
   if (!server?.connected) throw new Error('Bluetooth đã ngắt. Hãy kết nối lại đúng nút bấm.');
   return server.getPrimaryService(BLE_SERVICE);

@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useMemo } from 'react';
 import { User } from '../types';
 import { api, apiSessionMarker, isTokenExpired, getOrRefreshValidToken } from '../services/api';
-import { apiCooldownError, getApiRetryUntil } from '../services/request-backoff';
+import { apiCooldownError, clearApiCooldown, getApiRetryUntil } from '../services/request-backoff';
 import { updateSocketAuth, clearSocketSubscriptions } from '../services/socket';
 import { clearPushToken, cleanupBrowserPushAfterLogout, currentPushUserId, invalidatePushSession, readPushOwner, readPushToken, unregisterWebPush } from '../services/web-push-state';
 import { isActiveRole, normalizeAuthUser } from '../utils/authority';
@@ -103,6 +103,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
 
     // 1. Instantly wipe client credentials & state (0ms UI transition)
+    clearApiCooldown();
     localStorage.removeItem('smart_order_token');
     localStorage.removeItem('smart_order_refresh_token');
     localStorage.removeItem('smart_order_user');
@@ -259,6 +260,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = useCallback((newToken: string, userData: User, newRefreshToken?: string) => {
     setSessionError(null);
+    clearApiCooldown();
     const normalizedUser = normalizeAuthUser(userData);
     const previousPushOwner = readPushOwner();
     invalidatePushSession();

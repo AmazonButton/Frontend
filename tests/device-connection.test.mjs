@@ -1,4 +1,4 @@
-﻿import assert from 'node:assert/strict';
+import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDeviceTelemetry } from '../src/services/device-runtime.ts';
 import { readFileSync } from 'node:fs';
@@ -152,5 +152,22 @@ for (const prefix of ['../src/', '../frontend/src/']) {
       stale.resolve(ok([])); await Promise.all([old,next]);
       assert.equal(rows.length,1); assert.equal(rows[0].deviceId,fresh.deviceId); assert.equal(rows[0].product.id,'7'); assert.equal(emptySeen, false);
     }
+  });
+  test(prefix + 'claimDeviceViaBle claims an unassigned store button explicitly and verifies customer ownership', async () => {
+    const be = backend();
+    be.client.post = async (path, body) => {
+      be.calls.push({ method: 'post', path, body });
+      if (path === '/devices/SOB-000052/ble-claim') {
+        assert.equal(body.bleConnected, true);
+        be.row = { ...be.row, deviceId: 'SOB-000052', customerId: '41', custodyStoreId: null, inventoryState: 'IN_CUSTOMER_CUSTODY', status: 'ACTIVE' };
+        return ok(structuredClone(be.row));
+      }
+      throw Error(path);
+    };
+    const claimed = await flow.claimDeviceViaBle(be.client, 'SOB-000052', customer, 'Nút Bếp');
+    assert.equal(claimed.deviceId, 'SOB-000052');
+    assert.equal(claimed.customerId, '41');
+    assert.equal(claimed.storeId, '5');
+    await assert.rejects(flow.claimDeviceViaBle(be.client, 'SOB-000052', owner), /Chỉ tài khoản khách hàng/);
   });
 }

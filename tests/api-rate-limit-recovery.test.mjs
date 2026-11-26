@@ -77,14 +77,14 @@ for(const prefix of ['../src/','../frontend/src/']){
   test(`${prefix}refresh 429 keeps session and blocks HTTP until Retry-After expires`,async()=>{
     const h=harness(prefix);h.calls.refreshImpl=async()=>{throw{response:{status:429,headers:{'retry-after':'120'}}};};
     assert.equal(await h.exports.getOrRefreshValidToken(),null);assert.equal(h.values.get('smart_order_refresh_token'),'refresh-A');assert.ok(h.values.has('smart_order_user'));
-    for(let i=0;i<10;i++){assert.equal(await h.exports.getOrRefreshValidToken(true),null);await assert.rejects(h.api.get('/orders'),error=>error.code==='API_COOLDOWN');}
+    for(let i=0;i<10;i++){assert.equal(await h.exports.getOrRefreshValidToken(true),null);await assert.rejects(h.api.get('/marketplace/shops'),error=>error.code==='API_COOLDOWN');}
     assert.equal(h.calls.refresh.length,1);assert.equal(h.calls.wire.length,0);
-    h.advance(120001);h.calls.refreshImpl=null;assert.equal(await h.exports.getOrRefreshValidToken(),h.valid());assert.equal(h.calls.refresh.length,2);
+    h.advance(15001);h.calls.refreshImpl=null;assert.equal(await h.exports.getOrRefreshValidToken(),h.valid());assert.equal(h.calls.refresh.length,2);
   });
   test(`${prefix}orders 429 pauses later polling/mutations without retrying or logging out`,async()=>{
     const h=harness(prefix);h.values.set('smart_order_token',h.valid());h.calls.wireImpl=async()=>{throw{response:{status:429,headers:{'retry-after':'90'}}};};
     await assert.rejects(h.api.post('/orders/18/claim',{}),error=>error.code==='API_COOLDOWN');
-    await Promise.all(Array.from({length:12},()=>assert.rejects(h.api.get('/orders'),error=>error.code==='API_COOLDOWN')));
+    await Promise.all(Array.from({length:12},()=>assert.rejects(h.api.get('/marketplace/shops'),error=>error.code==='API_COOLDOWN')));
     assert.equal(h.calls.wire.length,1);assert.equal(h.calls.refresh.length,0);assert.equal(h.values.get('smart_order_refresh_token'),'refresh-A');assert.equal(h.window.location.href,'');
   });
   test(`${prefix}refresh network failures preserve credentials and have a cooldown`,async()=>{
@@ -107,9 +107,28 @@ for(const prefix of ['../src/','../frontend/src/']){
     resolve({data:{success:true,data:{accessToken:h.valid(),refreshToken:'rotated'}}});const results=await Promise.all(pending);assert.ok(results.every(result=>result.data.success));assert.equal(h.calls.wire.length,12);assert.equal(h.calls.refresh.length,1);
   });
   test(`${prefix}Retry-After dates and rate-limit reset headers are honored across reloads`,()=>{
-    const h=harness(prefix);h.backoff.recordRateLimit({response:{headers:{'retry-after':new Date(h.now()+180000).toUTCString()}}});assert.equal(h.backoff.getApiRetryUntil(),h.now()+180000);
-    h.advance(180001);h.backoff.recordRateLimit({response:{headers:{'ratelimit-reset':'900'}}});assert.equal(h.backoff.getApiRetryUntil(),h.now()+900000);
-    assert.equal(Number(h.values.get('smart_order_api_retry_after')),h.now()+900000);
+    const h=harness(prefix);h.backoff.recordRateLimit({response:{headers:{'retry-after':new Date(h.now()+180000).toUTCString()}}});assert.equal(h.backoff.getApiRetryUntil(),h.now()+15000);
+    h.advance(15001);h.backoff.recordRateLimit({response:{headers:{'ratelimit-reset':'900'}}});assert.equal(h.backoff.getApiRetryUntil(),h.now()+15000);
+    assert.equal(Number(h.values.get('smart_order_api_retry_after')),h.now()+15000);
+  });
+  test(`${prefix}upstream Render hibernate/non-JSON 429 retries silently without locking cooldown`,async()=>{
+    for(const call of [()=>h=>h.api.get('/orders'),()=>h=>h.api.post('/auth/login',{email:'store@smartorder.local',password:'Password123!'})]){
+      const h=harness(prefix);h.values.set('smart_order_token',h.valid());
+      h.calls.wireImpl=async()=>{
+        if(h.calls.wire.length===1)throw{response:{status:429,headers:{'x-render-routing':'hibernate-rate-limited','content-type':'text/plain; charset=utf-8'},data:'Too Many Requests'}};
+        return{data:{success:true,data:{ok:true}}};
+      };
+      const res=await call()(h);
+      assert.equal(res.data.success,true);assert.equal(h.calls.wire.length,2);assert.equal(h.backoff.getApiRetryUntil(),0);assert.equal(h.values.has('smart_order_api_retry_after'),false);
+    }
+  });
+  test(`${prefix}active API_COOLDOWN never blocks interactive login/logout and clearApiCooldown resets state`,async()=>{
+    const h=harness(prefix);h.values.set('smart_order_token',h.valid());h.backoff.deferApiRequests(15000);
+    await assert.rejects(h.api.get('/marketplace/shops'),error=>error.code==='API_COOLDOWN');
+    const loginRes=await h.api.post('/auth/login',{email:'store@smartorder.local',password:'Password123!'});
+    const logoutRes=await h.api.post('/auth/logout',{});
+    assert.equal(loginRes.data.success,true);assert.equal(logoutRes.data.success,true);assert.equal(h.calls.wire.length,2);
+    h.backoff.clearApiCooldown();assert.equal(h.backoff.getApiRetryUntil(),0);assert.equal(h.values.has('smart_order_api_retry_after'),false);
   });
 }
 
