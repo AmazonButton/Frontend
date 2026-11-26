@@ -2,6 +2,7 @@
 export const BLE_SERVICE = '0000fff0-0000-1000-8000-00805f9b34fb';
 const BLE_INFO = '0000fff1-0000-1000-8000-00805f9b34fb';
 const BLE_WIFI = '0000fff2-0000-1000-8000-00805f9b34fb';
+const BLE_STATUS = '0000fff3-0000-1000-8000-00805f9b34fb';
 const BLE_SCAN = '0000fff4-0000-1000-8000-00805f9b34fb';
 export const DEVICE_SYNC_EVENT = 'sob_device_claimed_success';
 export function deviceData(response: any): any {
@@ -94,19 +95,86 @@ export async function connectBle(navigatorValue: any) {
     return { hardware, server, info, networks };
   } catch (error) { if (hardware.gatt?.connected) hardware.gatt.disconnect(); throw error; }
 }
-export async function sendBleWifi(server: any, expectedDeviceId: string, ssid: string, password: string) {
+export async function sendBleWifi(
+  server: any,
+  expectedDeviceId: string,
+  ssid: string,
+  password: string,
+  onStatus?: (status: string) => void,
+) {
   if (!ssid.trim() || /[:\r\n]/.test(ssid) || /[\r\n]/.test(password)) throw new Error('Tên Wi-Fi không được trống, chứa dấu hai chấm hoặc xuống dòng; mật khẩu không được xuống dòng.');
   const identity = await readBleIdentity(server);
   if (identity.deviceId !== expectedDeviceId) throw new Error('Nút Bluetooth khác nút đang cấu hình. Chưa gửi thông tin Wi-Fi.');
   const service = await bleService(server);
   const characteristic = await service.getCharacteristic(BLE_WIFI);
+
+  let statusChar: any = null;
+  try {
+    statusChar = await service.getCharacteristic(BLE_STATUS);
+    await statusChar.startNotifications();
+  } catch {
+    statusChar = null;
+  }
+
+  let cleanup = () => {};
+  const verification = new Promise<{ deviceId: string; status: string; ip?: string }>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn();
+    };
+    const timer = setTimeout(() => {
+      finish(() => resolve({ deviceId: expectedDeviceId, status: 'CREDENTIALS_SENT' }));
+    }, 18000);
+    const onValue = (event: any) => {
+      const msg = new TextDecoder().decode(event?.target?.value).trim();
+      if (!msg) return;
+      if (msg === 'CHECKING' || msg === 'CONFIG_OK') {
+        onStatus?.('Nút đang thử kết nối Wi-Fi để kiểm tra mật khẩu...');
+        if (msg === 'CONFIG_OK') {
+          // Firmware cũ chỉ báo CONFIG_OK rồi restart ngay
+          setTimeout(() => finish(() => resolve({ deviceId: expectedDeviceId, status: 'CREDENTIALS_SENT' })), 1200);
+        }
+        return;
+      }
+      if (msg.startsWith('WIFI_OK')) {
+        const ip = msg.split(':')[1] || '';
+        finish(() => resolve({ deviceId: expectedDeviceId, status: 'WIFI_CONNECTED', ip }));
+        return;
+      }
+      if (msg.startsWith('WIFI_FAIL')) {
+        const errMessage = msg.includes('KHONG_TIM_THAY_SSID')
+          ? `Nút không tìm thấy mạng Wi-Fi "${ssid.trim()}" (lưu ý nút chỉ hỗ trợ Wi-Fi 2.4GHz).`
+          : 'Sai mật khẩu Wi-Fi hoặc không thể kết nối. Vui lòng kiểm tra lại mật khẩu và thử lại!';
+        finish(() => reject(new Error(errMessage)));
+      }
+    };
+    if (statusChar) {
+      statusChar.addEventListener('characteristicvaluechanged', onValue);
+    }
+    cleanup = () => {
+      clearTimeout(timer);
+      if (statusChar) {
+        try { statusChar.removeEventListener('characteristicvaluechanged', onValue); } catch {}
+      }
+    };
+  });
+
   // Firmware FFF2 splits at the first colon and saves the remaining bytes as
   // password. WIFI: and a trailing newline would corrupt those credentials.
   const payload = new TextEncoder().encode(`${ssid.trim()}:${password}`);
-  if (typeof characteristic.writeValueWithResponse === 'function') await characteristic.writeValueWithResponse(payload);
-  else if (typeof characteristic.writeValue === 'function') await characteristic.writeValue(payload);
-  else throw new Error('Nút không hỗ trợ ghi cấu hình Wi-Fi có xác nhận.');
-  return { deviceId: expectedDeviceId, status: 'CREDENTIALS_SENT' };
+  try {
+    if (typeof characteristic.writeValueWithResponse === 'function') await characteristic.writeValueWithResponse(payload);
+    else if (typeof characteristic.writeValue === 'function') await characteristic.writeValue(payload);
+    else throw new Error('Nút không hỗ trợ ghi cấu hình Wi-Fi có xác nhận.');
+    onStatus?.('Đã gửi thông tin Wi-Fi tới nút, đang chờ nút kiểm tra mật khẩu...');
+    return await verification;
+  } catch (err) {
+    cleanup();
+    throw err;
+  }
 }
 export async function saveDeviceProduct(client: any, id: string, productId: string, user: any, name: string, onSent = () => {}, canContinue = () => true) {
   const before = await readScopedDevice(client, id, user);
