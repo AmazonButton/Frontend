@@ -125,18 +125,27 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
       setSession(verified); setCatalog(store.products); setButtonName('Nút bấm của tôi'); setStep('SELECT_PRODUCT');
     } catch (failure) { if (sent && active()) setUncertain(true); throw failure; }
   });
+  const isOwnedRecord = (item: any) =>
+    Boolean(
+      item?.isClaimed ||
+      (user?.customerProfileId && String(item?.customerId || '') === String(user.customerProfileId)),
+    );
   const loadCatalog = async () => run('catalog', async active => {
     if (!customer || !record) return;
-    if (!record.isClaimed) {
+    let current: any;
+    try {
+      current = await readScopedDevice(api, record.deviceId, user);
+    } catch {
       setStep('PAIRING');
       setNotice('Nút chưa được ghép vào tài khoản của bạn. Nhập mã ghép nối của cửa hàng để nhận nút và chọn sản phẩm.');
       return;
     }
-    const current = await readScopedDevice(api, record.deviceId, user);
     const store = deviceData(await api.get(`/stores/${encodeURIComponent(current.storeId)}`));
     if (String(store.storeId || store.id) !== String(current.storeId) || store.status !== 'ACTIVE') throw new Error('Cửa hàng của nút chưa sẵn sàng.');
     if (!active()) return;
-    setRecord(current); setCatalog((store.products || []).filter((p: any) => p.status === 'ACTIVE' && (!p.storeId || String(p.storeId) === String(current.storeId)))); setStep('SELECT_PRODUCT');
+    setRecord({ ...current, isClaimed: true });
+    setCatalog((store.products || []).filter((p: any) => p.status === 'ACTIVE' && (!p.storeId || String(p.storeId) === String(current.storeId))));
+    setStep('SELECT_PRODUCT');
   });
   const saveProduct = async () => run('save', async active => {
     if (!customer || !record || !selectedProductId || confirmationSent.current) return;
@@ -150,7 +159,14 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     if (session) saved = await finishPairedProduct(api, saved, user, session.storeId, selectedProductId, buttonName, active);
     if (!active()) return;
     try { if (customer) clearPairingProgress(sessionStorage, user); } catch {}
-    setRecord(saved); publish(saved); setStep('WIFI_CONFIG'); setNotice('Máy chủ đã lưu nút và sản phẩm. Nhập Wi-Fi 2.4GHz để nạp cho nút ngay.');
+    setRecord({ ...saved, isClaimed: true }); publish(saved);
+    if (wifiVerifiedIp) {
+      setStep('BOUND_SUCCESS');
+      setNotice('Đã lưu sản phẩm cho nút thành công. Wi-Fi và sản phẩm đã sẵn sàng!');
+    } else {
+      setStep('WIFI_CONFIG');
+      setNotice('Máy chủ đã lưu nút và sản phẩm. Nhập Wi-Fi 2.4GHz để nạp cho nút ngay.');
+    }
   });
   const checkSaved = async () => run('check', async active => {
     if (!customer || !record) return;
@@ -164,7 +180,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   const deployWifi = async () => run('wifi', async active => {
     if (!customer || !record) return;
     setWifiVerifiedIp('');
-    const targetDeviceId = record.isClaimed
+    const targetDeviceId = isOwnedRecord(record)
       ? (await readScopedDevice(api, record.deviceId, user)).deviceId
       : record.deviceId;
     if (!active()) return;
@@ -184,7 +200,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
       setWifiPassword('');
       setNotice('Đã gửi cấu hình tới đúng nút qua Bluetooth. Chờ nút khởi động lại để xác nhận kết nối Internet.');
     }
-    if (record.isClaimed) publish(record);
+    if (isOwnedRecord(record)) publish(record);
   });
   const rescanWifi = async () => run('scan', async active => {
     if (!connection.current?.server?.connected) {
