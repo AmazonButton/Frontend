@@ -1,13 +1,13 @@
 import React, { Suspense, useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { AnimatePresence, motion, useReducedMotion } from 'framer-motion';
-import { AlertCircle, ArrowLeft, ArrowRight, Camera, Check, CheckCircle2, Clock3, KeyRound, Loader2, Package, QrCode, RefreshCw, ShieldCheck, Store, X } from 'lucide-react';
+import { AlertCircle, ArrowLeft, ArrowRight, Bluetooth, Camera, Check, CheckCircle2, Clock3, KeyRound, Loader2, Package, QrCode, RefreshCw, ShieldCheck, Store, Wifi, X } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
 import { clearPairingProgress, readPairingProgress, savePairingProgress, confirmAtomicPairing, createPairingSession, loadPairingStore, lookupPairingDevice, pairingConfirmationBody, pairingCustomer, pairingError, parsePairingInput, readOwnedPairedDevice, verifyPairingSession } from './device-pairing.mjs';
 
 const QrCameraScanner = React.lazy(() => import('../../components/common/QrCameraScanner').then(module => ({ default: module.QrCameraScanner })));
-import { deviceProductIds, finishPairedProduct } from '../../services/device-connection';
+import { connectBle, deviceProductIds, finishPairedProduct, sendBleWifi } from '../../services/device-connection';
 
 const field = 'mt-2 w-full min-w-0 rounded-xl border border-slate-300 bg-white px-3 py-2.5 text-sm text-slate-900 outline-none focus:border-[#287DA8] focus:ring-2 focus:ring-sky-100 disabled:opacity-60 dark:border-zinc-700 dark:bg-zinc-950 dark:text-zinc-100 dark:focus:ring-sky-950';
 const primary = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-[#287DA8] px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-[#206588] disabled:cursor-not-allowed disabled:opacity-50';
@@ -24,9 +24,10 @@ const PairingWorkspace: React.FC = () => {
   const [mode, setMode] = useState<'QR' | 'MANUAL'>('QR'); const [qr, setQr] = useState(''); const [deviceCode, setDeviceCode] = useState(''); const [token, setToken] = useState(''); const [camera, setCamera] = useState(false); const [scanned, setScanned] = useState(false);
   const [session, setSession] = useState<any>(null); const [store, setStore] = useState<any>(null); const [productId, setProductId] = useState(''); const [buttonName, setButtonName] = useState(''); const [device, setDevice] = useState<any>(null);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [contextError, setContextError] = useState(''); const [now, setNow] = useState(Date.now()); const [createUncertain, setCreateUncertain] = useState(false); const [confirmationSent, setConfirmationSent] = useState(false); const [acknowledged, setAcknowledged] = useState(false);
+  const [bleServer, setBleServer] = useState<any>(null); const [bleDevice, setBleDevice] = useState<any>(null); const [wifiSsid, setWifiSsid] = useState(''); const [wifiPassword, setWifiPassword] = useState(''); const [wifiBusy, setWifiBusy] = useState(false); const [wifiError, setWifiError] = useState(''); const [wifiSuccess, setWifiSuccess] = useState('');
   const busyRef = useRef(false); const sentRef = useRef(false); const createAttempt = useRef(false); const expected = useRef<any>(null); const sessionRef = useRef<any>(null); const mounted = useRef(true);
   const attemptedCodes = useRef(new Set<string>());
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; bleDevice?.gatt?.disconnect?.(); }; }, [bleDevice]);
   useEffect(() => { if (!session || device) return; const timer = window.setInterval(() => { const current = Date.now(); setNow(current); if (current >= Date.parse(session.expiresAt)) window.clearInterval(timer); }, 1000); return () => window.clearInterval(timer); }, [session, device]);
   const onScan = useCallback((text: string) => { setQr(text); setScanned(true); setCamera(false); setError(''); }, []);
   const lock = () => { if (busyRef.current) return false; busyRef.current = true; setBusy(true); return true; };
@@ -81,6 +82,45 @@ const PairingWorkspace: React.FC = () => {
     try { clearPairingProgress(sessionStorage, user); } catch {}
     setSession(null); sessionRef.current = null; setStore(null); setProductId(''); setButtonName(''); setQr(''); setToken(''); setDeviceCode(''); setError(''); setContextError(''); setCreateUncertain(false); createAttempt.current = false; setAcknowledged(false);
   };
+  const connectDeviceWifiBle = async () => {
+    if (!device || wifiBusy) return;
+    setWifiBusy(true); setWifiError(''); setWifiSuccess('');
+    try {
+      const found = await connectBle(navigator);
+      if (!mounted.current) { found.hardware?.gatt?.disconnect?.(); return; }
+      if (String(found.info?.deviceId || '').toUpperCase() !== String(device.deviceId || '').toUpperCase()) {
+        found.hardware?.gatt?.disconnect?.();
+        throw new Error(`Bạn đang chọn nhầm nút ${found.info?.deviceId || 'khác'}. Hãy giữ nút ${device.deviceId} 5 giây rồi chọn đúng thiết bị.`);
+      }
+      bleDevice?.gatt?.disconnect?.();
+      setBleDevice(found.hardware);
+      setBleServer(found.server);
+    } catch (failure: any) {
+      if (mounted.current && failure?.name !== 'NotFoundError') {
+        setWifiError(pairingError(failure));
+      }
+    } finally {
+      if (mounted.current) setWifiBusy(false);
+    }
+  };
+  const sendDeviceWifi = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!device || wifiBusy) return;
+    setWifiBusy(true); setWifiError(''); setWifiSuccess('');
+    try {
+      if (!bleServer?.connected) {
+        throw new Error('Hãy bấm "Kết nối Bluetooth tới nút" trước (giữ nút 5 giây để bật BLE).');
+      }
+      await sendBleWifi(bleServer, device.deviceId, wifiSsid, wifiPassword);
+      if (!mounted.current) return;
+      setWifiPassword('');
+      setWifiSuccess(`Đã gửi cấu hình Wi-Fi "${wifiSsid.trim()}" tới nút ${device.deviceId}. Nút sẽ tự khởi động lại và kết nối mạng mới.`);
+    } catch (failure) {
+      if (mounted.current) setWifiError(pairingError(failure));
+    } finally {
+      if (mounted.current) setWifiBusy(false);
+    }
+  };
   useEffect(() => {
     if (!allowed) return;
     let stopped = false;
@@ -116,7 +156,7 @@ const PairingWorkspace: React.FC = () => {
     <ol className="grid grid-cols-3 gap-2" aria-label="Tiến trình thêm nút bấm">{['Nhập mã', 'Kiểm tra & xác nhận', 'Hoàn tất'].map((label, index) => <li key={label} aria-current={step === index + 1 ? 'step' : undefined} className={`flex flex-col gap-2 rounded-xl border p-3 text-xs sm:flex-row sm:items-center sm:text-sm ${step === index + 1 ? 'border-sky-200 bg-sky-50 text-[#287DA8] dark:border-sky-900 dark:bg-sky-950/40 dark:text-sky-300' : 'border-slate-200 bg-white text-slate-500 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-400'}`}><span className={`inline-flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold ${step > index + 1 ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600 dark:bg-zinc-800 dark:text-zinc-300'}`}>{step > index + 1 ? <Check className="h-3.5 w-3.5" /> : index + 1}</span><span className="leading-snug">{label}</span></li>)}</ol>
     {!allowed ? <PairingNotice>Tài khoản cần có hồ sơ khách hàng để thêm nút bấm. <Link className="font-semibold underline" to="/customer/profile">Kiểm tra hồ sơ</Link></PairingNotice> : <AnimatePresence mode="wait" initial={false}>
       <motion.section key={step} initial={reduced ? false : { opacity: 0, y: 8 }} animate={{ opacity: 1, y: 0 }} exit={reduced ? { opacity: 0 } : { opacity: 0, y: -4 }} transition={{ duration: 0.18 }} className="space-y-5 rounded-2xl border border-slate-200 bg-white p-5 sm:p-7 dark:border-zinc-800 dark:bg-zinc-900">
-        {device ? <><div className="space-y-3 py-3 text-center"><CheckCircle2 className="mx-auto h-12 w-12 text-emerald-600" /><h2 className="text-xl font-semibold text-slate-900 dark:text-white">Đã thêm nút vào tài khoản</h2><p className="text-sm leading-relaxed text-slate-500 dark:text-zinc-400">Hệ thống đã xác nhận nút bấm thuộc tài khoản của bạn.</p></div><dl className="space-y-3 rounded-xl bg-slate-50 p-4 text-sm dark:bg-zinc-800">{[['Tên nút', device.customName || device.buttonName || device.name], ['Thiết bị', device.deviceId], ['Cửa hàng', device.store?.name || device.store?.storeName || store?.name || session?.storeName], ['Sản phẩm', device.products?.find((item: any) => String(item.productId) === productId)?.productName || device.products?.[0]?.productName]].map(([label, value]) => <div key={label} className="flex flex-wrap justify-between gap-2"><dt className="text-slate-500 dark:text-zinc-400">{label}</dt><dd className="max-w-full break-words text-right font-medium text-slate-900 dark:text-white">{value || 'Chưa có thông tin'}</dd></div>)}</dl><p className="text-sm leading-relaxed text-slate-500 dark:text-zinc-400">Việc thêm tài khoản không thay thế kết nối Wi-Fi trên thiết bị. Hãy kiểm tra hướng dẫn của cửa hàng trước khi sử dụng nút.</p><Link to="/customer/home" className={`${primary} w-full`}>Về nút bấm của tôi<ArrowRight className="h-4 w-4" /></Link></> : !session ? <>
+        {device ? <><div className="space-y-3 py-3 text-center"><CheckCircle2 className="mx-auto h-12 w-12 text-emerald-600" /><h2 className="text-xl font-semibold text-slate-900 dark:text-white">Đã thêm nút vào tài khoản</h2><p className="text-sm leading-relaxed text-slate-500 dark:text-zinc-400">Hệ thống đã xác nhận nút bấm thuộc tài khoản của bạn.</p></div><dl className="space-y-3 rounded-xl bg-slate-50 p-4 text-sm dark:bg-zinc-800">{[['Tên nút', device.customName || device.buttonName || device.name], ['Thiết bị', device.deviceId], ['Cửa hàng', device.store?.name || device.store?.storeName || store?.name || session?.storeName], ['Sản phẩm', device.products?.find((item: any) => String(item.productId) === productId)?.productName || device.products?.[0]?.productName]].map(([label, value]) => <div key={label} className="flex flex-wrap justify-between gap-2"><dt className="text-slate-500 dark:text-zinc-400">{label}</dt><dd className="max-w-full break-words text-right font-medium text-slate-900 dark:text-white">{value || 'Chưa có thông tin'}</dd></div>)}</dl><div className="space-y-4 rounded-xl border border-sky-200 bg-sky-50/60 p-4 dark:border-sky-900 dark:bg-sky-950/20"><div className="flex items-start gap-2.5"><Wifi className="mt-0.5 h-5 w-5 shrink-0 text-[#287DA8]" /><div><h3 className="text-sm font-semibold text-slate-900 dark:text-white">Cấu hình Wi-Fi 2.4GHz cho nút bấm</h3><p className="mt-1 text-xs leading-relaxed text-slate-600 dark:text-zinc-300">Giữ nút bấm 5 giây cho đèn nháy xanh dương rồi kết nối Bluetooth để nạp Wi-Fi nhà bạn (không làm thay đổi mã nút hay sản phẩm).</p></div></div><button type="button" disabled={wifiBusy} onClick={() => void connectDeviceWifiBle()} className={`${secondary} w-full`}>{wifiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bluetooth className="h-4 w-4" />}{bleServer?.connected ? `Đã kết nối Bluetooth (${device.deviceId})` : 'Kết nối Bluetooth tới nút'}</button>{wifiError && <PairingNotice>{wifiError}</PairingNotice>}{wifiSuccess && <PairingNotice success>{wifiSuccess}</PairingNotice>}<form onSubmit={sendDeviceWifi} className="space-y-3"><label className="block text-sm font-medium text-slate-700 dark:text-zinc-200">Tên Wi-Fi 2.4GHz<input required autoComplete="off" value={wifiSsid} onChange={event => setWifiSsid(event.target.value)} disabled={wifiBusy} className={field} placeholder="Nhập tên mạng Wi-Fi ở nhà bạn" /></label><label className="block text-sm font-medium text-slate-700 dark:text-zinc-200">Mật khẩu Wi-Fi<input type="password" autoComplete="new-password" value={wifiPassword} onChange={event => setWifiPassword(event.target.value)} disabled={wifiBusy} className={field} placeholder="Nhập mật khẩu Wi-Fi" /></label><button type="submit" disabled={wifiBusy || !wifiSsid.trim()} className={`${primary} w-full`}>{wifiBusy ? <Loader2 className="h-4 w-4 animate-spin" /> : <Wifi className="h-4 w-4" />}{wifiBusy ? 'Đang gửi Wi-Fi…' : 'Gửi cấu hình Wi-Fi tới nút'}</button></form></div><Link to="/customer/home" className={`${secondary} w-full`}>Về nút bấm của tôi<ArrowRight className="h-4 w-4" /></Link></> : !session ? <>
           <div className="flex rounded-xl bg-slate-100 p-1 dark:bg-zinc-800" role="group" aria-label="Cách nhập mã"><button type="button" aria-pressed={mode === 'QR'} disabled={busy || createUncertain} onClick={() => { setMode('QR'); setError(''); }} className={`flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg text-sm font-medium ${mode === 'QR' ? 'bg-white text-[#287DA8] shadow-sm dark:bg-zinc-900 dark:text-sky-300' : 'text-slate-500'}`}><QrCode className="h-4 w-4" />Mã QR</button><button type="button" aria-pressed={mode === 'MANUAL'} disabled={busy || createUncertain} onClick={() => { setMode('MANUAL'); setCamera(false); setError(''); }} className={`flex min-h-10 flex-1 items-center justify-center gap-2 rounded-lg text-sm font-medium ${mode === 'MANUAL' ? 'bg-white text-[#287DA8] shadow-sm dark:bg-zinc-900 dark:text-sky-300' : 'text-slate-500'}`}><KeyRound className="h-4 w-4" />Nhập mã</button></div>
           <form onSubmit={begin} className="space-y-4">{mode === 'QR' ? <><div className="flex flex-wrap items-center justify-between gap-3"><p className="text-sm text-slate-600 dark:text-zinc-300">Quét mã QR mới từ cửa hàng.</p><button type="button" disabled={busy || createUncertain} onClick={() => setCamera(value => !value)} className={secondary}>{camera ? <X className="h-4 w-4" /> : <Camera className="h-4 w-4" />}{camera ? 'Đóng camera' : 'Mở camera'}</button></div>{camera && <Suspense fallback={<p role="status" className="py-8 text-center text-sm text-slate-500">Đang tải camera…</p>}><QrCameraScanner onScanSuccess={onScan} /></Suspense>}{scanned && <PairingNotice success>Đã đọc mã QR. Bấm kiểm tra thiết bị để tiếp tục.</PairingNotice>}<label className="block text-sm font-medium text-slate-700 dark:text-zinc-200">Hoặc dán nội dung mã QR<input type="password" autoComplete="off" spellCheck={false} maxLength={2000} required value={qr} onChange={event => setQr(event.target.value)} disabled={busy || createUncertain} className={field} placeholder="Nội dung mã QR ghép nối" /></label></> : <><label className="block text-sm font-medium text-slate-700 dark:text-zinc-200">Mã thiết bị<input autoComplete="off" spellCheck={false} required maxLength={100} value={deviceCode} onChange={event => setDeviceCode(event.target.value)} disabled={busy || createUncertain} className={field} placeholder="Ví dụ: SOB-000123" /></label><label className="block text-sm font-medium text-slate-700 dark:text-zinc-200">Mã ghép nối<input type="password" autoComplete="off" required maxLength={500} value={token} onChange={event => setToken(event.target.value)} disabled={busy || createUncertain} className={field} placeholder="Mã ghép nối do cửa hàng cung cấp" /></label></>}{error && <PairingNotice>{error}</PairingNotice>}{createUncertain && <PairingNotice>Yêu cầu tạo phiên đã được gửi nhưng chưa nhận được kết quả đầy đủ. Mã ghép nối chỉ dùng một lần; hãy nhờ cửa hàng kiểm tra và cấp mã mới thay vì gửi lại mã cũ.</PairingNotice>}{createUncertain && <button type="button" disabled={busy} onClick={useNewCode} className={`${secondary} w-full`}>Tôi đã có mã ghép nối mới</button>}<button type="submit" disabled={busy || createUncertain} className={`${primary} w-full`}>{busy ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <ShieldCheck className="h-4 w-4" />}{busy ? 'Đang kiểm tra thiết bị…' : 'Kiểm tra thiết bị'}</button></form><p className="text-xs leading-relaxed text-slate-500 dark:text-zinc-400">Mã ghép nối chỉ dùng một lần. Giữ màn hình này mở trong khi thêm nút và không chia sẻ mã cho người khác.</p>
         </> : <>
