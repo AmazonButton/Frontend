@@ -2,6 +2,7 @@
 export const BLE_SERVICE = '0000fff0-0000-1000-8000-00805f9b34fb';
 const BLE_INFO = '0000fff1-0000-1000-8000-00805f9b34fb';
 const BLE_WIFI = '0000fff2-0000-1000-8000-00805f9b34fb';
+const BLE_SCAN = '0000fff4-0000-1000-8000-00805f9b34fb';
 export const DEVICE_SYNC_EVENT = 'sob_device_claimed_success';
 export function deviceData(response: any): any {
   if (response?.data?.success === false) throw new Error(response.data.message || 'Máy chủ từ chối thao tác thiết bị.');
@@ -55,9 +56,33 @@ export async function readBleIdentity(server: any) {
   try { info = JSON.parse(text); } catch { throw new Error('Không đọc được danh tính nút từ Bluetooth. Không dùng tên Bluetooth thay mã thiết bị.'); }
   return { ...info, deviceId: deviceId(info?.deviceId) };
 }
+function parseWifiList(text: string): string[] {
+  return [...new Set(text.split(',').map(item => item.trim()).filter(Boolean))];
+}
+export async function readBleWifiNetworks(server: any): Promise<string[]> {
+  try {
+    const service = await bleService(server);
+    const characteristic = await service.getCharacteristic(BLE_SCAN);
+    const text = new TextDecoder().decode(await characteristic.readValue());
+    return parseWifiList(text);
+  } catch {
+    return [];
+  }
+}
+export async function rescanBleWifiNetworks(server: any): Promise<string[]> {
+  const service = await bleService(server);
+  const characteristic = await service.getCharacteristic(BLE_SCAN);
+  const cmd = new TextEncoder().encode('SCAN');
+  if (typeof characteristic.writeValueWithResponse === 'function') await characteristic.writeValueWithResponse(cmd);
+  else if (typeof characteristic.writeValueWithoutResponse === 'function') await characteristic.writeValueWithoutResponse(cmd);
+  else if (typeof characteristic.writeValue === 'function') await characteristic.writeValue(cmd);
+  await new Promise(resolve => setTimeout(resolve, 1600));
+  const text = new TextDecoder().decode(await characteristic.readValue());
+  return parseWifiList(text);
+}
 export async function connectBle(navigatorValue: any) {
   if (!navigatorValue?.bluetooth) throw new Error('Trình duyệt chưa hỗ trợ Web Bluetooth. Hãy dùng Chrome hoặc Edge có hỗ trợ Bluetooth.');
-  const hardware = await navigatorValue.bluetooth.requestDevice({ filters: [{ namePrefix: 'BTN' }, { namePrefix: 'SmartOrder' }, { namePrefix: 'SmartButton' }, { namePrefix: 'ESP' }, { namePrefix: 'SOB' }], optionalServices: [BLE_SERVICE] });
+  const hardware = await navigatorValue.bluetooth.requestDevice({ filters: [{ services: [BLE_SERVICE] }, { namePrefix: 'BTN' }, { namePrefix: 'SmartOrder' }, { namePrefix: 'SmartButton' }, { namePrefix: 'ESP' }, { namePrefix: 'SOB' }], optionalServices: [BLE_SERVICE] });
   try {
     let server = hardware.gatt;
     if (!server?.connected) {
@@ -65,7 +90,8 @@ export async function connectBle(navigatorValue: any) {
       catch (error) { if (hardware.gatt?.connected) server = hardware.gatt; else throw error; }
     }
     const info = await readBleIdentity(server);
-    return { hardware, server, info };
+    const networks = await readBleWifiNetworks(server);
+    return { hardware, server, info, networks };
   } catch (error) { if (hardware.gatt?.connected) hardware.gatt.disconnect(); throw error; }
 }
 export async function sendBleWifi(server: any, expectedDeviceId: string, ssid: string, password: string) {

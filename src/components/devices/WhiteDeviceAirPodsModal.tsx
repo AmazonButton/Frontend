@@ -6,7 +6,7 @@ import { Bluetooth, CheckCircle2, Loader2, RefreshCw, Wifi, X } from 'lucide-rea
 import { api } from '../../services/api';
 import { useAuth } from '../../context/AuthContext';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
-import { connectBle, finishPairedProduct, DEVICE_SYNC_EVENT, deviceData, deviceId, deviceProductIds, readConnectionDraft, readScopedDevice, rememberBleReceipt, saveConnectionDraft, saveDeviceProduct, sendBleWifi } from '../../services/device-connection';
+import { connectBle, finishPairedProduct, DEVICE_SYNC_EVENT, deviceData, deviceId, deviceProductIds, readConnectionDraft, readScopedDevice, rememberBleReceipt, rescanBleWifiNetworks, saveConnectionDraft, saveDeviceProduct, sendBleWifi } from '../../services/device-connection';
 import { clearPairingProgress, savePairingProgress, confirmAtomicPairing, createPairingSession, loadPairingStore, lookupPairingDevice, pairingError, parsePairingInput, readOwnedPairedDevice, verifyPairingSession } from '../../pages/customer/device-pairing.mjs';
 
 interface WhiteDeviceAirPodsModalProps {
@@ -29,6 +29,8 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   const [selectedProductId, setSelectedProductId] = useState('');
   const [buttonName, setButtonName] = useState('');
   const [ssid, setSsid] = useState('');
+  const [scannedNetworks, setScannedNetworks] = useState<string[]>([]);
+  const [manualSsidMode, setManualSsidMode] = useState(false);
   const [wifiPassword, setWifiPassword] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
@@ -57,7 +59,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   useEffect(() => {
     alive.current = isOpen; generation.current++;
     if (isOpen) {
-      setStep('DISCOVER'); setRecord(null); setSession(null); setPairCode(''); setError(''); setNotice(''); setCatalog([]); setBusy(''); setUncertain(false); locked.current = false; confirmationSent.current = false;
+      setStep('DISCOVER'); setRecord(null); setSession(null); setPairCode(''); setError(''); setNotice(''); setCatalog([]); setScannedNetworks([]); setManualSsidMode(false); setSsid(''); setWifiPassword(''); setBusy(''); setUncertain(false); locked.current = false; confirmationSent.current = false;
       try { setManualCode(readConnectionDraft(localStorage, user) || ''); } catch { setManualCode(''); }
     }
     return () => { alive.current = false; generation.current++; connection.current?.hardware?.gatt?.disconnect(); connection.current = null; };
@@ -77,6 +79,12 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
       const found = await connectBle(navigator);
       if (!active()) { found.hardware.gatt.disconnect(); return; }
       connection.current?.hardware?.gatt?.disconnect(); connection.current = found; code = found.info.deviceId;
+      const list = Array.isArray(found.networks) ? found.networks : [];
+      setScannedNetworks(list);
+      if (list.length > 0) {
+        setManualSsidMode(false);
+        setSsid(prev => (prev && list.includes(prev) ? prev : list[0]));
+      }
     }
     if (!code) throw new Error('Nhập mã nút hoặc kết nối Bluetooth để đọc mã thiết bị.');
     const lookup = await lookupPairingDevice(api, code);
@@ -157,6 +165,22 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     setWifiPassword(''); setNotice('Đã gửi cấu hình tới đúng nút qua Bluetooth. Chờ nút khởi động lại và heartbeat để xác nhận kết nối Internet; nút và sản phẩm vẫn được giữ nguyên.');
     if (record.isClaimed) publish(record);
   });
+  const rescanWifi = async () => run('scan', async active => {
+    if (!connection.current?.server?.connected) {
+      throw new Error('Hãy kết nối Bluetooth tới nút trước khi quét Wi-Fi.');
+    }
+    const list = await rescanBleWifiNetworks(connection.current.server);
+    if (!active()) return;
+    setScannedNetworks(list);
+    if (list.length > 0) {
+      setManualSsidMode(false);
+      setSsid(list[0]);
+      setNotice(`Đã quét được ${list.length} mạng Wi-Fi 2.4GHz từ nút ${record?.deviceId || ''}.`);
+    } else {
+      setManualSsidMode(true);
+      setNotice('Nút chưa tìm thấy mạng Wi-Fi nào. Bạn có thể nhập tên Wi-Fi thủ công.');
+    }
+  });
   if (!isOpen) return null;
   const selected = catalog.find(p => String(p.productId || p.id) === selectedProductId);
   return createPortal(<div
@@ -175,7 +199,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
       {step === 'DISCOVER' && <div className="space-y-4">{customer && <Link to="/customer/pair-device" onClick={onClose} className={secondary}>Khôi phục / kiểm tra ghép nối đã gửi</Link>}<button type="button" disabled={!!busy} onClick={() => void identify(true)} className={primary + ' w-full'}>{busy ? <Loader2 size={18} className="motion-safe:animate-spin" /> : <Bluetooth size={18} />}Tìm & kết nối Bluetooth</button><form onSubmit={event => { event.preventDefault(); void identify(false); }}><label className="block text-sm">Hoặc kiểm tra mã nút đã có<input value={manualCode} onChange={e => setManualCode(e.target.value)} className={field} required disabled={!!busy} autoComplete="off" /></label><button disabled={!!busy} className={secondary + ' mt-3'}>Kiểm tra nút trên hệ thống</button></form></div>}
       {step === 'PAIRING' && <div className="space-y-4"><p className="text-sm leading-6">Nút đang thuộc cửa hàng cấp phát. Ghép nối bằng mã do cửa hàng cung cấp để giữ đúng nút và đúng cửa hàng.</p><label className="block text-sm">Mã ghép nối hoặc nội dung QR<input value={pairCode} onChange={e => setPairCode(e.target.value)} className={field} disabled={!!busy || uncertain} autoComplete="off" /></label><button type="button" disabled={!!busy || !pairCode.trim() || uncertain} onClick={() => void pairCustomer()} className={primary}>Kiểm tra mã ghép nối</button>{uncertain && <Link to={'/customer/pair-device?deviceId=' + encodeURIComponent(record.deviceId)} onClick={onClose} className={secondary}>Mở trang kiểm tra ghép nối</Link>}</div>}
       {step === 'IDENTIFIED' && !customer && <div className="space-y-4"><CheckCircle2 className="h-9 w-9 text-[#287DA8]" /><h3 className="font-semibold">Đã đối chiếu ID với kho cửa hàng</h3><p className="text-sm leading-6 text-slate-500">Kết nối này chỉ nhận diện nút trong lô được cấp, không kích hoạt, không đổi Wi-Fi hoặc sản phẩm của khách.</p><button type="button" className={primary} onClick={onClose}>Hoàn tất nhận diện</button></div>}
-      {customer && step === 'WIFI_CONFIG' && <div className="space-y-4"><p className="text-sm leading-6">{connection.current?.server?.connected ? `Đã kết nối Bluetooth với nút ${record?.deviceId}. Nhập Wi-Fi nhà bạn để nạp cho nút.` : 'Nút đã được lưu cho tài khoản của bạn. Giữ nút 5 giây rồi bấm kết nối Bluetooth bên dưới để nạp Wi-Fi nhà bạn.'}</p><button type="button" className={secondary} disabled={!!busy} onClick={() => void identify(true)}><Bluetooth size={16} />{connection.current?.server?.connected ? `Đã kết nối BLE (${record?.deviceId})` : 'Kết nối Bluetooth tới nút'}</button><label className="block text-sm">Tên Wi-Fi 2.4GHz<input value={ssid} onChange={e => setSsid(e.target.value)} className={field} disabled={!!busy} autoComplete="off" placeholder="Nhập tên Wi-Fi nhà bạn" /></label><label className="block text-sm">Mật khẩu Wi-Fi<input type="password" value={wifiPassword} onChange={e => setWifiPassword(e.target.value)} className={field} disabled={!!busy} autoComplete="new-password" placeholder="Nhập mật khẩu Wi-Fi" /></label><button type="button" className={primary} disabled={!!busy || !ssid.trim()} onClick={() => void deployWifi()}><Wifi size={16} />{busy === 'wifi' ? 'Đang gửi cấu hình…' : 'Gửi Wi-Fi tới nút'}</button><div className="flex flex-wrap gap-2"><button type="button" disabled={!!busy} className={secondary} onClick={() => void loadCatalog()}>Kiểm tra / chọn sản phẩm</button><button type="button" disabled={!!busy} className={secondary} onClick={onClose}>Hoàn tất & đóng</button></div></div>}
+      {customer && step === 'WIFI_CONFIG' && <div className="space-y-4"><p className="text-sm leading-6">{connection.current?.server?.connected ? `Đã kết nối Bluetooth với nút ${record?.deviceId}. Chọn Wi-Fi nhà bạn để nạp cho nút.` : 'Nút đã được lưu cho tài khoản của bạn. Giữ nút 5 giây rồi bấm kết nối Bluetooth bên dưới để nạp Wi-Fi nhà bạn.'}</p><div className="flex flex-wrap gap-2"><button type="button" className={secondary} disabled={!!busy} onClick={() => void identify(true)}><Bluetooth size={16} />{connection.current?.server?.connected ? `Đã kết nối BLE (${record?.deviceId})` : 'Kết nối Bluetooth tới nút'}</button>{connection.current?.server?.connected && <button type="button" className={secondary} disabled={!!busy} onClick={() => void rescanWifi()}><RefreshCw size={16} className={busy === 'scan' ? 'animate-spin' : ''} />{busy === 'scan' ? 'Đang quét…' : 'Quét lại Wi-Fi'}</button>}</div><label className="block text-sm">Tên Wi-Fi 2.4GHz{scannedNetworks.length > 0 && !manualSsidMode ? <select value={ssid} onChange={e => { if (e.target.value === '__MANUAL__') { setManualSsidMode(true); setSsid(''); } else setSsid(e.target.value); }} className={field} disabled={!!busy}>{scannedNetworks.map(net => <option key={net} value={net}>{net}</option>)}<option value="__MANUAL__">Nhập tên Wi-Fi khác (thủ công)…</option></select> : <input value={ssid} onChange={e => setSsid(e.target.value)} className={field} disabled={!!busy} autoComplete="off" placeholder="Nhập tên Wi-Fi nhà bạn" />}</label>{scannedNetworks.length > 0 && manualSsidMode && <button type="button" className="text-xs font-medium text-[#287DA8] underline" onClick={() => { setManualSsidMode(false); setSsid(scannedNetworks[0]); }}>Chọn lại từ danh sách Wi-Fi đã quét ({scannedNetworks.length})</button>}<label className="block text-sm">Mật khẩu Wi-Fi<input type="password" value={wifiPassword} onChange={e => setWifiPassword(e.target.value)} className={field} disabled={!!busy} autoComplete="new-password" placeholder="Nhập mật khẩu Wi-Fi" /></label><button type="button" className={primary} disabled={!!busy || !ssid.trim()} onClick={() => void deployWifi()}><Wifi size={16} />{busy === 'wifi' ? 'Đang gửi cấu hình…' : 'Gửi Wi-Fi tới nút'}</button><div className="flex flex-wrap gap-2"><button type="button" disabled={!!busy} className={secondary} onClick={() => void loadCatalog()}>Kiểm tra / chọn sản phẩm</button><button type="button" disabled={!!busy} className={secondary} onClick={onClose}>Hoàn tất & đóng</button></div></div>}
       {customer && step === 'SELECT_PRODUCT' && <div className="space-y-4"><label className="block text-sm">Tên nút<input value={buttonName} onChange={e => setButtonName(e.target.value)} className={field} maxLength={100} disabled={!!busy || confirmationSent.current} /></label><label className="block text-sm">Sản phẩm của cửa hàng cấp nút<select value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)} className={field} disabled={!!busy || confirmationSent.current}><option value="">Chọn sản phẩm</option>{catalog.map(p => <option key={p.productId || p.id} value={p.productId || p.id}>{p.productName || p.name}</option>)}</select></label>{selected && <p className="text-sm">{selected.productName || selected.name} · {Number(selected.basePrice ?? selected.price).toLocaleString('vi-VN')} ₫</p>}{confirmationSent.current ? <button type="button" disabled={!!busy} className={primary} onClick={() => void checkSaved()}><RefreshCw size={16} />Kiểm tra kết quả đã lưu</button> : <button type="button" disabled={!!busy || !selectedProductId || !buttonName.trim()} className={primary} onClick={() => void saveProduct()}>{busy === 'save' ? 'Đang lưu…' : customer && session ? 'Xác nhận lưu nút vào tài khoản' : 'Lưu sản phẩm cho đúng nút'}</button>}{!catalog.length && <p className="text-sm text-slate-500">Chưa có sản phẩm đang bán trong cửa hàng của nút.</p>}</div>}
       {customer && step === 'BOUND_SUCCESS' && <div className="space-y-4"><CheckCircle2 className="h-10 w-10 text-emerald-600" /><h3 className="font-semibold">Đã xác nhận dữ liệu lưu trên máy chủ</h3><p className="text-sm">Nút {record.deviceId} · {record.product?.name || record.products?.[0]?.productName || 'Sản phẩm đã lưu'}</p><p className="text-sm text-slate-500">Bạn có thể tải lại trang. Nút giữ nguyên ID, cửa hàng và sản phẩm; trạng thái mạng được cập nhật riêng.</p><button type="button" disabled={!!busy} className={secondary} onClick={() => setStep('WIFI_CONFIG')}>Kết nối Wi-Fi cho nút này</button><button type="button" className={primary} onClick={onClose}>Hoàn tất & đóng</button></div>}
       {!!busy && <p role="status" className="mt-4 flex items-center gap-2 text-sm text-[#287DA8]"><Loader2 size={16} className="motion-safe:animate-spin" />Đang kiểm tra dữ liệu thực tế…</p>}
