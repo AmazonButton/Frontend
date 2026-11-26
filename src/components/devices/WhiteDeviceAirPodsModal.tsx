@@ -125,6 +125,11 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   });
   const loadCatalog = async () => run('catalog', async active => {
     if (!customer || !record) return;
+    if (!record.isClaimed) {
+      setStep('PAIRING');
+      setNotice('Nút chưa được ghép vào tài khoản của bạn. Nhập mã ghép nối của cửa hàng để nhận nút và chọn sản phẩm.');
+      return;
+    }
     const current = await readScopedDevice(api, record.deviceId, user);
     const store = deviceData(await api.get(`/stores/${encodeURIComponent(current.storeId)}`));
     if (String(store.storeId || store.id) !== String(current.storeId) || store.status !== 'ACTIVE') throw new Error('Cửa hàng của nút chưa sẵn sàng.');
