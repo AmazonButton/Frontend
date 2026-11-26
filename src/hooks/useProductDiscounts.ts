@@ -42,14 +42,6 @@ export function useProductDiscounts(productIds: string[]) {
     const onStorage = (event: StorageEvent) => {
       if (event.key === 'smart_order_catalog_changed') onChange();
     };
-    let lastTouch = 0;
-    const onTouch = () => {
-      const currentTime = Date.now();
-      if (currentTime - lastTouch >= 4000) {
-        lastTouch = currentTime;
-        onChange();
-      }
-    };
     const socket = getSocket();
     const socketEvents = ['CATALOG_UPDATED', 'PRODUCT_UPDATED', 'connect'];
     socketEvents.forEach(event => socket.on(event, onChange));
@@ -57,10 +49,9 @@ export function useProductDiscounts(productIds: string[]) {
     window.addEventListener('storage', onStorage);
     window.addEventListener('focus', onChange);
     window.addEventListener('pageshow', onChange);
-    window.addEventListener('touchstart', onTouch, { passive: true } as any);
     document.addEventListener('visibilitychange', onChange);
-    // The discount API currently has no broadcast event across devices.
-    const timer = window.setInterval(() => { if (!running) onChange(); }, 15000);
+    // Socket.IO handles real-time updates; keep a light 120s fallback poll only.
+    const timer = window.setInterval(() => { if (!running) onChange(); }, 120000);
     onChange();
     return () => {
       cancelled = true;
@@ -70,7 +61,6 @@ export function useProductDiscounts(productIds: string[]) {
       window.removeEventListener('storage', onStorage);
       window.removeEventListener('focus', onChange);
       window.removeEventListener('pageshow', onChange);
-      window.removeEventListener('touchstart', onTouch);
       document.removeEventListener('visibilitychange', onChange);
     };
   }, [ids]);

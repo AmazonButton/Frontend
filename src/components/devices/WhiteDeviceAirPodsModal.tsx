@@ -85,8 +85,10 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     try { saveConnectionDraft(localStorage, user, lookup); } catch { setNotice('Trình duyệt chưa lưu được tiến trình. Thiết bị đã có trên máy chủ vẫn được giữ nguyên.'); }
     setManualCode(lookup.deviceId);
     if (customer && !lookup.isClaimed) {
-      setRecord(lookup); setStep('PAIRING');
-      setNotice('Đã nhận diện đúng nút. Nhập mã ghép nối của cửa hàng để lưu nút vào tài khoản của bạn.');
+      setRecord(lookup); setStep('WIFI_CONFIG');
+      setNotice(ble
+        ? `Đã kết nối nút ${lookup.deviceId}. Nhập tên Wi-Fi 2.4GHz và mật khẩu để nạp trực tiếp cho nút.`
+        : `Đã nhận diện nút ${lookup.deviceId}. Kết nối Bluetooth tới nút rồi nhập Wi-Fi 2.4GHz để nạp.`);
       return;
     }
     const saved = await readScopedDevice(api, lookup.deviceId, user);
@@ -146,13 +148,14 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   });
   const deployWifi = async () => run('wifi', async active => {
     if (!customer || !record) return;
-    // Verify ownership before transmitting credentials to the physical device.
-    const saved = await readScopedDevice(api, record.deviceId, user);
+    const targetDeviceId = record.isClaimed
+      ? (await readScopedDevice(api, record.deviceId, user)).deviceId
+      : record.deviceId;
     if (!active()) return;
-    await sendBleWifi(connection.current?.server, saved.deviceId, ssid, wifiPassword);
+    await sendBleWifi(connection.current?.server, targetDeviceId, ssid, wifiPassword);
     if (!active()) return;
     setWifiPassword(''); setNotice('Đã gửi cấu hình tới đúng nút qua Bluetooth. Chờ nút khởi động lại và heartbeat để xác nhận kết nối Internet; nút và sản phẩm vẫn được giữ nguyên.');
-    publish(saved);
+    if (record.isClaimed) publish(record);
   });
   if (!isOpen) return null;
   const selected = catalog.find(p => String(p.productId || p.id) === selectedProductId);

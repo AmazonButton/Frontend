@@ -18,15 +18,18 @@ export function recordRateLimit(error: any): number {
   const headers = error?.response?.headers;
   const read = (name: string) => headers?.get?.(name) ?? headers?.[name] ?? headers?.[name.toLowerCase()];
   const retryAfter = read('retry-after');
-  let delay = 60000;
+  let delay = 5000;
   if (retryAfter != null && String(retryAfter).trim()) {
     const seconds = Number(retryAfter);
     const date = Date.parse(String(retryAfter));
-    if (Number.isFinite(seconds)) delay = Math.max(1000, seconds * 1000);
-    else if (Number.isFinite(date)) delay = Math.max(1000, date - Date.now());
+    if (Number.isFinite(seconds)) delay = Math.min(15000, Math.max(1000, seconds * 1000));
+    else if (Number.isFinite(date)) delay = Math.min(15000, Math.max(1000, date - Date.now()));
   } else {
     const reset = Number(read('ratelimit-reset'));
-    if (Number.isFinite(reset) && reset > 0) delay = reset > Date.now() / 1000 ? (reset * 1000 - Date.now()) : reset * 1000;
+    if (Number.isFinite(reset) && reset > 0) {
+      const raw = reset > Date.now() / 1000 ? (reset * 1000 - Date.now()) : reset * 1000;
+      delay = Math.min(15000, Math.max(1000, raw));
+    }
   }
   return deferApiRequests(delay);
 }
@@ -44,5 +47,16 @@ export function apiCooldownError(config?: any): any {
 }
 
 export function throwIfApiCoolingDown(config?: any) {
+  const url = String(config?.url || '');
+  // Không để lỗi 429 từ request nền (như /discounts) khóa các thao tác chính của người dùng
+  if (
+    url.includes('/devices/') ||
+    url.includes('/provisioning/') ||
+    url.includes('/auth/') ||
+    url.includes('/orders') ||
+    url.includes('/payments')
+  ) {
+    return;
+  }
   if (getApiRetryUntil()) throw apiCooldownError(config);
 }
