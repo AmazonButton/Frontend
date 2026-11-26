@@ -35,6 +35,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   const [showWifiPassword, setShowWifiPassword] = useState(false);
   const [wifiVerifiedIp, setWifiVerifiedIp] = useState('');
   const [wifiCheckError, setWifiCheckError] = useState('');
+  const [bleBattery, setBleBattery] = useState<{ battery: number; voltage?: number } | null>(null);
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -62,7 +63,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   useEffect(() => {
     alive.current = isOpen; generation.current++;
     if (isOpen) {
-      setStep('DISCOVER'); setRecord(null); setSession(null); setPairCode(''); setError(''); setNotice(''); setCatalog([]); setScannedNetworks([]); setManualSsidMode(false); setSsid(''); setWifiPassword(''); setShowWifiPassword(false); setWifiVerifiedIp(''); setWifiCheckError(''); setBusy(''); setUncertain(false); locked.current = false; confirmationSent.current = false;
+      setStep('DISCOVER'); setRecord(null); setSession(null); setPairCode(''); setError(''); setNotice(''); setCatalog([]); setScannedNetworks([]); setManualSsidMode(false); setSsid(''); setWifiPassword(''); setShowWifiPassword(false); setWifiVerifiedIp(''); setWifiCheckError(''); setBleBattery(null); setBusy(''); setUncertain(false); locked.current = false; confirmationSent.current = false;
       try { setManualCode(readConnectionDraft(localStorage, user) || ''); } catch { setManualCode(''); }
     }
     return () => { alive.current = false; generation.current++; connection.current?.hardware?.gatt?.disconnect(); connection.current = null; };
@@ -82,6 +83,12 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
       const found = await connectBle(navigator);
       if (!active()) { found.hardware.gatt.disconnect(); return; }
       connection.current?.hardware?.gatt?.disconnect(); connection.current = found; code = found.info.deviceId;
+      if (typeof found.info?.battery === 'number') {
+        setBleBattery({
+          battery: found.info.battery,
+          voltage: typeof found.info?.voltage === 'number' ? found.info.voltage : undefined,
+        });
+      }
       const list = Array.isArray(found.networks) ? found.networks : [];
       setScannedNetworks(list);
       if (list.length > 0) {
@@ -271,7 +278,10 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
             </span>
             <div>
               <p className="text-sm font-semibold text-slate-900 dark:text-white">{connection.current?.server?.connected ? `Đã kết nối BLE · ${record?.deviceId}` : 'Chưa kết nối Bluetooth'}</p>
-              <p className="text-xs text-slate-500 dark:text-zinc-400">{connection.current?.server?.connected ? 'Chọn Wi-Fi 2.4GHz bên dưới và nhập mật khẩu' : 'Giữ nút 5 giây rồi bấm Kết nối BLE'}</p>
+              <p className="text-xs text-slate-500 dark:text-zinc-400">
+                {bleBattery ? `Pin mạch: ${bleBattery.battery}%${bleBattery.voltage ? ` (${bleBattery.voltage.toFixed(2)}V)` : ''} · ` : ''}
+                {connection.current?.server?.connected ? 'Chọn Wi-Fi 2.4GHz bên dưới và nhập mật khẩu' : 'Giữ nút 5 giây rồi bấm Kết nối BLE'}
+              </p>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
