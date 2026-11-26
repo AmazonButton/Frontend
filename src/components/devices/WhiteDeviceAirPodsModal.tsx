@@ -209,15 +209,18 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
             setNotice(`Kết nối Wi-Fi "${ssid.trim()}" thành công${result.ip ? ` (${result.ip})` : ''}! Chọn sản phẩm của cửa hàng để gán cho nút.`);
             return;
           }
-        } catch {
-          // Nút chưa claim vào tài khoản Khách -> giữ màn hình Wi-Fi thành công để Khách bấm ghép nối nếu muốn
+        } catch (catalogErr: any) {
+          if (active()) {
+            setNotice(`Kết nối Wi-Fi "${ssid.trim()}" thành công${result.ip ? ` (${result.ip})` : ''}! ${pairingError(catalogErr)}`);
+          }
+          return;
         }
         if (active()) {
           setNotice(`Kết nối Wi-Fi "${ssid.trim()}" thành công${result.ip ? ` (IP: ${result.ip})` : ''}! Bấm "Kiểm tra / chọn sản phẩm" để chọn sản phẩm cho nút.`);
         }
       } else {
         setWifiPassword('');
-        setNotice('Đã gửi cấu hình tới đúng nút qua Bluetooth. Chờ nút khởi động lại để xác nhận kết nối Internet.');
+        setNotice('Đã gửi Wi-Fi tới nút nhưng chưa nhận được phản hồi xác nhận từ mạch (hãy chắc chắn bạn đã Upload bản TanTai.ino mới nhất). Bạn vẫn có thể bấm "Kiểm tra / chọn sản phẩm" bên dưới.');
         if (isOwnedRecord(record)) publish(record);
       }
     } catch (err: any) {
