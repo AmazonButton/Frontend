@@ -198,12 +198,28 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
       if (result?.status === 'WIFI_CONNECTED') {
         setWifiPassword('');
         setWifiVerifiedIp(result.ip || 'OK');
-        setNotice(`Kết nối Wi-Fi "${ssid.trim()}" thành công${result.ip ? ` (IP: ${result.ip})` : ''}! Nút đã sẵn sàng đặt hàng.`);
+        if (isOwnedRecord(record)) publish(record);
+        try {
+          const current = await readScopedDevice(api, record.deviceId, user);
+          const store = deviceData(await api.get(`/stores/${encodeURIComponent(current.storeId)}`));
+          if (active() && String(store.storeId || store.id) === String(current.storeId) && store.status === 'ACTIVE') {
+            setRecord({ ...current, isClaimed: true });
+            setCatalog((store.products || []).filter((p: any) => p.status === 'ACTIVE' && (!p.storeId || String(p.storeId) === String(current.storeId))));
+            setStep('SELECT_PRODUCT');
+            setNotice(`Kết nối Wi-Fi "${ssid.trim()}" thành công${result.ip ? ` (${result.ip})` : ''}! Chọn sản phẩm của cửa hàng để gán cho nút.`);
+            return;
+          }
+        } catch {
+          // Nút chưa claim vào tài khoản Khách -> giữ màn hình Wi-Fi thành công để Khách bấm ghép nối nếu muốn
+        }
+        if (active()) {
+          setNotice(`Kết nối Wi-Fi "${ssid.trim()}" thành công${result.ip ? ` (IP: ${result.ip})` : ''}! Bấm "Kiểm tra / chọn sản phẩm" để chọn sản phẩm cho nút.`);
+        }
       } else {
         setWifiPassword('');
         setNotice('Đã gửi cấu hình tới đúng nút qua Bluetooth. Chờ nút khởi động lại để xác nhận kết nối Internet.');
+        if (isOwnedRecord(record)) publish(record);
       }
-      if (isOwnedRecord(record)) publish(record);
     } catch (err: any) {
       if (active()) {
         setNotice('');
@@ -350,7 +366,52 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
           <button type="button" disabled={!!busy} className={secondary} onClick={onClose}>Hoàn tất & đóng</button>
         </div>
       </div>}
-      {customer && step === 'SELECT_PRODUCT' && <div className="space-y-4"><label className="block text-sm">Tên nút<input value={buttonName} onChange={e => setButtonName(e.target.value)} className={field} maxLength={100} disabled={!!busy || confirmationSent.current} /></label><label className="block text-sm">Sản phẩm của cửa hàng cấp nút<select value={selectedProductId} onChange={e => setSelectedProductId(e.target.value)} className={field} disabled={!!busy || confirmationSent.current}><option value="">Chọn sản phẩm</option>{catalog.map(p => <option key={p.productId || p.id} value={p.productId || p.id}>{p.productName || p.name}</option>)}</select></label>{selected && <p className="text-sm">{selected.productName || selected.name} · {Number(selected.basePrice ?? selected.price).toLocaleString('vi-VN')} ₫</p>}{confirmationSent.current ? <button type="button" disabled={!!busy} className={primary} onClick={() => void checkSaved()}><RefreshCw size={16} />Kiểm tra kết quả đã lưu</button> : <button type="button" disabled={!!busy || !selectedProductId || !buttonName.trim()} className={primary} onClick={() => void saveProduct()}>{busy === 'save' ? 'Đang lưu…' : customer && session ? 'Xác nhận lưu nút vào tài khoản' : 'Lưu sản phẩm cho đúng nút'}</button>}{!catalog.length && <p className="text-sm text-slate-500">Chưa có sản phẩm đang bán trong cửa hàng của nút.</p>}</div>}
+      {customer && step === 'SELECT_PRODUCT' && <div className="space-y-4">
+        {wifiVerifiedIp && (
+          <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
+            <CheckCircle2 size={15} className="shrink-0 text-emerald-600" />
+            <span>Wi-Fi đã kết nối{wifiVerifiedIp !== 'OK' ? ` (${wifiVerifiedIp})` : ''} · Chọn sản phẩm bên dưới</span>
+          </div>
+        )}
+        <label className="block text-sm font-semibold text-slate-800 dark:text-zinc-200">Tên nút<input value={buttonName} onChange={e => setButtonName(e.target.value)} className={field} maxLength={100} disabled={!!busy || confirmationSent.current} /></label>
+        <div className="space-y-2">
+          <span className="block text-sm font-semibold text-slate-800 dark:text-zinc-200">Sản phẩm của cửa hàng ({catalog.length})</span>
+          {catalog.length > 0 ? (
+            <div className="max-h-60 space-y-2 overflow-y-auto rounded-2xl border border-slate-200 bg-slate-50/60 p-2 dark:border-zinc-800 dark:bg-zinc-950/40">
+              {catalog.map(p => {
+                const pid = String(p.productId || p.id);
+                const activeProd = selectedProductId === pid;
+                const priceNum = Number(p.basePrice ?? p.price);
+                return (
+                  <button
+                    key={pid}
+                    type="button"
+                    disabled={!!busy || confirmationSent.current}
+                    onClick={() => setSelectedProductId(pid)}
+                    className={`flex w-full items-center justify-between gap-3 rounded-xl p-2.5 text-left transition-all ${activeProd ? 'border border-[#287DA8] bg-white shadow-sm dark:bg-zinc-900' : 'border border-transparent hover:bg-white/80 dark:hover:bg-zinc-900/60'}`}
+                  >
+                    <div className="flex min-w-0 items-center gap-3">
+                      {p.thumbnailUrl || p.imageUrl ? (
+                        <img src={p.thumbnailUrl || p.imageUrl} alt={p.productName || p.name} className="h-11 w-11 shrink-0 rounded-lg border border-slate-100 object-cover" />
+                      ) : (
+                        <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-sky-50 text-[#287DA8]"><Wifi size={18} /></span>
+                      )}
+                      <div className="min-w-0">
+                        <p className={`truncate text-sm ${activeProd ? 'font-bold text-[#287DA8] dark:text-sky-300' : 'font-medium text-slate-800 dark:text-zinc-200'}`}>{p.productName || p.name}</p>
+                        <p className="text-xs font-semibold text-slate-500 dark:text-zinc-400">{Number.isFinite(priceNum) ? `${priceNum.toLocaleString('vi-VN')} ₫` : ''}</p>
+                      </div>
+                    </div>
+                    {activeProd && <Check size={18} className="shrink-0 text-[#287DA8]" />}
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <p className="rounded-xl border border-slate-200 p-3 text-sm text-slate-500">Chưa có sản phẩm đang bán trong cửa hàng của nút.</p>
+          )}
+        </div>
+        {confirmationSent.current ? <button type="button" disabled={!!busy} className={`${primary} w-full`} onClick={() => void checkSaved()}><RefreshCw size={16} />Kiểm tra kết quả đã lưu</button> : <button type="button" disabled={!!busy || !selectedProductId || !buttonName.trim()} className={`${primary} w-full`} onClick={() => void saveProduct()}>{busy === 'save' ? 'Đang lưu…' : customer && session ? 'Xác nhận lưu nút vào tài khoản' : 'Lưu sản phẩm cho nút'}</button>}
+      </div>}
       {customer && step === 'BOUND_SUCCESS' && <div className="space-y-4"><CheckCircle2 className="h-10 w-10 text-emerald-600" /><h3 className="font-semibold">Đã xác nhận dữ liệu lưu trên máy chủ</h3><p className="text-sm">Nút {record.deviceId} · {record.product?.name || record.products?.[0]?.productName || 'Sản phẩm đã lưu'}</p><p className="text-sm text-slate-500">Bạn có thể tải lại trang. Nút giữ nguyên ID, cửa hàng và sản phẩm; trạng thái mạng được cập nhật riêng.</p><button type="button" disabled={!!busy} className={secondary} onClick={() => setStep('WIFI_CONFIG')}>Kết nối Wi-Fi cho nút này</button><button type="button" className={primary} onClick={onClose}>Hoàn tất & đóng</button></div>}
       {!!busy && <p role="status" className="mt-4 flex items-center gap-2 text-sm text-[#287DA8]"><Loader2 size={16} className="motion-safe:animate-spin" />Đang kiểm tra dữ liệu thực tế…</p>}
     </motion.section>
