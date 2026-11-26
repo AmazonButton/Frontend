@@ -127,14 +127,12 @@ export async function sendBleWifi(
     };
     const timer = setTimeout(() => {
       finish(() => resolve({ deviceId: expectedDeviceId, status: 'CREDENTIALS_SENT' }));
-    }, 18000);
-    const onValue = (event: any) => {
-      const msg = new TextDecoder().decode(event?.target?.value).trim();
+    }, 25000);
+    const handleMessage = (msg: string) => {
       if (!msg) return;
       if (msg === 'CHECKING' || msg === 'CONFIG_OK') {
         onStatus?.('Nút đang thử kết nối Wi-Fi để kiểm tra mật khẩu...');
         if (msg === 'CONFIG_OK') {
-          // Firmware cũ chỉ báo CONFIG_OK rồi restart ngay
           setTimeout(() => finish(() => resolve({ deviceId: expectedDeviceId, status: 'CREDENTIALS_SENT' })), 1200);
         }
         return;
@@ -147,15 +145,26 @@ export async function sendBleWifi(
       if (msg.startsWith('WIFI_FAIL')) {
         const errMessage = msg.includes('KHONG_TIM_THAY_SSID')
           ? `Nút không tìm thấy mạng Wi-Fi "${ssid.trim()}" (lưu ý nút chỉ hỗ trợ Wi-Fi 2.4GHz).`
-          : 'Sai mật khẩu Wi-Fi hoặc không thể kết nối. Vui lòng kiểm tra lại mật khẩu và thử lại!';
+          : 'Đã nhập sai mật khẩu Wi-Fi hoặc không thể kết nối. Vui lòng kiểm tra lại mật khẩu!';
         finish(() => reject(new Error(errMessage)));
       }
     };
+    const onValue = (event: any) => {
+      handleMessage(new TextDecoder().decode(event?.target?.value).trim());
+    };
+    let pollTimer: any = null;
     if (statusChar) {
       statusChar.addEventListener('characteristicvaluechanged', onValue);
+      pollTimer = setInterval(async () => {
+        try {
+          const val = await statusChar.readValue();
+          handleMessage(new TextDecoder().decode(val).trim());
+        } catch {}
+      }, 2500);
     }
     cleanup = () => {
       clearTimeout(timer);
+      if (pollTimer) clearInterval(pollTimer);
       if (statusChar) {
         try { statusChar.removeEventListener('characteristicvaluechanged', onValue); } catch {}
       }

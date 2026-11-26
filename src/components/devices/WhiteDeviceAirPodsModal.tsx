@@ -34,6 +34,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   const [wifiPassword, setWifiPassword] = useState('');
   const [showWifiPassword, setShowWifiPassword] = useState(false);
   const [wifiVerifiedIp, setWifiVerifiedIp] = useState('');
+  const [wifiCheckError, setWifiCheckError] = useState('');
   const [busy, setBusy] = useState('');
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('');
@@ -61,7 +62,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   useEffect(() => {
     alive.current = isOpen; generation.current++;
     if (isOpen) {
-      setStep('DISCOVER'); setRecord(null); setSession(null); setPairCode(''); setError(''); setNotice(''); setCatalog([]); setScannedNetworks([]); setManualSsidMode(false); setSsid(''); setWifiPassword(''); setShowWifiPassword(false); setWifiVerifiedIp(''); setBusy(''); setUncertain(false); locked.current = false; confirmationSent.current = false;
+      setStep('DISCOVER'); setRecord(null); setSession(null); setPairCode(''); setError(''); setNotice(''); setCatalog([]); setScannedNetworks([]); setManualSsidMode(false); setSsid(''); setWifiPassword(''); setShowWifiPassword(false); setWifiVerifiedIp(''); setWifiCheckError(''); setBusy(''); setUncertain(false); locked.current = false; confirmationSent.current = false;
       try { setManualCode(readConnectionDraft(localStorage, user) || ''); } catch { setManualCode(''); }
     }
     return () => { alive.current = false; generation.current++; connection.current?.hardware?.gatt?.disconnect(); connection.current = null; };
@@ -180,27 +181,36 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   const deployWifi = async () => run('wifi', async active => {
     if (!customer || !record) return;
     setWifiVerifiedIp('');
+    setWifiCheckError('');
     const targetDeviceId = isOwnedRecord(record)
       ? (await readScopedDevice(api, record.deviceId, user)).deviceId
       : record.deviceId;
     if (!active()) return;
-    const result = await sendBleWifi(
-      connection.current?.server,
-      targetDeviceId,
-      ssid,
-      wifiPassword,
-      (statusText) => { if (active()) setNotice(statusText); },
-    );
-    if (!active()) return;
-    if (result?.status === 'WIFI_CONNECTED') {
-      setWifiPassword('');
-      setWifiVerifiedIp(result.ip || 'OK');
-      setNotice(`Kết nối Wi-Fi "${ssid.trim()}" thành công${result.ip ? ` (IP: ${result.ip})` : ''}! Nút đã sẵn sàng đặt hàng.`);
-    } else {
-      setWifiPassword('');
-      setNotice('Đã gửi cấu hình tới đúng nút qua Bluetooth. Chờ nút khởi động lại để xác nhận kết nối Internet.');
+    try {
+      const result = await sendBleWifi(
+        connection.current?.server,
+        targetDeviceId,
+        ssid,
+        wifiPassword,
+        (statusText) => { if (active()) setNotice(statusText); },
+      );
+      if (!active()) return;
+      if (result?.status === 'WIFI_CONNECTED') {
+        setWifiPassword('');
+        setWifiVerifiedIp(result.ip || 'OK');
+        setNotice(`Kết nối Wi-Fi "${ssid.trim()}" thành công${result.ip ? ` (IP: ${result.ip})` : ''}! Nút đã sẵn sàng đặt hàng.`);
+      } else {
+        setWifiPassword('');
+        setNotice('Đã gửi cấu hình tới đúng nút qua Bluetooth. Chờ nút khởi động lại để xác nhận kết nối Internet.');
+      }
+      if (isOwnedRecord(record)) publish(record);
+    } catch (err: any) {
+      if (active()) {
+        setNotice('');
+        setWifiCheckError(pairingError(err));
+      }
+      throw err;
     }
-    if (isOwnedRecord(record)) publish(record);
   });
   const rescanWifi = async () => run('scan', async active => {
     if (!connection.current?.server?.connected) {
@@ -317,6 +327,12 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
           </div>
         </label>
 
+        {wifiCheckError && (
+          <div role="alert" className="flex items-center gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5 text-xs font-semibold text-rose-700 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-200">
+            <X size={16} className="shrink-0 text-rose-600" />
+            <span>{wifiCheckError}</span>
+          </div>
+        )}
         {wifiVerifiedIp && (
           <div className="flex items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-3 py-2.5 text-xs font-medium text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200">
             <CheckCircle2 size={16} className="shrink-0 text-emerald-600" />
