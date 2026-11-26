@@ -28,6 +28,7 @@ import {
 } from 'lucide-react';
 import { adminPaymentRefundsService, PaymentRefundObligation } from '../../services/admin-payment-refunds';
 import { api } from '../../services/api';
+import { getSocket } from '../../services/socket';
 import { adminDate, adminField, adminMoney, adminSecondary, AdminWorkflowDialog, AdminWorkflowNotice } from '../../pages/admin/AdminWorkflowDialog';
 import { card, primaryButton } from '../../pages/operations/OperationPrimitives';
 
@@ -206,6 +207,13 @@ export const AdminRefundsWorkspace: React.FC = () => {
   useEffect(() => {
     void loadData(false, true);
 
+    const socket = getSocket();
+    const handleOrderRefunded = () => {
+      void loadData(true, true);
+    };
+    socket.on('ORDER_REFUNDED', handleOrderRefunded);
+    socket.on('order:refunded', handleOrderRefunded);
+
     const onVisible = () => {
       if (document.visibilityState === 'visible') {
         void loadData(true);
@@ -220,6 +228,8 @@ export const AdminRefundsWorkspace: React.FC = () => {
     }, 10000);
 
     return () => {
+      socket.off('ORDER_REFUNDED', handleOrderRefunded);
+      socket.off('order:refunded', handleOrderRefunded);
       document.removeEventListener('visibilitychange', onVisible);
       clearInterval(interval);
     };

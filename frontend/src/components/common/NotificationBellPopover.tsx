@@ -845,10 +845,31 @@ export const NotificationBellPopover: React.FC = () => {
       };
 
       const handleCancelled = (payload: any) => handleCustomerOrderStatus(normalizeOrderEvent(payload, 'ORDER_CANCELLED'));
+      const handleCustomerRefunded = (payload: any) => {
+        const orderNum = payload?.orderCode || payload?.orderNumber || (payload?.orderId ? `#${payload.orderId}` : 'đơn hàng');
+        const amountStr = payload?.refundAmount ? `${Number(payload.refundAmount).toLocaleString('vi-VN')} ₫` : '';
+        const title = 'Hoàn tiền đơn hàng thành công';
+        const newNotif: AppNotification = {
+          id: `refund_${payload?.obligationId || payload?.orderId || Date.now()}`,
+          type: 'ORDER_STATUS_CHANGED',
+          roleScope: 'CUSTOMER',
+          title,
+          orderNumber: orderNum,
+          orderId: payload?.orderId,
+          totalAmount: payload?.refundAmount,
+          reason: 'Khoản hoàn tiền qua PayOS đã được chi trả thành công về tài khoản ngân hàng.',
+          status: 'REFUNDED',
+          isRead: false,
+          timestamp: new Date().toISOString(),
+        };
+        setNotifications((prev) => [newNotif, ...prev.filter((n) => n.id !== newNotif.id)]);
+        toast.success(`Đơn hàng #${orderNum} đã hoàn tiền thành công ${amountStr ? `(${amountStr}) ` : ''}về tài khoản!`, { title, duration: notifDuration });
+      };
       const handleLocalEvent = (event: Event) => {
         const { type, payload } = (event as CustomEvent).detail;
         if (type === 'ORDER_CREATED') handleCustomerOrderCreated(payload);
         else if (type === 'ORDER_CANCELLED') handleCancelled(payload);
+        else if (type === 'ORDER_REFUNDED') handleCustomerRefunded(payload);
         else handleCustomerOrderStatus(payload);
       };
       window.addEventListener(ORDER_EVENT, handleLocalEvent);
@@ -859,6 +880,8 @@ export const NotificationBellPopover: React.FC = () => {
       socket.on('ORDER_DELIVERED', handleCustomerOrderStatus);
       socket.on('ORDER_CANCELLED', handleCancelled);
       socket.on('order:cancelled', handleCancelled);
+      socket.on('ORDER_REFUNDED', handleCustomerRefunded);
+      socket.on('order:refunded', handleCustomerRefunded);
 
       return () => {
         try { if (typeof unsubRentals === "function") unsubRentals(); } catch (_) {}
@@ -869,6 +892,8 @@ export const NotificationBellPopover: React.FC = () => {
         socket.off('ORDER_DELIVERED', handleCustomerOrderStatus);
         socket.off('ORDER_CANCELLED', handleCancelled);
         socket.off('order:cancelled', handleCancelled);
+        socket.off('ORDER_REFUNDED', handleCustomerRefunded);
+        socket.off('order:refunded', handleCustomerRefunded);
       };
     }
 
@@ -920,10 +945,34 @@ export const NotificationBellPopover: React.FC = () => {
         });
       };
 
+      const handleAdminRefundSettled = (payload: any) => {
+        const oblId = payload?.obligationId ? `#${payload.obligationId}` : '';
+        const orderCode = payload?.orderCode || payload?.orderNumber || '';
+        const amountStr = payload?.refundAmount ? `${Number(payload.refundAmount).toLocaleString('vi-VN')} ₫` : '';
+        const title = 'Đối soát hoàn tiền thành công';
+        const newNotif: AppNotification = {
+          id: `admin_refund_${payload?.obligationId || payload?.orderId || Date.now()}`,
+          type: 'SYSTEM',
+          roleScope: 'ADMIN',
+          title,
+          orderNumber: orderCode,
+          orderId: payload?.orderId,
+          totalAmount: payload?.refundAmount,
+          reason: `Nghĩa vụ hoàn tiền ${oblId} (${amountStr}) cho đơn ${orderCode} đã đối soát và tất toán thành công qua PayOS.`,
+          status: 'REFUNDED',
+          isRead: false,
+          timestamp: new Date().toISOString(),
+        };
+        setNotifications((prev) => [newNotif, ...prev.filter((n) => n.id !== newNotif.id)]);
+        toast.success(`Nghĩa vụ ${oblId} (${orderCode}) đã đối soát tất toán thành công!`, { title, duration: 6000 });
+      };
+
       socket.on('STORE_REGISTERED', handleStoreRegistered);
       socket.on('store:registered', handleStoreRegistered);
       socket.on('WITHDRAWAL_REQUESTED', handleWithdrawalRequested);
       socket.on('withdrawal:requested', handleWithdrawalRequested);
+      socket.on('ORDER_REFUNDED', handleAdminRefundSettled);
+      socket.on('order:refunded', handleAdminRefundSettled);
 
       return () => {
         try { if (typeof unsubRentals === "function") unsubRentals(); } catch (_) {}
@@ -931,6 +980,8 @@ export const NotificationBellPopover: React.FC = () => {
         socket.off('store:registered', handleStoreRegistered);
         socket.off('WITHDRAWAL_REQUESTED', handleWithdrawalRequested);
         socket.off('withdrawal:requested', handleWithdrawalRequested);
+        socket.off('ORDER_REFUNDED', handleAdminRefundSettled);
+        socket.off('order:refunded', handleAdminRefundSettled);
       };
     }
   }, [playOrderChime, playCancelChime, announceStoreOrder, user, storeId, isAdmin, isStore, isCustomer]);
