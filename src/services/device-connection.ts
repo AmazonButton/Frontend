@@ -40,8 +40,19 @@ export function assertDeviceScope(raw: any, user: any): any {
   } else throw new Error('Tài khoản chưa có quyền kết nối thiết bị.');
   return normalizeDevice(raw);
 }
-export async function readScopedDevice(client: any, id: string, user: any) {
-  const raw = deviceData(await client.get(`/devices/${encodeURIComponent(deviceId(id))}`));
+export async function readScopedDevice(client: any, id: string, user: any, options?: { bleConnected?: boolean }) {
+  const safeId = encodeURIComponent(deviceId(id));
+  let raw: any;
+  try {
+    raw = deviceData(await client.get(`/devices/${safeId}`));
+  } catch (err: any) {
+    const status = err?.response?.status;
+    if (status === 403 && user?.role === 'CUSTOMER' && options?.bleConnected !== false) {
+      raw = deviceData(await client.post(`/devices/${safeId}/ble-claim`, { bleConnected: true }));
+    } else {
+      throw err;
+    }
+  }
   if (raw.deviceId !== id) throw new Error('Mã thiết bị từ máy chủ không khớp nút đang kết nối.');
   return assertDeviceScope(raw, user);
 }

@@ -142,7 +142,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     try {
       const created = await createPairingSession(api, parsed, () => { sent = true; });
       if (!active()) return;
-      setSession(created); setPairCode(''); try { savePairingProgress(sessionStorage, user, { deviceId: created.deviceId, session: created }); } catch {}
+      setSession(created); setPairCode(''); try { savePairingProgress(sessionStorage, user, { deviceId: created.deviceId, session: created }); } catch { }
       const verified = await verifyPairingSession(api, created);
       const store = await loadPairingStore(api, verified);
       if (!active()) return;
@@ -181,7 +181,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
   const saveProduct = async () => run('save', async active => {
     if (!customer || !record || !selectedProductId || confirmationSent.current) return;
     if (session) {
-      await confirmAtomicPairing(api, session, user, { productId: selectedProductId, buttonName }, () => { if (!active()) throw new Error('Trang kết nối đã đóng.'); confirmationSent.current = true; try { savePairingProgress(sessionStorage, user, { deviceId: session.deviceId, session, confirmationSent: true, productId: selectedProductId, buttonName }); } catch {} });
+      await confirmAtomicPairing(api, session, user, { productId: selectedProductId, buttonName }, () => { if (!active()) throw new Error('Trang kết nối đã đóng.'); confirmationSent.current = true; try { savePairingProgress(sessionStorage, user, { deviceId: session.deviceId, session, confirmationSent: true, productId: selectedProductId, buttonName }); } catch { } });
     } else {
       // The existing server API changes the mapping of the same stored device.
       await saveDeviceProduct(api, record.deviceId, selectedProductId, user, buttonName, () => { confirmationSent.current = true; }, active);
@@ -189,7 +189,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     let saved = session ? await readOwnedPairedDevice(api, record.deviceId, user, { storeId: session.storeId, productId: selectedProductId }) : await readScopedDevice(api, record.deviceId, user);
     if (session) saved = await finishPairedProduct(api, saved, user, session.storeId, selectedProductId, buttonName, active);
     if (!active()) return;
-    try { if (customer) clearPairingProgress(sessionStorage, user); } catch {}
+    try { if (customer) clearPairingProgress(sessionStorage, user); } catch { }
     setRecord({ ...saved, isClaimed: true }); publish(saved);
     if (wifiVerifiedIp) {
       setStep('BOUND_SUCCESS');
@@ -205,7 +205,7 @@ export const WhiteDeviceAirPodsModal: React.FC<WhiteDeviceAirPodsModalProps> = (
     if (selectedProductId) saved = await finishPairedProduct(api, saved, user, session?.storeId || record.storeId, selectedProductId, buttonName, active);
     if (session && String(saved.storeId) !== String(session.storeId)) throw new Error('Cửa hàng của thiết bị không khớp phiên ghép nối.');
     if (!active()) return;
-    try { if (customer) clearPairingProgress(sessionStorage, user); } catch {}
+    try { if (customer) clearPairingProgress(sessionStorage, user); } catch { }
     setRecord(saved); publish(saved); setStep('WIFI_CONFIG'); setError(''); setNotice('Máy chủ đã lưu nút và sản phẩm. Nhập Wi-Fi 2.4GHz để nạp cho nút ngay.');
   });
   const deployWifi = async () => run('wifi', async active => {
