@@ -182,10 +182,10 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
                 {/* Gesture guide as minimalist outline tags */}
                 <div className="flex items-center gap-1.5 flex-wrap">
                   <span className="px-2 py-0.5 rounded-lg border border-slate-200/90 bg-slate-50/70 text-[10px] text-slate-600 font-medium">
-                    1 chạm: Bật
+                    1 chạm: Đặt đơn
                   </span>
                   <span className="px-2 py-0.5 rounded-lg border border-slate-200/90 bg-slate-50/70 text-[10px] text-slate-600 font-medium">
-                    2 chạm: Đặt
+                    2 chạm: Hủy đơn
                   </span>
                   <span className="px-2 py-0.5 rounded-lg border border-slate-200/90 bg-slate-50/70 text-[10px] text-slate-600 font-medium">
                     Giữ 5s: Wi-Fi
