@@ -17,7 +17,9 @@ export function deviceRuntime(device: any, now = Date.now()) {
   }
   if (device.canOrder !== true) return result('Chờ xác nhận', 'Chưa có xác nhận quyền đặt hàng từ máy chủ. Tải lại để kiểm tra.');
   const seen = Date.parse(device.lastSeenAt || device.updatedAt || '');
-  const recent = Number.isFinite(seen) && (now - seen) < DEVICE_HEARTBEAT_TTL_MS && (seen - now) < 60_000;
+  const recentUtc = Number.isFinite(seen) && Math.abs(now - seen) < DEVICE_HEARTBEAT_TTL_MS;
+  const recentVnShift = Number.isFinite(seen) && Math.abs(now + 7 * 3_600_000 - seen) < DEVICE_HEARTBEAT_TTL_MS;
+  const recent = recentUtc || recentVnShift;
   if (!recent) return result('Chờ kết nối', 'Chưa nhận được tín hiệu Internet gần đây. Kiểm tra nguồn và Wi-Fi của nút.', false, true);
   return result('Đang hoạt động', '', true, true);
 }
