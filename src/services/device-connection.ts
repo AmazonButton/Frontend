@@ -2,6 +2,8 @@
 export const BLE_SERVICE = '0000fff0-0000-1000-8000-00805f9b34fb';
 const BLE_INFO = '0000fff1-0000-1000-8000-00805f9b34fb';
 const BLE_WIFI = '0000fff2-0000-1000-8000-00805f9b34fb';
+const BLE_STATUS = '0000fff3-0000-1000-8000-00805f9b34fb';
+const BLE_SCAN = '0000fff4-0000-1000-8000-00805f9b34fb';
 export const DEVICE_SYNC_EVENT = 'sob_device_claimed_success';
 export function deviceData(response: any): any {
   if (response?.data?.success === false) throw new Error(response.data.message || 'Máy chủ từ chối thao tác thiết bị.');
@@ -38,8 +40,30 @@ export function assertDeviceScope(raw: any, user: any): any {
   } else throw new Error('Tài khoản chưa có quyền kết nối thiết bị.');
   return normalizeDevice(raw);
 }
-export async function readScopedDevice(client: any, id: string, user: any) {
-  const raw = deviceData(await client.get(`/devices/${encodeURIComponent(deviceId(id))}`));
+export async function readScopedDevice(client: any, id: string, user: any, options?: { bleConnected?: boolean }) {
+  const safeId = encodeURIComponent(deviceId(id));
+  let raw: any;
+  try {
+    raw = deviceData(await client.get(`/devices/${safeId}`));
+  } catch (err: any) {
+    const status = err?.response?.status;
+    if (status === 403 && user?.role === 'CUSTOMER' && options?.bleConnected !== false) {
+      raw = deviceData(await client.post(`/devices/${safeId}/ble-claim`, { bleConnected: true }));
+    } else {
+      throw err;
+    }
+  }
+  if (raw.deviceId !== id) throw new Error('Mã thiết bị từ máy chủ không khớp nút đang kết nối.');
+  return assertDeviceScope(raw, user);
+}
+export async function claimDeviceViaBle(client: any, id: string, user: any, buttonName?: string) {
+  if (user?.role !== 'CUSTOMER') throw new Error('Chỉ tài khoản khách hàng mới có thể liên kết nút qua Bluetooth.');
+  const raw = deviceData(
+    await client.post(`/devices/${encodeURIComponent(deviceId(id))}/ble-claim`, {
+      bleConnected: true,
+      ...(buttonName?.trim() ? { buttonName: buttonName.trim() } : {}),
+    }),
+  );
   if (raw.deviceId !== id) throw new Error('Mã thiết bị từ máy chủ không khớp nút đang kết nối.');
   return assertDeviceScope(raw, user);
 }
@@ -55,9 +79,33 @@ export async function readBleIdentity(server: any) {
   try { info = JSON.parse(text); } catch { throw new Error('Không đọc được danh tính nút từ Bluetooth. Không dùng tên Bluetooth thay mã thiết bị.'); }
   return { ...info, deviceId: deviceId(info?.deviceId) };
 }
+function parseWifiList(text: string): string[] {
+  return [...new Set(text.split(',').map(item => item.trim()).filter(Boolean))];
+}
+export async function readBleWifiNetworks(server: any): Promise<string[]> {
+  try {
+    const service = await bleService(server);
+    const characteristic = await service.getCharacteristic(BLE_SCAN);
+    const text = new TextDecoder().decode(await characteristic.readValue());
+    return parseWifiList(text);
+  } catch {
+    return [];
+  }
+}
+export async function rescanBleWifiNetworks(server: any): Promise<string[]> {
+  const service = await bleService(server);
+  const characteristic = await service.getCharacteristic(BLE_SCAN);
+  const cmd = new TextEncoder().encode('SCAN');
+  if (typeof characteristic.writeValueWithResponse === 'function') await characteristic.writeValueWithResponse(cmd);
+  else if (typeof characteristic.writeValueWithoutResponse === 'function') await characteristic.writeValueWithoutResponse(cmd);
+  else if (typeof characteristic.writeValue === 'function') await characteristic.writeValue(cmd);
+  await new Promise(resolve => setTimeout(resolve, 1600));
+  const text = new TextDecoder().decode(await characteristic.readValue());
+  return parseWifiList(text);
+}
 export async function connectBle(navigatorValue: any) {
   if (!navigatorValue?.bluetooth) throw new Error('Trình duyệt chưa hỗ trợ Web Bluetooth. Hãy dùng Chrome hoặc Edge có hỗ trợ Bluetooth.');
-  const hardware = await navigatorValue.bluetooth.requestDevice({ filters: [{ namePrefix: 'BTN' }, { namePrefix: 'SmartOrder' }, { namePrefix: 'SmartButton' }, { namePrefix: 'ESP' }, { namePrefix: 'SOB' }], optionalServices: [BLE_SERVICE] });
+  const hardware = await navigatorValue.bluetooth.requestDevice({ filters: [{ services: [BLE_SERVICE] }, { namePrefix: 'BTN' }, { namePrefix: 'SmartOrder' }, { namePrefix: 'SmartButton' }, { namePrefix: 'ESP' }, { namePrefix: 'SOB' }], optionalServices: [BLE_SERVICE] });
   try {
     let server = hardware.gatt;
     if (!server?.connected) {
@@ -65,22 +113,99 @@ export async function connectBle(navigatorValue: any) {
       catch (error) { if (hardware.gatt?.connected) server = hardware.gatt; else throw error; }
     }
     const info = await readBleIdentity(server);
-    return { hardware, server, info };
+    const networks = await readBleWifiNetworks(server);
+    return { hardware, server, info, networks };
   } catch (error) { if (hardware.gatt?.connected) hardware.gatt.disconnect(); throw error; }
 }
-export async function sendBleWifi(server: any, expectedDeviceId: string, ssid: string, password: string) {
+export async function sendBleWifi(
+  server: any,
+  expectedDeviceId: string,
+  ssid: string,
+  password: string,
+  onStatus?: (status: string) => void,
+) {
   if (!ssid.trim() || /[:\r\n]/.test(ssid) || /[\r\n]/.test(password)) throw new Error('Tên Wi-Fi không được trống, chứa dấu hai chấm hoặc xuống dòng; mật khẩu không được xuống dòng.');
   const identity = await readBleIdentity(server);
   if (identity.deviceId !== expectedDeviceId) throw new Error('Nút Bluetooth khác nút đang cấu hình. Chưa gửi thông tin Wi-Fi.');
   const service = await bleService(server);
   const characteristic = await service.getCharacteristic(BLE_WIFI);
+
+  let statusChar: any = null;
+  try {
+    statusChar = await service.getCharacteristic(BLE_STATUS);
+    await statusChar.startNotifications();
+  } catch {
+    statusChar = null;
+  }
+
+  let cleanup = () => {};
+  const verification = new Promise<{ deviceId: string; status: string; ip?: string }>((resolve, reject) => {
+    let settled = false;
+    const finish = (fn: () => void) => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      fn();
+    };
+    const timer = setTimeout(() => {
+      finish(() => resolve({ deviceId: expectedDeviceId, status: 'CREDENTIALS_SENT' }));
+    }, 25000);
+    const handleMessage = (msg: string) => {
+      if (!msg) return;
+      if (msg === 'CHECKING' || msg === 'CONFIG_OK') {
+        onStatus?.('Nút đang thử kết nối Wi-Fi để kiểm tra mật khẩu...');
+        if (msg === 'CONFIG_OK') {
+          setTimeout(() => finish(() => resolve({ deviceId: expectedDeviceId, status: 'CREDENTIALS_SENT' })), 1200);
+        }
+        return;
+      }
+      if (msg.startsWith('WIFI_OK')) {
+        const ip = msg.split(':')[1] || '';
+        finish(() => resolve({ deviceId: expectedDeviceId, status: 'WIFI_CONNECTED', ip }));
+        return;
+      }
+      if (msg.startsWith('WIFI_FAIL')) {
+        const errMessage = msg.includes('KHONG_TIM_THAY_SSID')
+          ? `Nút không tìm thấy mạng Wi-Fi "${ssid.trim()}" (lưu ý nút chỉ hỗ trợ Wi-Fi 2.4GHz).`
+          : 'Đã nhập sai mật khẩu Wi-Fi hoặc không thể kết nối. Vui lòng kiểm tra lại mật khẩu!';
+        finish(() => reject(new Error(errMessage)));
+      }
+    };
+    const onValue = (event: any) => {
+      handleMessage(new TextDecoder().decode(event?.target?.value).trim());
+    };
+    let pollTimer: any = null;
+    if (statusChar) {
+      statusChar.addEventListener('characteristicvaluechanged', onValue);
+      pollTimer = setInterval(async () => {
+        try {
+          const val = await statusChar.readValue();
+          handleMessage(new TextDecoder().decode(val).trim());
+        } catch {}
+      }, 2500);
+    }
+    cleanup = () => {
+      clearTimeout(timer);
+      if (pollTimer) clearInterval(pollTimer);
+      if (statusChar) {
+        try { statusChar.removeEventListener('characteristicvaluechanged', onValue); } catch {}
+      }
+    };
+  });
+
   // Firmware FFF2 splits at the first colon and saves the remaining bytes as
   // password. WIFI: and a trailing newline would corrupt those credentials.
   const payload = new TextEncoder().encode(`${ssid.trim()}:${password}`);
-  if (typeof characteristic.writeValueWithResponse === 'function') await characteristic.writeValueWithResponse(payload);
-  else if (typeof characteristic.writeValue === 'function') await characteristic.writeValue(payload);
-  else throw new Error('Nút không hỗ trợ ghi cấu hình Wi-Fi có xác nhận.');
-  return { deviceId: expectedDeviceId, status: 'CREDENTIALS_SENT' };
+  try {
+    if (typeof characteristic.writeValueWithResponse === 'function') await characteristic.writeValueWithResponse(payload);
+    else if (typeof characteristic.writeValue === 'function') await characteristic.writeValue(payload);
+    else throw new Error('Nút không hỗ trợ ghi cấu hình Wi-Fi có xác nhận.');
+    onStatus?.('Đã gửi thông tin Wi-Fi tới nút, đang chờ nút kiểm tra mật khẩu...');
+    return await verification;
+  } catch (err) {
+    cleanup();
+    throw err;
+  }
 }
 export async function saveDeviceProduct(client: any, id: string, productId: string, user: any, name: string, onSent = () => {}, canContinue = () => true) {
   const before = await readScopedDevice(client, id, user);

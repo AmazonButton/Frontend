@@ -1,6 +1,6 @@
 // Activation, ownership and order permission remain server controlled.
 // A BLE connection or a successful Wi-Fi write is never an Internet heartbeat.
-export const DEVICE_HEARTBEAT_TTL_MS = 25_000;
+export const DEVICE_HEARTBEAT_TTL_MS = 120_000;
 
 export function deviceRuntime(device: any, now = Date.now()) {
   const result = (label: string, hint: string, running = false, canOrder = false) => ({ label, hint, running, canOrder });
@@ -19,8 +19,10 @@ export function deviceRuntime(device: any, now = Date.now()) {
     return result('Chưa thể đặt hàng', device.canOrderReason || 'Quyền đặt hàng hoặc hợp đồng của nút chưa sẵn sàng.');
   }
   if (device.canOrder !== true) return result('Chờ xác nhận', 'Chưa có xác nhận quyền đặt hàng từ máy chủ. Tải lại để kiểm tra.');
-  const seen = Date.parse(device.lastSeenAt || '');
-  const recent = Number.isFinite(seen) && seen <= now && now - seen < DEVICE_HEARTBEAT_TTL_MS;
+  const seen = Date.parse(device.lastSeenAt || device.updatedAt || '');
+  const recentUtc = Number.isFinite(seen) && Math.abs(now - seen) < DEVICE_HEARTBEAT_TTL_MS;
+  const recentVnShift = Number.isFinite(seen) && Math.abs(now + 7 * 3_600_000 - seen) < DEVICE_HEARTBEAT_TTL_MS;
+  const recent = recentUtc || recentVnShift;
   if (!recent) return result('Chờ kết nối', 'Chưa nhận được tín hiệu Internet gần đây. Kiểm tra nguồn và Wi-Fi của nút.', false, true);
   return result('Đang hoạt động', '', true, true);
 }

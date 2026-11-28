@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { apiCooldownError, deferApiRequests, getApiRetryUntil, recordRateLimit, throwIfApiCoolingDown } from './request-backoff';
+import { apiCooldownError, clearApiCooldown, deferApiRequests, getApiRetryUntil, isUpstreamInfra429, recordRateLimit, throwIfApiCoolingDown } from './request-backoff';
 
 let cachedApiUrlKey = '';
 let cachedApiUrlValue = '';
@@ -295,7 +295,9 @@ export function isTransientConnectionError(error: any): boolean {
 }
 
 api.interceptors.request.use(async (config) => {
-  throwIfApiCoolingDown(config);
+  if (!isPublicAuthEndpoint(config.url)) {
+    throwIfApiCoolingDown(config);
+  }
   if (typeof isRecoverableRead === 'function' && isRecoverableRead(config)) {
     const scoped = config as any;
     if (scoped._readSessionMarker == null) scoped._readSessionMarker = apiSessionMarker();
@@ -377,13 +379,36 @@ api.interceptors.request.use(async (config) => {
   return config;
 });
 
-// A 429 pauses later requests; it is never retried automatically.
+// A genuine API 429 pauses later requests; upstream edge/hibernate 429s fail over without locking the browser.
 api.interceptors.response.use(
   response => response,
   async error => {
     const originalRequest = error.config;
     if (error.isLocalCooldown) return Promise.reject(error);
-    if (error.response?.status === 429) { recordRateLimit(error); return Promise.reject(apiCooldownError(originalRequest)); }
+    const isAuthEndpoint = isPublicAuthEndpoint(originalRequest?.url);
+    if (isUpstreamInfra429(error)) {
+      const retryCount = Number(originalRequest?._infra429RetryCount || 0);
+      if (originalRequest && retryCount < 2 && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
+        originalRequest._infra429RetryCount = retryCount + 1;
+        await new Promise(resolve => setTimeout(resolve, 300));
+        return api(originalRequest);
+      }
+      if (error.response && typeof error.response.data !== 'object') {
+        error.response.data = {
+          success: false,
+          code: 'UPSTREAM_NODE_HIBERNATING',
+          message: 'Một máy chủ nhánh đang khởi động lại, vui lòng bấm thử lại ngay.',
+        };
+      }
+      return Promise.reject(error);
+    }
+    if (error.response?.status === 429) {
+      if (isAuthEndpoint) {
+        return Promise.reject(error);
+      }
+      recordRateLimit(error);
+      return Promise.reject(apiCooldownError(originalRequest));
+    }
     if (!originalRequest) return Promise.reject(error);
     if (isRecoverableRead(originalRequest) && isTransientConnectionError(error)
       && !originalRequest._readRetried && (typeof navigator === 'undefined' || navigator.onLine !== false)) {
@@ -394,7 +419,6 @@ api.interceptors.response.use(
       if (getApiRetryUntil()) return Promise.reject(apiCooldownError(originalRequest));
       return api(originalRequest);
     }
-    const isAuthEndpoint = isPublicAuthEndpoint(originalRequest.url);
     const isMissingRoute404 =
       error.response?.status === 404 &&
       (!error.response?.data ||

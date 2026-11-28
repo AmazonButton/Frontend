@@ -303,6 +303,32 @@ export const StoreDashboard: React.FC = () => {
   const [newOrderAlert, setNewOrderAlert] = useState<any | null>(null);
   const [chartData, setChartData] = useState<any[]>([]);
   const cancelAlertTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const knownOrderIdsRef = useRef<Set<string>>(new Set());
+  const hasLoadedOrdersRef = useRef(false);
+
+  const triggerNewOrderAlert = (newOrder: any, normalizedEvent?: any) => {
+    playOrderChime();
+    const code = (newOrder as any)?.orderCode || newOrder?.orderNumber || newOrder?.id;
+    toast.success(`Đã nhận đơn hàng mới #${code}!`);
+    const rawNum =
+      newOrder?.orderNumber ||
+      newOrder?.orderCode ||
+      (newOrder?.id ? String(newOrder.id).slice(-6) : 'SOB');
+    const orderNumber = String(rawNum).replace(/^#/, '');
+    if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
+    statusUpdatesRef.current.clear();
+    setNewOrderAlert({
+      type: 'CREATE',
+      orderNumber,
+      customerName: normalizedEvent?.customerName || newOrder?.customerName || newOrder?.customer?.user?.fullName || 'Khách hàng',
+      customerPhone: newOrder?.customerPhone || normalizedEvent?.customerPhone,
+      productName: normalizedEvent?.productName || newOrder?.items?.[0]?.product?.name || newOrder?.items?.[0]?.productName || 'Nhu yếu phẩm',
+      quantity: normalizedEvent?.quantity || newOrder?.items?.[0]?.quantity || 1,
+      totalAmount: newOrder?.totalAmount ?? normalizedEvent?.totalAmount,
+      deliveryAddress: newOrder?.deliveryAddress || normalizedEvent?.deliveryAddress,
+      orderId: newOrder?.id || normalizedEvent?.orderId || normalizedEvent?.id,
+    });
+  };
 
   const fetchOrders = async () => {
     const revision = orderListRevision.current;
@@ -316,6 +342,19 @@ export const StoreDashboard: React.FC = () => {
           const pending = statusUpdatesRef.current.get(order.id);
           return pending ? { ...order, status: pending.displayStatus as Order['status'], orderStatus: pending.displayStatus } : order;
         });
+
+        // Detect newly arrived PENDING orders when Socket.IO missed ORDER_CREATED
+        if (hasLoadedOrdersRef.current) {
+          const newlyArrived = fetchedOrders.find(
+            (o) => o.id && !knownOrderIdsRef.current.has(String(o.id)) && String(o.status || '').toUpperCase() === 'PENDING'
+          );
+          if (newlyArrived) {
+            triggerNewOrderAlert(newlyArrived);
+          }
+        }
+        knownOrderIdsRef.current = new Set(fetchedOrders.map((o) => String(o.id)).filter(Boolean));
+        hasLoadedOrdersRef.current = true;
+
         setOrders(fetchedOrders);
         setChartData(buildChartDataFromOrders(fetchedOrders));
         try {
@@ -368,12 +407,12 @@ export const StoreDashboard: React.FC = () => {
       const newOrder = normalizedEvent.order || newOrderPayload;
       if (storeId && newOrder?.storeId && String(newOrder.storeId) !== storeId) return;
 
-      // 1. Phát âm thanh chuông "Ting Ting" thông báo
-      playOrderChime();
+      const orderId = String(newOrder.id || newOrder.orderId || '');
+      if (orderId) knownOrderIdsRef.current.add(orderId);
+      hasLoadedOrdersRef.current = true;
 
-      // 2. Chèn ngay đơn hàng mới lên đầu danh sách mà KHÔNG CẦN F5 tải lại trang
+      // 1. Chèn ngay đơn hàng mới lên đầu danh sách mà KHÔNG CẦN F5 tải lại trang
       setOrders((prevOrders) => {
-        const orderId = String(newOrder.id || newOrder.orderId || '');
         const exists = prevOrders.some(
           (o) => (orderId && o.id === orderId) || (newOrder.orderNumber && o.orderNumber === newOrder.orderNumber)
         );
@@ -385,31 +424,9 @@ export const StoreDashboard: React.FC = () => {
         return [safeOrder, ...prevOrders];
       });
 
-      // 3. Hiện toast thông báo góc màn hình
-      const code = (newOrder as any).orderCode || newOrder.orderNumber || newOrder.id;
-      // 3. Hiện toast thông báo góc màn hình
-      toast.success(`Đã nhận đơn hàng mới #${code}!`);
-
-      const rawNum =
-        newOrder?.orderNumber ||
-        newOrder?.orderCode ||
-        (newOrder?.id ? String(newOrder.id).slice(-6) : 'SOB');
-      const orderNumber = String(rawNum).replace(/^#/, '');
-
-      if (cancelAlertTimerRef.current) clearTimeout(cancelAlertTimerRef.current);
-      statusUpdatesRef.current.clear();
+      // 2. Phát âm thanh, toast & popup báo đơn mới
       ++orderListRevision.current;
-      setNewOrderAlert({
-        type: 'CREATE',
-        orderNumber,
-        customerName: normalizedEvent.customerName || newOrder?.customerName || newOrder?.customer?.user?.fullName || 'Khách hàng',
-        customerPhone: newOrder?.customerPhone || normalizedEvent.customerPhone,
-        productName: normalizedEvent.productName || newOrder?.items?.[0]?.product?.name || newOrder?.items?.[0]?.productName || 'Nhu yếu phẩm',
-        quantity: normalizedEvent.quantity || newOrder?.items?.[0]?.quantity || 1,
-        totalAmount: newOrder?.totalAmount ?? normalizedEvent.totalAmount,
-        deliveryAddress: newOrder?.deliveryAddress || normalizedEvent.deliveryAddress,
-        orderId: newOrder?.id || normalizedEvent.orderId || normalizedEvent.id,
-      });
+      triggerNewOrderAlert(newOrder, normalizedEvent);
 
       fetchOrders();
     };
@@ -529,11 +546,11 @@ export const StoreDashboard: React.FC = () => {
     socket.on('DEVICES_ALLOCATED', handleDevicesAllocated);
     socket.on('devices:allocated', handleDevicesAllocated);
 
-    // Socket.IO provides immediate updates; this is a low-frequency fallback if it disconnects.
+    // Socket.IO provides immediate updates; 5s fallback keeps Vercel/multi-instance dashboards synced.
     const pollTimer = setInterval(() => {
       if (typeof document !== 'undefined' && document.visibilityState === 'hidden') return;
       fetchOrders();
-    }, 15000);
+    }, 5000);
 
     return () => {
       clearInterval(pollTimer);
