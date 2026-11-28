@@ -1,30 +1,90 @@
 import { CreatePayosBatchPayoutDto, EstimatePayoutCreditDto, ListPayosPayoutsQueryDto } from './dto/payos-payout.dto';
-import { Injectable, NotFoundException, BadRequestException, Optional, Inject } from '@nestjs/common';
+import { UpdateAdminStoreDto } from './dto/update-admin-store.dto';
+import { Injectable, NotFoundException, BadRequestException, Optional, Inject, Logger } from '@nestjs/common';
 import { PayOSPayoutService } from '../payments/payos-payout.service';
 import { AdminRepository } from './admin.repository';
+import { CryptoVaultUtil } from '../common/utils/crypto-vault.util';
+import {
+  verifyPayosPayoutEvidence,
+  verifyPayosPayoutRejectionEvidence,
+  PayosPayoutExpectedCriteria,
+} from '../payments/payos-payout-verifier';
+import { WalletMapper } from '../store-wallet/mappers/wallet.mapper';
+import { DashboardCacheService } from '../common/cache/dashboard-cache.service';
+import { buildAnalyticsDateRange } from '../analytics/utils/analytics-date-range.util';
+import {
+  AdminDashboardQueryDto,
+  AdminTimeseriesAnalyticsQueryDto,
+  AdminStoresLeaderboardQueryDto,
+} from './dto/admin-analytics-query.dto';
 
 @Injectable()
 export class AdminService {
-      constructor(
+  private readonly logger = new Logger(AdminService.name);
+
+  constructor(
     @Inject(AdminRepository)
     private readonly adminRepo: AdminRepository,
     @Optional()
     private readonly payosPayoutService?: PayOSPayoutService,
+    @Optional() private readonly cacheService?: DashboardCacheService,
   ) {}
 
-  async listPendingStores() {
-    return this.adminRepo.findPendingStores();
+  private async invalidateAdminAndStoreCaches(storeId?: string | number | bigint) {
+    if (!this.cacheService || typeof this.cacheService.invalidatePrefix !== 'function') return;
+    try {
+      const promises: Promise<void>[] = [
+        this.cacheService.invalidatePrefix('admin:dashboard:'),
+        this.cacheService.invalidatePrefix('admin:operations'),
+        this.cacheService.invalidatePrefix('admin:revenue:'),
+        this.cacheService.invalidatePrefix('admin:growth:'),
+        this.cacheService.invalidatePrefix('admin:stores-leaderboard:'),
+        this.cacheService.invalidatePrefix('stores:'),
+        this.cacheService.invalidateKey('stores:active_page1_20'),
+        this.cacheService.invalidateKey('rentals:available_packages'),
+      ];
+      if (storeId) {
+        promises.push(this.cacheService.invalidatePrefix(`dash:store:${storeId.toString()}:`));
+        promises.push(this.cacheService.invalidatePrefix(`staff:dashboard:store:${storeId.toString()}:`));
+      }
+      await Promise.all(promises);
+    } catch (error) {
+      this.logger.warn(
+        `Dashboard cache invalidation failed: ${
+          error instanceof Error ? error.message : 'unknown error'
+        }`,
+      );
+    }
   }
 
-  async listAllStores() {
-    return this.adminRepo.findAllStores();
+  async listPendingStores(query?: any) {
+    const res = await this.adminRepo.findPendingStores(query);
+    return res;
+  }
+
+  async listAllStores(query?: any) {
+    const res = await this.adminRepo.findAllStores(query);
+    return res;
+  }
+
+  async updateStoreById(storeId: string | number | bigint, dto: UpdateAdminStoreDto, _adminUser?: any) {
+    const targetStoreId = BigInt(storeId);
+    const store = await this.adminRepo.findStoreById(targetStoreId);
+    if (!store) {
+      throw new NotFoundException('Không tìm thấy cửa hàng');
+    }
+    const updated = await this.adminRepo.updateStoreById(targetStoreId, dto);
+    await this.invalidateAdminAndStoreCaches(targetStoreId);
+    return updated;
   }
 
   async approveStore(storeId: string | number | bigint, _adminUser?: any) {
     const targetStoreId = BigInt(storeId);
     const store = await this.adminRepo.findStoreById(targetStoreId);
     if (!store) throw new NotFoundException('Không tìm thấy cửa hàng');
-    return this.adminRepo.approveStore(targetStoreId, store.ownerUserId);
+    const res = await this.adminRepo.approveStore(targetStoreId, store.ownerUserId);
+    await this.invalidateAdminAndStoreCaches(targetStoreId);
+    return res;
   }
 
   async rejectStore(storeId: string | number | bigint, reason: string, _adminUser?: any) {
@@ -32,29 +92,13 @@ export class AdminService {
     const targetStoreId = BigInt(storeId);
     const store = await this.adminRepo.findStoreById(targetStoreId);
     if (!store) throw new NotFoundException('Không tìm thấy cửa hàng');
-    return this.adminRepo.rejectStore(targetStoreId);
+    const res = await this.adminRepo.rejectStore(targetStoreId);
+    await this.invalidateAdminAndStoreCaches(targetStoreId);
+    return res;
   }
 
   async getSystemStats() {
-    const { totalStores, totalUsers, totalButtons, totalOrders, stores, orders, activeButtons } =
-      await this.adminRepo.getCounts();
-
-    const activeStores = stores.filter((s: any) => s.status === 'ACTIVE').length;
-    const completedOrders = orders.filter((o: any) => o.orderStatus === 'CONFIRMED' || o.orderStatus === 'DELIVERED').length;
-    const totalGmv = orders
-      .filter((o: any) => o.orderStatus === 'CONFIRMED' || o.orderStatus === 'DELIVERED')
-      .reduce((sum: number, o: any) => sum + Number(o.totalAmount || 0), 0);
-
-    return {
-      totalStores,
-      activeStores,
-      totalUsers,
-      totalButtons,
-      activeButtons,
-      totalOrders,
-      completedOrders,
-      totalGmv,
-    };
+    return this.adminRepo.getCounts();
   }
 
   async getAuditLogs() {
@@ -86,131 +130,40 @@ export class AdminService {
     return this.getAuditLogs();
   }
 
-  async listUsers() {
-    const users = await this.adminRepo.findUsers();
-    return users.map((u: any) => {
-      const isActive = u.status === 'ACTIVE';
-      let role = 'CUSTOMER';
-      const isSuperAdmin =
-        u.username === 'admin' ||
-        u.email === 'admin@smartorder.local' ||
-        u.storeStaffs?.some((s: any) => s.role?.roleCode === 'SUPER_ADMIN' || s.role?.roleCode === 'SYSTEM_ADMIN');
-
-      if (isSuperAdmin) {
-        role = 'SUPER_ADMIN';
-      } else if (u.ownedStores && u.ownedStores.length > 0) {
-        role = 'STORE_OWNER';
-      } else if (u.storeStaffs && u.storeStaffs.length > 0) {
-        role = u.storeStaffs[0].role?.roleCode || 'STORE_STAFF';
-      } else if (u.customerProfile) {
-        role = 'CUSTOMER';
-      }
-
-      const storeName =
-        u.ownedStores && u.ownedStores.length > 0
-          ? u.ownedStores[0].name
-          : (u.storeStaffs && u.storeStaffs.length > 0 ? u.storeStaffs[0].store?.name : null);
-
-      return {
-        ...u,
-        id: u.userId.toString(),
-        userId: u.userId.toString(),
-        role,
-        isActive,
-        status: u.status,
-        storeName: storeName || 'Mặc định',
-      };
-    });
-  }
-
-  async toggleUserStatus(userId: string | number | bigint, status?: string, _adminUser?: any) {
-    const rawId = String(userId || '').trim();
-    let targetUserId: bigint | null = null;
-    let user: any = null;
-
-    // 1. Try resolving numeric userId
-    if (/^\d+$/.test(rawId)) {
-      try {
-        targetUserId = BigInt(rawId);
-        user = await this.adminRepo.findUserById(targetUserId);
-      } catch (_) {
-        targetUserId = null;
-      }
-    }
-
-    // 2. Try resolving mock ID or email / username identifier
-    if (!user) {
-      const MOCK_MAP: Record<string, string> = {
-        'usr-admin-01': 'admin@smartorder.local',
-        'usr-store-01': 'store@smartorder.local',
-        'usr-delivery-01': 'shipper.hung@smartorder.local',
-        'usr-customer-01': 'customer@smartorder.local',
-        'usr-customer-02': 'mai.tran@smartorder.local',
-      };
-      const identifier = MOCK_MAP[rawId] || rawId;
-      user = await this.adminRepo.findUserByIdentifier(identifier);
-      if (user) {
-        targetUserId = user.userId;
-      }
-    }
-
-    // 3. Update in database if user found
-    if (user && targetUserId) {
-      const nextStatus = status || (user.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE');
-      const updated = await this.adminRepo.updateUserStatus(targetUserId, nextStatus);
-      return {
-        ...updated,
-        id: rawId,
-        userId: updated.userId.toString(),
-        isActive: updated.status === 'ACTIVE',
-        status: updated.status,
-      };
-    }
-
-    // 4. Safe fallback for mock / client-side placeholder records
-    const nextStatus = status || (rawId.endsWith('-02') ? 'ACTIVE' : 'INACTIVE');
+  async listUsers(query?: any) {
+    const res = await this.adminRepo.findUsers(query);
+    const items = res.items.map((u: any) => ({
+      ...u,
+      id: u.userId.toString(),
+      userId: u.userId.toString(),
+      role: u.customerProfile ? 'CUSTOMER' : (u.ownedStores && u.ownedStores.length > 0 ? 'STORE_OWNER' : 'USER'),
+    }));
     return {
-      id: rawId,
-      userId: rawId,
-      isActive: nextStatus === 'ACTIVE',
-      status: nextStatus,
+      items,
+      total: res.total,
+      page: res.page,
+      pageSize: res.pageSize,
     };
   }
 
+  async toggleUserStatus(userId: string | number | bigint, status?: string, _adminUser?: any) {
+    const targetUserId = BigInt(userId);
+    const user = await this.adminRepo.findUserById(targetUserId);
+    if (!user) throw new NotFoundException('Không tìm thấy người dùng');
+    const nextStatus = status || (user.status === 'ACTIVE' ? 'INACTIVE' : 'ACTIVE');
+    const result = await this.adminRepo.updateUserStatus(targetUserId, nextStatus);
+    await this.invalidateAdminAndStoreCaches();
+    return result;
+  }
+
   async updateUserRole(userId: string | number | bigint, roleCode: string, _adminUser?: any) {
-    const rawId = String(userId || '').trim();
-    let targetUserId: bigint | null = null;
-    let user: any = null;
+    const targetUserId = BigInt(userId);
+    const user = await this.adminRepo.findUserById(targetUserId);
+    if (!user) throw new NotFoundException('Không tìm thấy người dùng');
 
-    if (/^\d+$/.test(rawId)) {
-      try {
-        targetUserId = BigInt(rawId);
-        user = await this.adminRepo.findUserById(targetUserId);
-      } catch (_) {
-        targetUserId = null;
-      }
-    }
-
-    if (!user) {
-      const MOCK_MAP: Record<string, string> = {
-        'usr-admin-01': 'admin@smartorder.local',
-        'usr-store-01': 'store@smartorder.local',
-        'usr-delivery-01': 'shipper.hung@smartorder.local',
-        'usr-customer-01': 'customer@smartorder.local',
-        'usr-customer-02': 'mai.tran@smartorder.local',
-      };
-      const identifier = MOCK_MAP[rawId] || rawId;
-      user = await this.adminRepo.findUserByIdentifier(identifier);
-      if (user) {
-        targetUserId = user.userId;
-      }
-    }
-
-    if (user && targetUserId) {
-      const role = await this.adminRepo.findOrCreateRole(roleCode);
-      await this.adminRepo.updateStaffRole(targetUserId, role.roleId);
-      return { success: true, message: 'Đã cập nhật vai trò người dùng thành ' + roleCode };
-    }
+    const role = await this.adminRepo.findOrCreateRole(roleCode);
+    await this.adminRepo.updateStaffRole(targetUserId, role.roleId);
+    await this.invalidateAdminAndStoreCaches();
 
     return { success: true, message: 'Đã cập nhật vai trò người dùng thành ' + roleCode };
   }
@@ -281,7 +234,7 @@ export class AdminService {
       throw new BadRequestException('Mã gói thuê thiết bị đã tồn tại');
     }
 
-    return this.adminRepo.createRentalPackage({
+    const created = await this.adminRepo.createRentalPackage({
       packageCode,
       packageName,
       description,
@@ -292,6 +245,8 @@ export class AdminService {
       features: features || [],
       status: 'ACTIVE',
     });
+    await this.invalidateAdminAndStoreCaches();
+    return created;
   }
 
   async listRentalPackages() {
@@ -302,30 +257,40 @@ export class AdminService {
     const packageId = BigInt(id);
     const existing = await this.adminRepo.findRentalPackageById(packageId);
     if (!existing) throw new NotFoundException('Không tìm thấy gói thuê');
-    return this.adminRepo.updateRentalPackage(packageId, body);
+    const updated = await this.adminRepo.updateRentalPackage(packageId, body);
+    await this.invalidateAdminAndStoreCaches();
+    return updated;
   }
 
-  async listAllWithdrawals() {
-    return this.adminRepo.findWithdrawals();
+  async listAllWithdrawals(query?: any) {
+    const res = await this.adminRepo.findWithdrawals(query);
+    return {
+      items: WalletMapper.toWithdrawalDtoList(res.items),
+      total: res.total,
+      page: res.page,
+      pageSize: res.pageSize,
+    };
   }
 
   async listWithdrawals() {
     return this.listAllWithdrawals();
   }
 
-  async confirmWithdrawalTransfer(withdrawalId: string | number | bigint, transferEvidenceUrl?: string, adminUser?: any) {
+  async getWithdrawalById(withdrawalId: string | number | bigint) {
     const rawWithdrawalId = BigInt(withdrawalId);
     const withdrawal = await this.adminRepo.findWithdrawalById(rawWithdrawalId);
-    if (!withdrawal) throw new NotFoundException('Yêu cầu rút tiền không tồn tại');
-    if (withdrawal.status !== 'PENDING') {
-      throw new BadRequestException('Yêu cầu đang ở trạng thái ' + withdrawal.status + ', không thể duyệt');
+    if (!withdrawal) {
+      throw new NotFoundException('Yêu cầu rút tiền không tồn tại');
     }
+    return withdrawal;
+  }
 
-    return this.adminRepo.updateWithdrawal(rawWithdrawalId, {
-      status: 'TRANSFERRED',
-      transferEvidenceUrl: typeof transferEvidenceUrl === 'string' ? transferEvidenceUrl : null,
-      approvedByUserId: adminUser?.userId ? BigInt(adminUser.userId) : null,
-      processedAt: new Date(),
+  async confirmWithdrawalTransfer(_withdrawalId: string | number | bigint, _transferEvidenceUrl?: string, _adminUser?: any) {
+    throw new BadRequestException({
+      success: false,
+      errorCode: 'MANUAL_TRANSFER_DEPRECATED',
+      message:
+        'Phương thức chuyển khoản thủ công đã bị vô hiệu hóa. Trạng thái rút tiền chỉ được xử lý qua PayOS Payout (POST /api/v1/admin/withdrawals/:id/payout).',
     });
   }
 
@@ -345,11 +310,13 @@ export class AdminService {
       throw new BadRequestException('Yêu cầu đang ở trạng thái ' + withdrawal.status + ', không thể từ chối');
     }
 
-    return this.adminRepo.rejectWithdrawalTransaction(
+    const res = await this.adminRepo.rejectWithdrawalTransaction(
       withdrawal,
       reason,
       adminUser?.userId ? BigInt(adminUser.userId) : undefined,
     );
+    await this.invalidateAdminAndStoreCaches(withdrawal.storeId);
+    return res;
   }
 
   async getPayosPayoutBalance() {
@@ -391,32 +358,68 @@ export class AdminService {
     // Provider reference must be stable and idempotent (NO Date.now() suffix!)
     const providerReferenceId = withdrawal.providerReferenceId || withdrawal.withdrawalCode;
 
+    if (!withdrawal.bankAccountEncrypted || !withdrawal.bankAccountHash || !withdrawal.bankBinSnapshot) {
+      throw new BadRequestException('Thiếu snapshot tài khoản ngân hàng đã mã hóa hoặc mã BIN (Fail-Closed)');
+    }
+
+    let toAccountNumber = '';
+    try {
+      toAccountNumber = CryptoVaultUtil.decryptAccountNumber(withdrawal.bankAccountEncrypted).trim();
+    } catch (err: any) {
+      this.logger.error(`Lỗi giải mã tài khoản cho withdrawal #${rawWithdrawalId}: ${err?.message}`);
+      throw new BadRequestException('Lỗi giải mã tài khoản nhận tiền (Fail-Closed)');
+    }
+
+    if (!toAccountNumber) {
+      throw new BadRequestException('Số tài khoản nhận tiền sau giải mã rỗng (Fail-Closed)');
+    }
+
+    // Xác minh hash trước khi gửi tiền
+    const computedHash = CryptoVaultUtil.hashAccountNumber(toAccountNumber);
+    if (computedHash !== withdrawal.bankAccountHash) {
+      throw new BadRequestException('Tính toàn vẹn của tài khoản nhận tiền bị vi phạm (Hash Mismatch)');
+    }
+
+    // Số tiền PayOS thực chuyển bắt buộc là netAmount (amount - fee)
+    const payoutAmount = withdrawal.netAmount ? Number(withdrawal.netAmount) : Number(withdrawal.amount) - Number(withdrawal.fee || 0);
+    if (!Number.isInteger(payoutAmount) || payoutAmount <= 0) {
+      throw new BadRequestException('Số tiền chi hộ thực chuyển (netAmount) không hợp lệ');
+    }
+
     const payoutPayload = {
       referenceId: providerReferenceId,
-      amount: Number(withdrawal.amount),
+      amount: payoutAmount,
       description: ('Chi ho SOB ' + withdrawal.withdrawalCode).slice(0, 25),
-      toBin: (withdrawal.wallet as any)?.bankBin || withdrawal.bankCode || '970422',
-      toAccountNumber: (withdrawal.wallet as any)?.bankAccount || withdrawal.bankAccountNumber || '000000000',
+      toBin: withdrawal.bankBinSnapshot.trim(),
+      toAccountNumber,
     };
 
     try {
       const payoutResult = await this.payosPayoutService.createPayout(payoutPayload);
-      const providerPayoutId = payoutResult?.data?.id || `payout_${providerReferenceId}`;
+      const providerPayoutId = payoutResult?.data?.id ? String(payoutResult.data.id).trim() : null;
 
-      return await this.adminRepo.updateWithdrawal(rawWithdrawalId, {
-        status: 'PROCESSING',
+      await this.adminRepo.supplementPayoutIdIfAllowed(
+        rawWithdrawalId,
         providerReferenceId,
         providerPayoutId,
-        approvedByUserId: adminUser?.userId ? BigInt(adminUser.userId) : null,
-        processedAt: new Date(),
-      });
+        adminUser?.userId ? BigInt(adminUser.userId) : null,
+      );
+      const updated = await this.adminRepo.findWithdrawalById(rawWithdrawalId);
+      await this.invalidateAdminAndStoreCaches(withdrawal.storeId);
+      return updated;
     } catch (err: any) {
-      // Auto-refund and mark FAILED on PayOS failure, network error, or exception
-      await this.adminRepo.refundFailedWithdrawalTransaction(
+      // Invariant PAY-01: Never auto-refund wallet on timeout or uncertain provider error!
+      // Auto-refunding while the remote provider might have accepted or queued the payout
+      // exposes the business to double payout vulnerability.
+      // Funds must remain frozen under status PENDING_RECONCILIATION until explicitly reconciled.
+      await this.adminRepo.markWithdrawalPendingReconciliation(
         rawWithdrawalId,
         err.message || 'Lỗi kết nối hoặc xử lý từ PayOS'
       );
-      throw new BadRequestException(`Xuất lệnh chi hộ PayOS thất bại: ${err.message || 'Lỗi cổng PayOS'}`);
+      await this.invalidateAdminAndStoreCaches(withdrawal.storeId);
+      throw new BadRequestException(
+        `Xuất lệnh chi hộ PayOS chưa rõ kết quả: ${err.message || 'Lỗi cổng PayOS'}. Yêu cầu được giữ ở trạng thái PENDING_RECONCILIATION để đối soát, số dư ví không tự ý hoàn lại để chống chi kép.`
+      );
     }
   }
 
@@ -433,15 +436,241 @@ export class AdminService {
       throw new BadRequestException('PayOSPayoutService chưa sẵn sàng');
     }
 
+    const formatResponse = (
+      withdrawalRecord: any,
+      outcome: 'PENDING' | 'SUCCESS' | 'FAILED',
+      reasonCode: string,
+      payoutId: string | null,
+      message: string,
+    ) => ({
+      withdrawal: WalletMapper.toWithdrawalDto(withdrawalRecord),
+      reconciliation: {
+        outcome,
+        reasonCode,
+        payoutId: payoutId || null,
+      },
+      message,
+    });
+
+    let statusData: any = null;
+    let targetPayout: any = null;
+    let expectedPayoutId: string | null = withdrawal.providerPayoutId ? String(withdrawal.providerPayoutId).trim() : null;
+
     if (withdrawal.providerPayoutId) {
-      const statusData = await this.payosPayoutService.getPayout(withdrawal.providerPayoutId);
-      return { withdrawal, statusData };
+      try {
+        statusData = await this.payosPayoutService.getPayout(withdrawal.providerPayoutId);
+        targetPayout = statusData?.data;
+      } catch (err: any) {
+        return formatResponse(
+          withdrawal,
+          'PENDING',
+          'PROVIDER_LOOKUP_ERROR',
+          expectedPayoutId,
+          'Lỗi khi lấy chi tiết payout từ provider. Giữ trạng thái chờ đối soát.',
+        );
+      }
     } else if (withdrawal.providerReferenceId) {
-      const listData = await this.payosPayoutService.getPayouts({ referenceId: withdrawal.providerReferenceId });
-      return { withdrawal, listData };
+      try {
+        statusData = await this.payosPayoutService.getPayouts({ referenceId: withdrawal.providerReferenceId });
+      } catch (err: any) {
+        return formatResponse(
+          withdrawal,
+          'PENDING',
+          'PROVIDER_LIST_ERROR',
+          null,
+          'Lỗi khi tra cứu danh sách payouts từ provider. Giữ trạng thái chờ đối soát.',
+        );
+      }
+
+      const rawList = statusData?.data?.payouts || statusData?.data || [];
+      const payoutsList = Array.isArray(rawList) ? rawList : [];
+
+      const matched = payoutsList.filter(
+        (p: any) =>
+          p.referenceId === withdrawal.providerReferenceId ||
+          p.referenceId === withdrawal.withdrawalCode ||
+          p.id === withdrawal.providerReferenceId,
+      );
+
+      if (matched.length === 1) {
+        const found = matched[0];
+        if (!found.id) {
+          return formatResponse(
+            withdrawal,
+            'PENDING',
+            'PAYOUT_ID_MISSING',
+            null,
+            'Bản ghi payout không có ID chi tiết từ provider, không thể xác thực an toàn. Giữ trạng thái chờ đối soát.',
+          );
+        }
+        expectedPayoutId = String(found.id).trim();
+        try {
+          const detailRes = await this.payosPayoutService.getPayout(found.id);
+          targetPayout = detailRes?.data;
+          if (!targetPayout) {
+            return formatResponse(
+              withdrawal,
+              'PENDING',
+              'PAYOUT_DETAIL_EMPTY',
+              expectedPayoutId,
+              'Phản hồi chi tiết payout từ provider rỗng, không dùng bản tóm tắt thay thế. Giữ trạng thái chờ đối soát.',
+            );
+          }
+        } catch (err: any) {
+          return formatResponse(
+            withdrawal,
+            'PENDING',
+            'PAYOUT_DETAIL_ERROR',
+            expectedPayoutId,
+            'Lỗi khi lấy chi tiết payout từ provider. Không dùng bản tóm tắt thay thế, giữ trạng thái chờ đối soát.',
+          );
+        }
+      } else {
+        const isNone = matched.length === 0;
+        return formatResponse(
+          withdrawal,
+          'PENDING',
+          isNone ? 'NO_MATCHED_PAYOUT' : 'MULTIPLE_MATCHED_PAYOUTS',
+          null,
+          isNone
+            ? 'Không tìm thấy giao dịch payout phù hợp với referenceId trên PayOS, giữ trạng thái chờ đối soát'
+            : 'Có nhiều hơn một payout trùng referenceId trên PayOS, giữ trạng thái chờ đối soát thủ công',
+        );
+      }
+    } else {
+      return formatResponse(
+        withdrawal,
+        'PENDING',
+        'NO_PAYOUT_REFERENCE',
+        null,
+        'Chưa có thông tin provider reference id hoặc payout id',
+      );
     }
 
-        return { withdrawal, message: 'Chưa có thông tin provider reference id' };
+    if (!targetPayout) {
+      return formatResponse(
+        withdrawal,
+        'PENDING',
+        'PAYOUT_DETAIL_EMPTY',
+        expectedPayoutId,
+        'Không thể trích xuất dữ liệu chi tiết payout từ provider. Giữ trạng thái chờ đối soát.',
+      );
+    }
+
+    const verifiedPayoutId = String(targetPayout.id || '').trim();
+    if (!verifiedPayoutId) {
+      return formatResponse(
+        withdrawal,
+        'PENDING',
+        'PAYOUT_ID_MISSING',
+        null,
+        'Thiếu thông tin payout ID từ cổng thanh toán. Giữ trạng thái chờ đối soát.',
+      );
+    }
+
+    const netAmount = withdrawal.netAmount !== null && withdrawal.netAmount !== undefined
+      ? Math.round(Number(withdrawal.netAmount))
+      : Math.round(Number(withdrawal.amount) - Number(withdrawal.fee || 0));
+
+    const expectedHash = withdrawal.bankAccountHash ? String(withdrawal.bankAccountHash).trim() : null;
+    const expectedEncrypted = withdrawal.bankAccountEncrypted ? String(withdrawal.bankAccountEncrypted).trim() : null;
+
+    if (!expectedHash && !expectedEncrypted) {
+      return formatResponse(
+        withdrawal,
+        'PENDING',
+        'MISSING_SNAPSHOT',
+        verifiedPayoutId,
+        'Yêu cầu rút tiền thiếu snapshot tài khoản ngân hàng (cả hash và bản mã hóa đều trống). Dừng đối soát để bảo vệ an toàn.',
+      );
+    }
+
+    let decryptedAccount = '';
+    if (expectedEncrypted) {
+      try {
+        decryptedAccount = CryptoVaultUtil.decryptAccountNumber(expectedEncrypted).replace(/\s+/g, '').toUpperCase();
+      } catch (err: any) {
+        return formatResponse(
+          withdrawal,
+          'PENDING',
+          'INCONSISTENT_SNAPSHOT',
+          verifiedPayoutId,
+          'Không thể giải mã snapshot tài khoản ngân hàng trong yêu cầu rút tiền. Dừng đối soát để bảo vệ an toàn.',
+        );
+      }
+    }
+
+    if (expectedHash && decryptedAccount) {
+      let decryptedSha256 = '';
+      let decryptedHmac = '';
+      try {
+        decryptedSha256 = CryptoVaultUtil.computeDeterministicAccountHash(decryptedAccount);
+      } catch {}
+      try {
+        decryptedHmac = CryptoVaultUtil.hashAccountNumber(decryptedAccount);
+      } catch {}
+
+      const isConsistent = expectedHash === decryptedSha256 || (decryptedHmac && expectedHash === decryptedHmac);
+      if (!isConsistent) {
+        return formatResponse(
+          withdrawal,
+          'PENDING',
+          'INCONSISTENT_SNAPSHOT',
+          verifiedPayoutId,
+          'Snapshot tài khoản ngân hàng không nhất quán giữa hash và dữ liệu mã hóa. Dừng đối soát để bảo vệ an toàn.',
+        );
+      }
+    }
+
+    const criteria: PayosPayoutExpectedCriteria = {
+      amount: netAmount,
+      payoutReference: withdrawal.providerReferenceId || withdrawal.withdrawalCode,
+      targetBankBin: withdrawal.bankBinSnapshot || withdrawal.bankCode,
+      targetAccountHash: expectedHash || (decryptedAccount ? CryptoVaultUtil.hashAccountNumber(decryptedAccount) : undefined),
+      expectedPayoutId: expectedPayoutId || undefined,
+    };
+
+    const successVerif = verifyPayosPayoutEvidence(targetPayout, criteria);
+    if (successVerif.isVerified) {
+      await this.adminRepo.finalizeSucceededWithdrawalTransaction(
+        rawWithdrawalId,
+        successVerif.providerPayoutId,
+      );
+      await this.invalidateAdminAndStoreCaches(withdrawal.storeId);
+      const fresh = await this.adminRepo.findWithdrawalById(rawWithdrawalId);
+      return formatResponse(
+        fresh || withdrawal,
+        'SUCCESS',
+        'PAYOUT_VERIFIED_SUCCESS',
+        successVerif.providerPayoutId,
+        'Xác thực payout thành công, đã khấu trừ số dư đóng băng và hoàn tất giao dịch rút tiền.',
+      );
+    }
+
+    const rejectionVerif = verifyPayosPayoutRejectionEvidence(targetPayout, criteria);
+    if (rejectionVerif.isVerified) {
+      await this.adminRepo.refundFailedWithdrawalTransaction(
+        rawWithdrawalId,
+        `PayOS xác nhận chi hộ thất bại: ${rejectionVerif.reason || 'REJECTED'}`,
+      );
+      await this.invalidateAdminAndStoreCaches(withdrawal.storeId);
+      const fresh = await this.adminRepo.findWithdrawalById(rawWithdrawalId);
+      return formatResponse(
+        fresh || withdrawal,
+        'FAILED',
+        'PAYOUT_TERMINAL_FAILURE',
+        rejectionVerif.providerPayoutId,
+        'PayOS xác nhận chi hộ thất bại, đã hoàn tiền về ví cửa hàng thành công.',
+      );
+    }
+
+    return formatResponse(
+      withdrawal,
+      'PENDING',
+      'PENDING_TERMINAL_CONFIRMATION',
+      verifiedPayoutId,
+      successVerif.reason || rejectionVerif.reason || 'Giao dịch payout đang ở trạng thái trung gian, tiếp tục chờ đối soát.',
+    );
   }
 
   async createBatchPayout(params: CreatePayosBatchPayoutDto) {
@@ -463,5 +692,77 @@ export class AdminService {
       throw new BadRequestException('PayOSPayoutService chưa sẵn sàng');
     }
     return this.payosPayoutService.getPayouts(query);
+  }
+
+  async getDashboard(query: AdminDashboardQueryDto) {
+    const cacheKey = `admin:dashboard:${query.fromDate || 'all'}:${query.toDate || 'all'}:${query.compareWith || 'none'}`;
+    const fetcher = async () => {
+      const dateRange = (query.fromDate || query.toDate)
+        ? buildAnalyticsDateRange(query.fromDate, query.toDate, 'day')
+        : {};
+      return this.adminRepo.getAdminDashboardData(dateRange, query.compareWith);
+    };
+
+    if (this.cacheService && typeof this.cacheService.getOrSet === 'function') {
+      return this.cacheService.getOrSet(cacheKey, 30, fetcher);
+    }
+    return fetcher();
+  }
+
+  async getRevenueAnalytics(query: AdminTimeseriesAnalyticsQueryDto) {
+    const groupBy = query.groupBy || 'day';
+    const cacheKey = `admin:revenue:${query.fromDate || 'all'}:${query.toDate || 'all'}:${groupBy}`;
+    const fetcher = async () => {
+      const dateRange = (query.fromDate || query.toDate)
+        ? buildAnalyticsDateRange(query.fromDate, query.toDate, groupBy)
+        : {};
+      return this.adminRepo.getAdminRevenueAnalytics(dateRange, groupBy);
+    };
+
+    if (this.cacheService && typeof this.cacheService.getOrSet === 'function') {
+      return this.cacheService.getOrSet(cacheKey, 30, fetcher);
+    }
+    return fetcher();
+  }
+
+  async getGrowthAnalytics(query: AdminTimeseriesAnalyticsQueryDto) {
+    const groupBy = query.groupBy || 'day';
+    const cacheKey = `admin:growth:${query.fromDate || 'all'}:${query.toDate || 'all'}:${groupBy}`;
+    const fetcher = async () => {
+      const dateRange = (query.fromDate || query.toDate)
+        ? buildAnalyticsDateRange(query.fromDate, query.toDate, groupBy)
+        : {};
+      return this.adminRepo.getAdminGrowthAnalytics(dateRange, groupBy);
+    };
+
+    if (this.cacheService && typeof this.cacheService.getOrSet === 'function') {
+      return this.cacheService.getOrSet(cacheKey, 30, fetcher);
+    }
+    return fetcher();
+  }
+
+  async getOperationsAnalytics() {
+    const cacheKey = 'admin:operations';
+    const fetcher = async () => this.adminRepo.getAdminOperationsAnalytics();
+
+    if (this.cacheService && typeof this.cacheService.getOrSet === 'function') {
+      return this.cacheService.getOrSet(cacheKey, 30, fetcher);
+    }
+    return fetcher();
+  }
+
+  async getStoresLeaderboard(query: AdminStoresLeaderboardQueryDto) {
+    const page = Math.max(query.page || 1, 1);
+    const pageSize = Math.min(query.pageSize || 20, 100);
+    const sortBy = query.sortBy || 'gmv';
+    const sortOrder = query.sortOrder || 'desc';
+
+    const cacheKey = `admin:stores-leaderboard:${page}:${pageSize}:${sortBy}:${sortOrder}`;
+    const fetcher = async () => this.adminRepo.getAdminStoresLeaderboard({ page, pageSize, sortBy, sortOrder });
+
+    if (this.cacheService && typeof this.cacheService.getOrSet === 'function') {
+      return this.cacheService.getOrSet(cacheKey, 30, fetcher);
+    }
+    return fetcher();
   }
 }

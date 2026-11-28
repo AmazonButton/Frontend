@@ -1,16 +1,23 @@
-import { Injectable, Inject, Logger } from '@nestjs/common';
+import { Injectable, Inject, Logger, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { FirebaseService, SendPushResult } from './firebase.service';
 import { RegisterFcmTokenDto } from './dto/register-fcm-token.dto';
+import { NotificationsRepository } from './notifications.repository';
+import { QueryNotificationsDto } from './dto/query-notifications.dto';
 
 @Injectable()
 export class NotificationsService {
   private readonly logger = new Logger(NotificationsService.name);
+  private readonly repo: NotificationsRepository;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(FirebaseService) private readonly firebaseService: FirebaseService,
-  ) {}
+    @Optional() @Inject(NotificationsRepository) private readonly notificationsRepo?: NotificationsRepository,
+  ) {
+    this.repo = this.notificationsRepo || new NotificationsRepository(this.prisma);
+  }
+
 
   /**
    * 1. Dang ky FCM Token cho User
@@ -320,5 +327,193 @@ export class NotificationsService {
         pushResult,
       },
     };
+  }
+
+  private formatNotification(item: any) {
+    const notificationId = item.notificationId ?? item.notification_id;
+    const userId = item.userId ?? item.user_id;
+    const idempotencyKey = item.idempotencyKey ?? item.idempotency_key;
+    const readAt = item.readAt ?? item.read_at ?? null;
+    const createdAt = item.createdAt ?? item.created_at;
+
+    return {
+      notificationId: notificationId != null ? notificationId.toString() : '',
+      userId: userId != null ? userId.toString() : '',
+      type: item.type,
+      title: item.title,
+      body: item.body,
+      data: item.data,
+      idempotencyKey,
+      readAt,
+      createdAt,
+    };
+  }
+
+  /**
+   * 7. Lay danh sach thong bao cua user (phan trang)
+   */
+  async getNotifications(userId: string | number | bigint, query: QueryNotificationsDto) {
+    const targetUserId = BigInt(userId);
+    const res = await this.repo.findMany(targetUserId, {
+      page: query.page,
+      pageSize: query.pageSize,
+    });
+
+    return {
+      success: true,
+      data: res.items.map((item) => this.formatNotification(item)),
+      unreadCount: res.unreadCount,
+      pagination: {
+        page: res.page,
+        pageSize: res.pageSize,
+        total: res.total,
+        totalPages: Math.ceil(res.total / res.pageSize) || 1,
+      },
+    };
+  }
+
+  /**
+   * 8. Lay so luong thong bao chua doc
+   */
+  async getUnreadCount(userId: string | number | bigint) {
+    const targetUserId = BigInt(userId);
+    const unreadCount = await this.repo.getUnreadCount(targetUserId);
+    return {
+      success: true,
+      data: {
+        unreadCount,
+      },
+    };
+  }
+
+  /**
+   * 9. Danh dau mot thong bao la da doc (BOLA protected)
+   */
+  async markAsRead(notificationId: string | number | bigint, userId: string | number | bigint) {
+    const notifId = BigInt(notificationId);
+    const targetUserId = BigInt(userId);
+    const updated = await this.repo.markAsRead(notifId, targetUserId);
+    return {
+      success: true,
+      message: 'Đã đánh dấu thông báo là đã đọc',
+      data: this.formatNotification(updated),
+    };
+  }
+
+  /**
+   * 10. Danh dau tat ca thong bao la da doc
+   */
+  async markAllAsRead(userId: string | number | bigint) {
+    const targetUserId = BigInt(userId);
+    const res = await this.repo.markAllAsRead(targetUserId);
+    return {
+      success: true,
+      message: 'Đã đánh dấu tất cả thông báo là đã đọc',
+      data: {
+        updatedCount: res.updatedCount,
+      },
+    };
+  }
+
+  /**
+   * 11. Tao va phat thong bao (DB History + FCM Push)
+   */
+  async createAndDispatchNotification(params: {
+    userId: bigint | number;
+    type: string;
+    title: string;
+    body: string;
+    data?: any;
+    idempotencyKey: string;
+  }) {
+    const targetUserId = BigInt(params.userId);
+    // 1. Luu lich su thong bao voi idempotency key
+    const record = await this.repo.createNotification({
+      userId: targetUserId,
+      type: params.type,
+      title: params.title,
+      body: params.body,
+      data: params.data,
+      idempotencyKey: params.idempotencyKey,
+    });
+
+    // 2. Gui FCM Push notification
+    this.sendPushToUser(targetUserId, {
+      title: params.title,
+      body: params.body,
+      data: params.data ? Object.fromEntries(
+        Object.entries(params.data).map(([k, v]) => [k, String(v)])
+      ) : undefined,
+    }).catch((err) => {
+      this.logger.error(`[NotificationsService] Failed to dispatch push for user ${targetUserId}: ${err.message}`);
+    });
+
+    return record ? this.formatNotification(record) : null;
+  }
+
+  /**
+   * 12. Phát thông báo sự kiện cho hệ thống thuê nút & hạn gói 60k (Pillar 5)
+   */
+  async dispatchRentalEventNotification(params: {
+    eventType: 'RENTAL_EXPIRED' | 'STORE_SUBSCRIPTION_EXPIRED' | 'RENTAL_RETURN_REQUESTED' | 'DEPOSIT_REFUND_APPROVED' | 'PAYMENT_RECEIVED' | 'DEPOSIT_REFUND_COMPLETED';
+    userId: bigint | number;
+    rentalCode?: string;
+    buttonCode?: string;
+    storeName?: string;
+    amount?: number;
+    recipientRole?: 'CUSTOMER' | 'STORE_OWNER' | 'ADMIN';
+    eventId?: string | bigint;
+    channel?: string;
+    periodRef?: string;
+  }) {
+    let title = 'Thông báo hệ thống';
+    let body = 'Có cập nhật mới từ hệ thống Smart Order';
+
+    switch (params.eventType) {
+      case 'RENTAL_EXPIRED':
+        title = 'Cảnh báo: Nút bấm thông minh đã hết hạn thuê';
+        body = `Hợp đồng thuê nút ${params.rentalCode || ''} (Mã nút: ${params.buttonCode || ''}) đã hết hạn. Nút bấm đã tạm dừng quyền đặt hàng. Vui lòng gia hạn 30.000đ/tháng để tiếp tục sử dụng.`;
+        break;
+      case 'STORE_SUBSCRIPTION_EXPIRED':
+        title = 'Cảnh báo: Gian hàng hết hạn gói duy trì kệ (60.000đ/tháng)';
+        body = `Gói duy trì kệ của gian hàng ${params.storeName || ''} đã hết hạn. Hệ thống đã tạm khóa quyền đăng sản phẩm mới. Vui lòng thanh toán 60.000đ/tháng để mở lại quyền đăng sản phẩm.`;
+        break;
+      case 'RENTAL_RETURN_REQUESTED':
+        title = 'Yêu cầu trả nút bấm & hoàn cọc mới';
+        body = `Khách hàng đã gửi yêu cầu trả nút cho hợp đồng ${params.rentalCode || ''}. Vui lòng kiểm tra và tiếp nhận tại kho cửa hàng.`;
+        break;
+      case 'DEPOSIT_REFUND_APPROVED':
+        title = 'Yêu cầu hoàn cọc đã được phê duyệt';
+        body = `Yêu cầu hoàn tiền cọc cho hợp đồng ${params.rentalCode || ''} đã được phê duyệt và chuyển sang lệnh chi trả Payout.`;
+        break;
+      case 'DEPOSIT_REFUND_COMPLETED':
+        title = 'Hoàn tiền cọc thành công';
+        body = `Số tiền cọc ${params.amount ? params.amount.toLocaleString('vi-VN') + 'đ' : ''} cho hợp đồng ${params.rentalCode || ''} đã được chuyển về tài khoản ngân hàng của bạn.`;
+        break;
+      case 'PAYMENT_RECEIVED':
+        title = 'Thanh toán thành công';
+        body = `Khoản thanh toán ${params.amount ? params.amount.toLocaleString('vi-VN') + 'đ' : ''} đã được xác nhận thành công.`;
+        break;
+    }
+
+    // Deterministic Idempotency Key theo chuẩn: eventId + recipientId + channel
+    const channel = params.channel || 'IN_APP';
+    const recipientId = params.userId.toString();
+    const entityRef = params.rentalCode || params.buttonCode || params.storeName || params.amount?.toString() || 'general';
+    const eventId = params.eventId
+      ? params.eventId.toString()
+      : params.periodRef
+        ? `${params.eventType}-${entityRef}-${params.periodRef}`
+        : `${params.eventType}-${entityRef}`;
+    const idempotencyKey = `notif:${eventId}:${recipientId}:${channel}`;
+
+    return this.createAndDispatchNotification({
+      userId: params.userId,
+      type: params.eventType,
+      title,
+      body,
+      data: params,
+      idempotencyKey,
+    });
   }
 }

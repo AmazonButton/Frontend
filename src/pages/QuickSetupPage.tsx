@@ -137,7 +137,6 @@ export const QuickSetupPage: React.FC = () => {
               ipAddress: '192.168.1.188',
               uptime: 12,
             }).catch(() => {});
-            await api.post(`/devices/${devId}/claim`).catch(() => {});
           } catch { }
 
           setStep(4);

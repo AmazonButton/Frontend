@@ -95,6 +95,10 @@ import {
   ShieldAlert,
   RotateCcw,
   AlertTriangle,
+  History,
+  X,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { STORE_CATALOG_PRODUCTS, StoreCatalogItem } from '../../data/storeProductsData';
 const AnalyticsChart = React.lazy(() => import('../../components/AnalyticsChart').then((module) => ({ default: module.AnalyticsChart })));
@@ -457,6 +461,8 @@ export const AdminDashboard: React.FC = () => {
   const [storeSubsFilter, setStoreSubsFilter] = useState<'ALL' | 'SUBSCRIBED' | 'UNSUBSCRIBED' | 'EXEMPT'>('ALL');
   const [storesFilter, setStoresFilter] = useState<'ALL' | 'ACTIVE' | 'SUSPENDED' | 'PENDING'>('ALL');
   const [storesSearch, setStoresSearch] = useState('');
+  const [storesPage, setStoresPage] = useState(1);
+  const STORES_PER_PAGE = 15;
 
   const loadStoreSubscriptions = useCallback(async (storesList?: any[]) => {
     const list = storesList || allStores;
@@ -526,6 +532,17 @@ export const AdminDashboard: React.FC = () => {
     return { total, active, suspended, pending };
   }, [allStores]);
 
+  const totalStoresPages = Math.max(1, Math.ceil(filteredAllStores.length / STORES_PER_PAGE));
+  const safeStoresPage = Math.min(storesPage, totalStoresPages);
+  const paginatedStores = useMemo(() => {
+    const start = (safeStoresPage - 1) * STORES_PER_PAGE;
+    return filteredAllStores.slice(start, start + STORES_PER_PAGE);
+  }, [filteredAllStores, safeStoresPage]);
+
+  useEffect(() => {
+    setStoresPage(1);
+  }, [storesFilter, storesSearch]);
+
   const storeSubsMetrics = useMemo(() => {
     const total = storeSubs.length;
     const subscribed = storeSubs.filter(s => s.statusCategory === 'SUBSCRIBED').length;
@@ -540,6 +557,19 @@ export const AdminDashboard: React.FC = () => {
   const [usersList, setUsersList] = useState<any[]>([]);
   const [userSearch, setUserSearch] = useState('');
   const [userRoleFilter, setUserRoleFilter] = useState('ALL');
+  const [platformMemberships, setPlatformMemberships] = useState<any[]>([]);
+  const [platformRoleModalUser, setPlatformRoleModalUser] = useState<any | null>(null);
+  const [platformRoleTarget, setPlatformRoleTarget] = useState<string>('SYSTEM_STAFF');
+  const [platformRoleReason, setPlatformRoleReason] = useState('');
+  const [platformRoleSaving, setPlatformRoleSaving] = useState(false);
+
+  // 2.3 Edit Store Modal State
+  const [editingStore, setEditingStore] = useState<any | null>(null);
+  const [editStoreForm, setEditStoreForm] = useState({ name: '', email: '', phone: '', address: '', status: 'ACTIVE' });
+  const [savingStore, setSavingStore] = useState(false);
+
+  // 2.4 Entity Audit Log Drawer State
+  const [auditDrawerEntity, setAuditDrawerEntity] = useState<{ type: 'USER' | 'STORE'; id: string; label: string } | null>(null);
 
   // =========================================================================
   // 4.2.2 Master Product Catalog State
@@ -563,7 +593,10 @@ export const AdminDashboard: React.FC = () => {
   // Universal body scroll lock & header submerge whenever any modal is open
   const isAnyAdminModalOpen = Boolean(
     rejectingStoreId ||
-    showAddProductModal
+    showAddProductModal ||
+    editingStore ||
+    platformRoleModalUser ||
+    auditDrawerEntity
   );
   useBodyScrollLock(isAnyAdminModalOpen);
 
@@ -679,15 +712,16 @@ export const AdminDashboard: React.FC = () => {
     const marker = typeof apiSessionMarker === 'function' ? apiSessionMarker() : null;
     const request = ++adminRead.current;
     try {
-      const [pendingRes, statsRes, logsRes, unassignedRes, storesRes, usersRes, plansRes, allDevicesRes] = await Promise.all([
-        api.get('/admin/stores/pending'),
+      const [pendingRes, statsRes, logsRes, unassignedRes, storesRes, usersRes, plansRes, allDevicesRes, membershipsRes] = await Promise.all([
+        api.get('/admin/stores/pending', { params: { pageSize: 100 } }),
         api.get('/admin/stats'),
         api.get('/admin/audit-logs'),
         api.get('/devices/unassigned'),
-        api.get('/admin/stores'),
+        api.get('/admin/stores', { params: { pageSize: 100 } }),
         api.get('/admin/users').catch(() => ({ data: { success: false, data: [] } })),
         api.get('/admin/plans').catch(() => ({ data: { success: false, data: [] } })),
         api.get('/devices?pageSize=100&limit=100').catch(() => ({ data: { success: false, data: [] } })),
+        api.get('/admin/platform-memberships', { params: { page: 1, pageSize: 20 } }).catch(() => null),
       ]);
 
       if (adminRead.current !== request || (marker && typeof apiSessionMarker === 'function' && apiSessionMarker() !== marker)) return;
@@ -731,6 +765,9 @@ export const AdminDashboard: React.FC = () => {
       }
       if (plansRes?.data?.success && Array.isArray(plansRes.data.data)) {
         setSubscriptionPlans(plansRes.data.data);
+      }
+      if (membershipsRes?.data?.success && Array.isArray(membershipsRes.data.data)) {
+        setPlatformMemberships(membershipsRes.data.data);
       }
     } catch (e) {
       if (adminRead.current !== request || (marker && typeof apiSessionMarker === 'function' && apiSessionMarker() !== marker)) return;
@@ -798,18 +835,18 @@ export const AdminDashboard: React.FC = () => {
     if (!rejectingStoreId || !rejectReason.trim()) return;
 
     try {
-      const res = await api.post(`/admin/stores/${rejectingStoreId}/reject`, {
-        reason: rejectReason,
-      });
+      const res = storeAction === 'SUSPEND'
+        ? await api.patch(`/admin/stores/${rejectingStoreId}`, { status: 'SUSPENDED' })
+        : await api.post(`/admin/stores/${rejectingStoreId}/reject`, { reason: rejectReason });
       if (res.data.success) {
-        toast.info(storeAction === 'SUSPEND' ? 'Đã ngừng hoạt động cửa hàng' : 'Đã từ chối đơn đăng ký cửa hàng');
+        toast.info(storeAction === 'SUSPEND' ? 'Đã tạm ngừng hoạt động cửa hàng thành công' : 'Đã từ chối đơn đăng ký cửa hàng');
         setRejectingStoreId(null);
         setRejectReason('');
         setStoreAction('REJECT');
         fetchAdminData();
       }
     } catch (err: any) {
-      toast.error(err.response?.data?.message || 'Không thể từ chối');
+      toast.error(err.response?.data?.message || (storeAction === 'SUSPEND' ? 'Không thể tạm ngừng cửa hàng' : 'Không thể từ chối đơn đăng ký'));
     }
   };
 
@@ -817,6 +854,52 @@ export const AdminDashboard: React.FC = () => {
     setStoreAction(action);
     setRejectReason('');
     setRejectingStoreId(storeId);
+  };
+
+  const openEditStoreModal = (s: any) => {
+    setEditingStore(s);
+    setEditStoreForm({
+      name: s.name || '',
+      email: s.email || '',
+      phone: s.phone || '',
+      address: s.address || '',
+      status: s.status || 'ACTIVE',
+    });
+  };
+
+  const handleSaveEditStore = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!editingStore) return;
+    const storeId = String(editingStore.id || editingStore.storeId);
+    setSavingStore(true);
+    try {
+      const payload: Record<string, string> = {};
+      if (editStoreForm.name.trim()) payload.name = editStoreForm.name.trim();
+      if (editStoreForm.email.trim()) payload.email = editStoreForm.email.trim();
+      if (editStoreForm.phone.trim()) payload.phone = editStoreForm.phone.trim();
+      if (editStoreForm.address.trim()) payload.address = editStoreForm.address.trim();
+      if (['ACTIVE', 'INACTIVE', 'SUSPENDED'].includes(editStoreForm.status)) {
+        payload.status = editStoreForm.status;
+      }
+      const res = await api.patch(`/admin/stores/${encodeURIComponent(storeId)}`, payload);
+      toast.success(res.data?.message || 'Cập nhật thông tin cửa hàng thành công');
+      setEditingStore(null);
+      await fetchAdminData();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Không thể cập nhật thông tin cửa hàng');
+    } finally {
+      setSavingStore(false);
+    }
+  };
+
+  const handleReactivateStore = async (storeId: string) => {
+    try {
+      const res = await api.patch(`/admin/stores/${encodeURIComponent(storeId)}`, { status: 'ACTIVE' });
+      toast.success(res.data?.message || 'Đã kích hoạt lại cửa hàng thành công');
+      await fetchAdminData();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Không thể kích hoạt lại cửa hàng');
+    }
   };
 
   const loadSubscriptionPlans = async () => {
@@ -900,8 +983,67 @@ export const AdminDashboard: React.FC = () => {
     }
   };
 
-  // Change user role
+  // Change user role (Platform Role Modal + safe fallback)
+  const openPlatformRoleModal = (u: any, defaultTarget?: string) => {
+    setPlatformRoleModalUser(u);
+    setPlatformRoleTarget(defaultTarget || u.role || 'SYSTEM_STAFF');
+    setPlatformRoleReason('');
+  };
+
+  const handleSubmitPlatformRole = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!platformRoleModalUser) return;
+    const userId = String(platformRoleModalUser.id || platformRoleModalUser.userId);
+    const isRevoke = platformRoleTarget === 'REVOKE' || platformRoleTarget === 'CUSTOMER';
+    setPlatformRoleSaving(true);
+    try {
+      let resolvedRole = isRevoke ? 'CUSTOMER' : platformRoleTarget;
+      let msg = '';
+      try {
+        const res = isRevoke
+          ? await api.delete(`/admin/users/${encodeURIComponent(userId)}/platform-role`, {
+              data: { reason: platformRoleReason.trim() || undefined },
+            })
+          : await api.post(`/admin/users/${encodeURIComponent(userId)}/platform-role`, {
+              roleCode: platformRoleTarget,
+              reason: platformRoleReason.trim() || undefined,
+            });
+        resolvedRole = res.data?.data?.newEffectiveRole || res.data?.data?.roleCode || resolvedRole;
+        msg = res.data?.message || '';
+      } catch (err: any) {
+        // Fallback to legacy endpoint only if /platform-role route does not exist yet
+        if (err?.response?.status === 404 || err?.response?.status === 405) {
+          const fallbackRes = await api.post(`/admin/users/${encodeURIComponent(userId)}/role`, { role: resolvedRole });
+          resolvedRole = fallbackRes.data?.data?.newEffectiveRole || resolvedRole;
+          msg = fallbackRes.data?.message || '';
+        } else {
+          throw err;
+        }
+      }
+      setUsersList((prev) =>
+        prev.map((u) =>
+          u.id === userId || String(u.id) === String(userId) || String(u.userId) === String(userId)
+            ? { ...u, role: resolvedRole }
+            : u
+        )
+      );
+      toast.success(msg || `Đã cập nhật vai trò người dùng thành ${resolvedRole}`);
+      setPlatformRoleModalUser(null);
+      setPlatformRoleReason('');
+      void fetchAdminData();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Không thể cập nhật vai trò người dùng');
+    } finally {
+      setPlatformRoleSaving(false);
+    }
+  };
+
   const handleChangeUserRole = async (userId: string, newRole: string) => {
+    const targetUser = usersList.find((u) => String(u.id || u.userId) === String(userId));
+    if (targetUser) {
+      openPlatformRoleModal(targetUser, newRole);
+      return;
+    }
     try {
       const res = await api.post(`/admin/users/${encodeURIComponent(userId)}/role`, { role: newRole });
       const resolvedRole = res.data?.data?.newEffectiveRole || newRole;
@@ -1331,7 +1473,7 @@ export const AdminDashboard: React.FC = () => {
                     animate="visible"
                     className="divide-y divide-zinc-200 dark:divide-zinc-800"
                   >
-                    {filteredAllStores.map((s) => {
+                    {paginatedStores.map((s) => {
                       const sId = s.id || s.storeId;
                       return (
                         <motion.tr
@@ -1372,29 +1514,99 @@ export const AdminDashboard: React.FC = () => {
                           </span>
                         </td>
                         <td className="py-2 px-3 text-right">
-                          {s.status === 'ACTIVE' ? (
+                          <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
                             <button
                               type="button"
-                              onClick={() => openStoreActionModal(String(sId), 'SUSPEND')}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300 cursor-pointer"
+                              onClick={() => openEditStoreModal(s)}
+                              title="Chỉnh sửa thông tin cửa hàng"
+                              className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[11px] font-medium text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 cursor-pointer"
                             >
-                              <ShieldAlert className="h-3.5 w-3.5" /> Ngừng hoạt động
+                              <Edit3 className="h-3 w-3" /> Sửa
                             </button>
-                          ) : (
                             <button
                               type="button"
-                              onClick={() => handleApprove(String(sId))}
-                              className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 cursor-pointer"
+                              onClick={() => setAuditDrawerEntity({ type: 'STORE', id: String(sId), label: s.name || s.code || `#${sId}` })}
+                              title="Lịch sử thay đổi (Audit Log)"
+                              className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2 py-1.5 text-[11px] font-medium text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 cursor-pointer"
                             >
-                              <CheckCircle2 className="h-3.5 w-3.5" /> Kích hoạt lại
+                              <History className="h-3 w-3" /> Lịch sử
                             </button>
-                          )}
+                            {s.status === 'ACTIVE' ? (
+                              <button
+                                type="button"
+                                onClick={() => openStoreActionModal(String(sId), 'SUSPEND')}
+                                className="inline-flex items-center gap-1 rounded-lg border border-rose-200 bg-rose-50 px-2.5 py-1.5 text-[11px] font-semibold text-rose-700 transition-colors hover:bg-rose-100 dark:border-rose-900 dark:bg-rose-950/40 dark:text-rose-300 cursor-pointer"
+                              >
+                                <ShieldAlert className="h-3.5 w-3.5" /> Ngừng
+                              </button>
+                            ) : s.status === 'PENDING' ? (
+                              <button
+                                type="button"
+                                onClick={() => handleApprove(String(sId))}
+                                className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 cursor-pointer"
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" /> Phê duyệt
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                onClick={() => void handleReactivateStore(String(sId))}
+                                className="inline-flex items-center gap-1 rounded-lg border border-emerald-200 bg-emerald-50 px-2.5 py-1.5 text-[11px] font-semibold text-emerald-700 transition-colors hover:bg-emerald-100 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-300 cursor-pointer"
+                              >
+                                <CheckCircle2 className="h-3.5 w-3.5" /> Kích hoạt lại
+                              </button>
+                            )}
+                          </div>
                         </td>
                       </motion.tr>
                     );
                   })}
                   </motion.tbody>
                 </table>
+              </div>
+            )}
+
+            {filteredAllStores.length > 0 && (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-2 px-1 text-xs text-zinc-600 dark:text-zinc-400">
+                <div className="text-[11px]">
+                  Hiển thị <span className="font-semibold text-zinc-900 dark:text-white">{(safeStoresPage - 1) * STORES_PER_PAGE + 1}</span> - <span className="font-semibold text-zinc-900 dark:text-white">{Math.min(safeStoresPage * STORES_PER_PAGE, filteredAllStores.length)}</span> trong số <span className="font-semibold text-zinc-900 dark:text-white">{filteredAllStores.length}</span> cửa hàng
+                </div>
+                {totalStoresPages > 1 && (
+                  <div className="flex items-center gap-1">
+                    <button
+                      type="button"
+                      disabled={safeStoresPage <= 1}
+                      onClick={() => setStoresPage((p) => Math.max(1, p - 1))}
+                      className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 disabled:cursor-not-allowed dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 cursor-pointer"
+                    >
+                      <ChevronLeft className="h-3.5 w-3.5" /> Trước
+                    </button>
+
+                    {Array.from({ length: totalStoresPages }, (_, i) => i + 1).map((pageNum) => (
+                      <button
+                        key={pageNum}
+                        type="button"
+                        onClick={() => setStoresPage(pageNum)}
+                        className={`min-w-7 rounded-lg px-2.5 py-1 text-xs font-semibold transition-colors cursor-pointer ${
+                          safeStoresPage === pageNum
+                            ? 'bg-[#0E6BA8] text-white shadow-2xs'
+                            : 'border border-zinc-200 bg-white text-zinc-700 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300'
+                        }`}
+                      >
+                        {pageNum}
+                      </button>
+                    ))}
+
+                    <button
+                      type="button"
+                      disabled={safeStoresPage >= totalStoresPages}
+                      onClick={() => setStoresPage((p) => Math.min(totalStoresPages, p + 1))}
+                      className="inline-flex items-center gap-1 rounded-lg border border-zinc-200 bg-white px-2.5 py-1 text-xs font-medium text-zinc-700 hover:bg-zinc-50 disabled:opacity-40 disabled:cursor-not-allowed dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-200 cursor-pointer"
+                    >
+                      Sau <ChevronRight className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1469,6 +1681,23 @@ export const AdminDashboard: React.FC = () => {
             </div>
           </div>
 
+          {platformMemberships.length > 0 && (
+            <div className="rounded-lg border border-sky-200/80 bg-sky-50/50 dark:border-sky-900/50 dark:bg-sky-950/20 p-3 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-semibold text-zinc-900 dark:text-white">Thành viên vận hành sàn đang hoạt động ({platformMemberships.length})</span>
+                <span className="text-[11px] text-zinc-500">Dữ liệu từ /admin/platform-memberships</span>
+              </div>
+              <div className="flex flex-wrap gap-2">
+                {platformMemberships.slice(0, 10).map((m: any, idx: number) => (
+                  <span key={m.membershipId || m.userId || idx} className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 text-[11px] font-medium text-zinc-700 dark:text-zinc-200">
+                    <span>{m.user?.fullName || m.fullName || `User #${m.userId}`}</span>
+                    <span className="px-1.5 py-0.2 rounded bg-[#0E6BA8]/10 text-[#0E6BA8] text-[10px] font-bold">{m.roleCode || m.role}</span>
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Users Table */}
           <div tabIndex={0} role="region" aria-label="Bảng dữ liệu, cuộn ngang để xem đầy đủ" className="overflow-x-auto border border-zinc-200 dark:border-zinc-800 rounded-lg bg-white dark:bg-zinc-900">
             <table className="w-full text-left text-xs">
@@ -1532,16 +1761,33 @@ export const AdminDashboard: React.FC = () => {
                       </span>
                     </td>
                     <td className="py-2 px-3 text-right">
-                      <button
-                        onClick={() => handleToggleUserStatus(u.id)}
-                        className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-all cursor-pointer active:scale-[0.97] ${
-                          (u.isActive ?? (u.status === 'ACTIVE'))
-                            ? 'border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-rose-950/40'
-                            : 'border-[#0E6BA8] bg-[#0E6BA8] text-white hover:bg-[#0B5586] shadow-sm'
-                        }`}
-                      >
-                        {(u.isActive ?? (u.status === 'ACTIVE')) ? 'Khóa TK' : 'Mở Khóa'}
-                      </button>
+                      <div className="inline-flex flex-wrap items-center justify-end gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => openPlatformRoleModal(u)}
+                          className="px-2 py-1 rounded-md text-[11px] font-medium border border-[#0E6BA8]/30 bg-sky-50/70 text-[#0E6BA8] hover:bg-sky-100 dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-300 cursor-pointer"
+                        >
+                          Phân quyền
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setAuditDrawerEntity({ type: 'USER', id: String(u.id || u.userId), label: u.fullName || u.email || `#${u.id}` })}
+                          title="Lịch sử thay đổi (Audit Log)"
+                          className="px-2 py-1 rounded-md text-[11px] font-medium border border-zinc-200 bg-white text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 cursor-pointer inline-flex items-center gap-1"
+                        >
+                          <History className="w-3 h-3" /> Lịch sử
+                        </button>
+                        <button
+                          onClick={() => handleToggleUserStatus(u.id)}
+                          className={`px-2.5 py-1 rounded-md text-xs font-medium border transition-all cursor-pointer active:scale-[0.97] ${
+                            (u.isActive ?? (u.status === 'ACTIVE'))
+                              ? 'border-slate-200 hover:bg-rose-50 hover:text-rose-600 hover:border-rose-200 text-slate-700 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-rose-950/40'
+                              : 'border-[#0E6BA8] bg-[#0E6BA8] text-white hover:bg-[#0B5586] shadow-sm'
+                          }`}
+                        >
+                          {(u.isActive ?? (u.status === 'ACTIVE')) ? 'Khóa TK' : 'Mở Khóa'}
+                        </button>
+                      </div>
                     </td>
                   </motion.tr>
                 )))}
@@ -2517,6 +2763,258 @@ export const AdminDashboard: React.FC = () => {
         setEditingPlan(null);
         void loadSubscriptionPlans();
       }} />}
+
+      {/* 2.2 Modal Phân quyền Hệ thống (Platform Role & Trước -> Sau) */}
+      {platformRoleModalUser && createPortal(
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/65 backdrop-blur-xs p-4">
+          <form
+            onSubmit={handleSubmitPlatformRole}
+            className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 space-y-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Cấp / Thu hồi vai trò hệ thống (Platform Role)</h3>
+                <p className="mt-0.5 text-xs text-zinc-500">
+                  Tài khoản: <strong>{platformRoleModalUser.fullName || platformRoleModalUser.email}</strong> (#{platformRoleModalUser.id || platformRoleModalUser.userId})
+                </p>
+              </div>
+              <button type="button" onClick={() => setPlatformRoleModalUser(null)} className="text-zinc-400 hover:text-zinc-600">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 p-3 text-xs">
+              <div>
+                <span className="text-[10px] uppercase font-bold text-zinc-400 block">Quyền Trước đó</span>
+                <span className="font-semibold text-zinc-900 dark:text-white mt-0.5 block">{platformRoleModalUser.role || 'CUSTOMER'}</span>
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  {platformRoleModalUser.role === 'SUPER_ADMIN'
+                    ? 'Toàn quyền hệ thống, duyệt chi PayOS Payout & phân quyền.'
+                    : platformRoleModalUser.role === 'SYSTEM_ADMIN'
+                      ? 'Quản trị vận hành, kho nút, eKYC, hoàn cọc.'
+                      : platformRoleModalUser.role === 'ADMIN'
+                        ? 'Duyệt hồ sơ eKYC, đối soát hoàn cọc & hợp đồng.'
+                        : platformRoleModalUser.role === 'SYSTEM_STAFF'
+                          ? 'Chỉ vào kho nút, bảo hành & nhận nút trả (không vào tài chính).'
+                          : 'Khách hàng / Chủ cửa hàng thông thường.'}
+                </p>
+              </div>
+              <div className="sm:border-l sm:border-zinc-200 dark:sm:border-zinc-700 sm:pl-3">
+                <span className="text-[10px] uppercase font-bold text-[#0E6BA8] block">Quyền Sau khi lưu</span>
+                <span className="font-semibold text-[#0E6BA8] mt-0.5 block">
+                  {platformRoleTarget === 'REVOKE' ? 'CUSTOMER (Thu hồi quyền sàn)' : platformRoleTarget}
+                </span>
+                <p className="text-[11px] text-zinc-500 mt-1">
+                  {platformRoleTarget === 'SUPER_ADMIN'
+                    ? 'Toàn quyền hệ thống, duyệt chi PayOS Payout & phân quyền.'
+                    : platformRoleTarget === 'SYSTEM_ADMIN'
+                      ? 'Quản trị vận hành, kho nút, eKYC, hoàn cọc.'
+                      : platformRoleTarget === 'ADMIN'
+                        ? 'Duyệt hồ sơ eKYC, đối soát hoàn cọc & hợp đồng.'
+                        : platformRoleTarget === 'SYSTEM_STAFF'
+                          ? 'Chỉ vào kho nút, bảo hành & nhận nút trả (không vào tài chính).'
+                          : 'Thu hồi toàn bộ quyền vận hành sàn về vai trò Khách hàng.'}
+                </p>
+              </div>
+            </div>
+
+            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Chọn vai trò mới
+              <select
+                value={platformRoleTarget}
+                onChange={(e) => setPlatformRoleTarget(e.target.value)}
+                className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+              >
+                <option value="SUPER_ADMIN">SUPER_ADMIN — Quản trị tối cao</option>
+                <option value="SYSTEM_ADMIN">SYSTEM_ADMIN — Quản trị hệ thống</option>
+                <option value="ADMIN">ADMIN — Quản trị viên vận hành</option>
+                <option value="SYSTEM_STAFF">SYSTEM_STAFF — Kỹ thuật hệ thống (Kho nút & Bảo hành)</option>
+                <option value="REVOKE">Thu hồi quyền sàn (Về CUSTOMER)</option>
+              </select>
+            </label>
+
+            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Lý do thay đổi quyền (reason)
+              <input
+                type="text"
+                value={platformRoleReason}
+                onChange={(e) => setPlatformRoleReason(e.target.value)}
+                placeholder="VD: Bổ nhiệm nhân sự trực kho thiết bị Q1..."
+                className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+              />
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+              <button
+                type="button"
+                disabled={platformRoleSaving}
+                onClick={() => setPlatformRoleModalUser(null)}
+                className="px-3.5 py-2 rounded-lg border border-zinc-200 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                disabled={platformRoleSaving}
+                className="px-4 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
+              >
+                {platformRoleSaving ? 'Đang lưu...' : 'Xác nhận phân quyền'}
+              </button>
+            </div>
+          </form>
+        </div>,
+        document.body
+      )}
+
+      {/* 2.3 Modal Chỉnh sửa thông tin Store (PATCH /admin/stores/:id) */}
+      {editingStore && createPortal(
+        <div className="fixed inset-0 z-[110] flex items-center justify-center bg-slate-950/65 backdrop-blur-xs p-4">
+          <form
+            onSubmit={handleSaveEditStore}
+            className="w-full max-w-lg rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 space-y-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Chỉnh sửa thông tin cửa hàng</h3>
+                <p className="mt-0.5 text-xs text-zinc-500">Mã cửa hàng: {editingStore.code || `#${editingStore.id || editingStore.storeId}`}</p>
+              </div>
+              <button type="button" onClick={() => setEditingStore(null)} className="text-zinc-400 hover:text-zinc-600">
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+              <label className="block font-semibold text-zinc-700 dark:text-zinc-300">
+                Tên cửa hàng
+                <input
+                  required
+                  value={editStoreForm.name}
+                  onChange={(e) => setEditStoreForm(f => ({ ...f, name: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </label>
+              <label className="block font-semibold text-zinc-700 dark:text-zinc-300">
+                Trạng thái
+                <select
+                  value={editStoreForm.status}
+                  onChange={(e) => setEditStoreForm(f => ({ ...f, status: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+                >
+                  <option value="ACTIVE">ACTIVE — Đang hoạt động</option>
+                  <option value="SUSPENDED">SUSPENDED — Tạm ngừng</option>
+                  <option value="INACTIVE">INACTIVE — Ngừng kích hoạt</option>
+                </select>
+              </label>
+              <label className="block font-semibold text-zinc-700 dark:text-zinc-300">
+                Số điện thoại (10-11 số)
+                <input
+                  value={editStoreForm.phone}
+                  onChange={(e) => setEditStoreForm(f => ({ ...f, phone: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </label>
+              <label className="block font-semibold text-zinc-700 dark:text-zinc-300">
+                Email liên hệ
+                <input
+                  type="email"
+                  value={editStoreForm.email}
+                  onChange={(e) => setEditStoreForm(f => ({ ...f, email: e.target.value }))}
+                  className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+                />
+              </label>
+            </div>
+
+            <label className="block text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+              Địa chỉ kho / cửa hàng
+              <input
+                value={editStoreForm.address}
+                onChange={(e) => setEditStoreForm(f => ({ ...f, address: e.target.value }))}
+                className="mt-1 w-full rounded-lg border border-zinc-200 bg-white px-3 py-2 text-xs dark:border-zinc-700 dark:bg-zinc-950"
+              />
+            </label>
+
+            <div className="flex justify-end gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+              <button
+                type="button"
+                disabled={savingStore}
+                onClick={() => setEditingStore(null)}
+                className="px-3.5 py-2 rounded-lg border border-zinc-200 text-xs font-semibold text-zinc-600 dark:border-zinc-700 dark:text-zinc-300"
+              >
+                Hủy
+              </button>
+              <button
+                type="submit"
+                disabled={savingStore}
+                className="px-4 py-2 rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] disabled:opacity-50 text-white text-xs font-semibold cursor-pointer"
+              >
+                {savingStore ? 'Đang lưu...' : 'Lưu thông tin Store'}
+              </button>
+            </div>
+          </form>
+        </div>,
+        document.body
+      )}
+
+      {/* 2.4 Slide-over Drawer: Lịch sử kiểm toán theo đối tượng (Entity Audit Log Drawer) */}
+      {auditDrawerEntity && createPortal(
+        <div className="fixed inset-0 z-[110] flex justify-end bg-slate-950/50 backdrop-blur-xs">
+          <div className="h-full w-full max-w-md bg-white dark:bg-zinc-900 border-l border-zinc-200 dark:border-zinc-800 shadow-2xl flex flex-col">
+            <div className="p-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-bold text-zinc-900 dark:text-white flex items-center gap-1.5">
+                  <History className="w-4 h-4 text-[#0E6BA8]" />
+                  <span>Lịch sử kiểm toán ({auditDrawerEntity.type === 'STORE' ? 'Cửa hàng' : 'Tài khoản'})</span>
+                </h3>
+                <p className="text-xs text-zinc-500 mt-0.5">{auditDrawerEntity.label} · ID #{auditDrawerEntity.id}</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setAuditDrawerEntity(null)}
+                className="p-1.5 rounded-lg text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            <div className="flex-1 overflow-y-auto p-4 space-y-3">
+              {(() => {
+                const entityLogs = auditLogs.filter((log: any) => {
+                  const hay = JSON.stringify(log).toLowerCase();
+                  return (
+                    String(log.entityId || '') === String(auditDrawerEntity.id) ||
+                    hay.includes(String(auditDrawerEntity.id).toLowerCase()) ||
+                    (auditDrawerEntity.label && hay.includes(auditDrawerEntity.label.toLowerCase()))
+                  );
+                });
+                if (entityLogs.length === 0) {
+                  return (
+                    <div className="py-12 text-center text-xs text-zinc-500 space-y-1.5">
+                      <History className="w-7 h-7 mx-auto text-zinc-300" />
+                      <p className="font-semibold text-zinc-700 dark:text-zinc-300">Chưa có bản ghi kiểm toán riêng cho đối tượng này</p>
+                      <p>Các thao tác duyệt, tạm ngừng, đổi quyền hoặc cập nhật sẽ xuất hiện tại đây.</p>
+                    </div>
+                  );
+                }
+                return entityLogs.map((log: any, idx: number) => (
+                  <div key={log.id || idx} className="p-3 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-800/40 text-xs space-y-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <span className="font-semibold text-[#0E6BA8]">{adminActionLabel(log.action)}</span>
+                      <span className="text-[11px] text-zinc-400">{log.createdAt ? new Date(log.createdAt).toLocaleString('vi-VN') : ''}</span>
+                    </div>
+                    <p className="text-[11px] text-zinc-600 dark:text-zinc-300">
+                      {log.details || log.newValues || `${adminEntityLabel(log.entity)} #${log.entityId || auditDrawerEntity.id}`}
+                    </p>
+                    {log.user?.fullName && (
+                      <p className="text-[10px] text-zinc-400">Thực hiện bởi: {log.user.fullName}</p>
+                    )}
+                  </div>
+                ));
+              })()}
+            </div>
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

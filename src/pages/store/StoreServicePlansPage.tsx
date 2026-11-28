@@ -13,6 +13,7 @@ import { BankError, bankButton } from '../../components/common/BankingPrimitives
 import { card, primaryButton } from '../operations/OperationPrimitives';
 import { getApiRetryUntil } from '../../services/request-backoff';
 import { StorePlanPayosPayment } from '../../components/store/StorePlanPayosPayment';
+import { notifyCatalogChanged } from '../../services/catalog-sync';
 
 const flow = createStorePlanFlow(api);
 type PendingRegistration = { planId: string; key: string };
@@ -136,7 +137,7 @@ export const StoreServicePlansWorkspace: React.FC<{ scope: string; storeId: stri
       dispatched = true;
       const registration = await flow.subscribe(storeId, request.planId, request.key);
       if (!alive.current) return;
-      savePending(null); setReceipt(registration); setSelected(null);
+      savePending(null); setReceipt(registration); setSelected(null); notifyCatalogChanged();
       setNotice('Hệ thống đã ghi nhận đăng ký gói dịch vụ. Quyền đăng sản phẩm được mở theo thời hạn có hiệu lực thực tế.');
       
       await Promise.all([loadCurrent(), loadWallet()]);

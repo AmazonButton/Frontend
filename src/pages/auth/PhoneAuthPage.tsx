@@ -1,10 +1,11 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Link, useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Phone, ArrowRight, Loader2, ShieldCheck } from 'lucide-react';
 import type { ConfirmationResult, RecaptchaVerifier } from 'firebase/auth';
 import { useAuth } from '../../context/AuthContext';
 import { api } from '../../services/api';
-import { exchangePhoneCredential, normalizePhoneNumber, roleHome } from '../../services/phone-auth-flow';
+import { exchangePhoneCredential, normalizePhoneNumber } from '../../services/phone-auth-flow';
+import { resolvePostLoginRedirect } from '../../utils/authority';
 import { PageBackButton } from '../../components/common/PageBackButton';
 import { WorkflowNotice, WorkflowReveal, workflowButton, workflowInput, workflowSecondary } from '../../components/operations/WorkflowUI';
 import { workflowError } from '../../utils/workflow';
@@ -14,6 +15,8 @@ export const PhoneAuthPage: React.FC = () => {
   const mode = params.get('mode') === 'verify' ? 'verify' : params.get('mode') === 'register' ? 'register' : 'login';
   const { user, login, refreshUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const fromLocation = (location.state as any)?.from || null;
   const [phone, setPhone] = useState(mode === 'verify' ? user?.phone || '' : '');
   const [fullName, setFullName] = useState('');
   const [email, setEmail] = useState('');
@@ -67,7 +70,7 @@ export const PhoneAuthPage: React.FC = () => {
       const result = await exchangePhoneCredential(api, mode, credentialToken.current, { fullName, email });
       if (!alive.current) return;
       if (mode === 'verify') { await refreshUser(); setStage('complete'); setNotice('Số điện thoại đã được xác minh và lưu vào tài khoản.'); }
-      else if (result.token && result.user) { login(result.token, result.user, result.refreshToken); navigate(roleHome(result.user.role), { replace: true }); }
+      else if (result.token && result.user) { login(result.token, result.user, result.refreshToken); navigate(resolvePostLoginRedirect(result.user.role, fromLocation), { replace: true }); }
       const sdk = await import('firebase/auth');
       const firebase = await import('../../services/firebase-web');
       await sdk.signOut(sdk.getAuth(firebase.getWebFirebaseApp()));

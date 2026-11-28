@@ -18,10 +18,10 @@ export type OrderStatusType = (typeof VALID_ORDER_STATUSES)[number];
 
 export const ALLOWED_ORDER_TRANSITIONS: Record<OrderStatusType, readonly OrderStatusType[]> = {
   PENDING: ['CONFIRMED', 'CANCELLED', 'REJECTED'],
-  CONFIRMED: ['PREPARING', 'READY_FOR_DELIVERY', 'SHIPPING', 'CANCELLED', 'REJECTED'],
-  PREPARING: ['READY_FOR_DELIVERY', 'SHIPPING', 'COMPLETED', 'CANCELLED'],
-  READY_FOR_DELIVERY: ['SHIPPING', 'DELIVERED', 'COMPLETED', 'CANCELLED'],
-  SHIPPING: ['DELIVERED', 'COMPLETED', 'DELIVERY_FAILED', 'CANCELLED'],
+  CONFIRMED: ['PREPARING', 'CANCELLED', 'REJECTED'],
+  PREPARING: ['READY_FOR_DELIVERY', 'CANCELLED'],
+  READY_FOR_DELIVERY: ['SHIPPING', 'CANCELLED'],
+  SHIPPING: ['DELIVERED', 'DELIVERY_FAILED', 'CANCELLED'],
   DELIVERY_FAILED: ['SHIPPING', 'CANCELLED'],
   DELIVERED: ['COMPLETED'],
   COMPLETED: [],
@@ -33,7 +33,14 @@ export class UpdateOrderStatusDto {
   @IsNotEmpty({ message: 'Trạng thái đơn hàng không được để trống' })
   @IsString()
   @Transform(({ value }) => {
-    if (value === 'OUT_FOR_DELIVERY') return 'READY_FOR_DELIVERY';
+    if (typeof value === 'string') {
+      const trimmed = value.trim().toUpperCase();
+      // Chuẩn hóa alias frontend OUT_FOR_DELIVERY -> READY_FOR_DELIVERY
+      if (trimmed === 'OUT_FOR_DELIVERY') {
+        return 'READY_FOR_DELIVERY';
+      }
+      return trimmed;
+    }
     return value;
   })
   @IsIn([...VALID_ORDER_STATUSES], {

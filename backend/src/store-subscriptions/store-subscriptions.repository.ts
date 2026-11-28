@@ -13,30 +13,49 @@ export class StoreSubscriptionsRepository {
     });
   }
 
-  async findFirstActivePlan() {
-    return this.prisma.subscriptionPlan.findFirst({
-      where: { isActive: true },
-      orderBy: { planId: 'asc' },
-    });
-  }
-
-  async createTrialSubscription(storeId: bigint, planId: bigint) {
-    const now = new Date();
-    const endDate = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-    return this.prisma.storeSubscription.create({
-      data: {
-        storeId,
-        planId,
-        startDate: now,
-        endDate,
-        status: 'ACTIVE',
-      },
-      include: { plan: true },
-    });
-  }
-
   async countTotalPlans(): Promise<number> {
     return this.prisma.subscriptionPlan.count();
+  }
+
+  async listActivePlans() {
+    return this.prisma.subscriptionPlan.findMany({
+      where: { isActive: true },
+      orderBy: { price: 'asc' },
+    });
+  }
+
+  async findStoreSubscriptions(
+    storeId: bigint,
+    options: { skip: number; take: number; status?: string },
+  ) {
+    const where: any = { storeId };
+    if (options.status) {
+      where.status = options.status;
+    }
+
+    const [total, items] = await Promise.all([
+      this.prisma.storeSubscription.count({ where }),
+      this.prisma.storeSubscription.findMany({
+        where,
+        skip: options.skip,
+        take: options.take,
+        include: { plan: true },
+        orderBy: { createdAt: 'desc' },
+      }),
+    ]);
+
+    return { total, items };
+  }
+
+  async findStoreSubscriptionById(subscriptionId: bigint, storeId?: bigint) {
+    const where: any = { subscriptionId };
+    if (storeId) {
+      where.storeId = storeId;
+    }
+    return this.prisma.storeSubscription.findFirst({
+      where,
+      include: { plan: true },
+    });
   }
 
   async countStoreProducts(storeId: bigint): Promise<number> {
@@ -46,14 +65,60 @@ export class StoreSubscriptionsRepository {
   }
 
   async getCurrentSubscription(storeId: bigint) {
+    const now = new Date();
+    // 1. Prioritize currently running subscription: startDate <= now AND endDate >= now
+    const runningSub = await this.prisma.storeSubscription.findFirst({
+      where: {
+        storeId,
+        status: 'ACTIVE',
+        startDate: { lte: now },
+        endDate: { gte: now },
+      },
+      include: { plan: true },
+      orderBy: { endDate: 'desc' },
+    });
+
+    if (runningSub) {
+      return runningSub;
+    }
+
+    // 2. Fallback to upcoming prepaid subscription if not yet started
+    const upcomingSub = await this.prisma.storeSubscription.findFirst({
+      where: {
+        storeId,
+        status: 'ACTIVE',
+        startDate: { gt: now },
+      },
+      include: { plan: true },
+      orderBy: { startDate: 'asc' },
+    });
+
+    if (upcomingSub) {
+      return upcomingSub;
+    }
+
+    // 3. Fallback: Chỉ trả về gói gần nhất nếu nó vẫn ở trạng thái ACTIVE và chưa hết hạn
     return this.prisma.storeSubscription.findFirst({
       where: {
         storeId,
         status: 'ACTIVE',
-        endDate: { gte: new Date() },
+        endDate: { gte: now },
       },
       include: { plan: true },
       orderBy: { endDate: 'desc' },
+    });
+  }
+
+  async getUpcomingSubscription(storeId: bigint) {
+    const now = new Date();
+    return this.prisma.storeSubscription.findFirst({
+      where: {
+        storeId,
+        status: 'ACTIVE',
+        startDate: { gt: now },
+      },
+      include: { plan: true },
+      orderBy: { startDate: 'asc' },
     });
   }
 

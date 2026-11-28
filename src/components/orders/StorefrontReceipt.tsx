@@ -13,15 +13,16 @@ export const StorefrontReceipt: React.FC<{
   onPayAhead?: (order: Order) => void;
 }> = ({ order, onClose, loggedIn, paymentError, onPayAhead }) => {
   useBodyScrollLock(true);
-  const awaitingPayment = order.paymentMethod === 'PAYOS' && order.paymentStatus !== 'PAID';
-  const isUnpaidCod = order.paymentMethod === 'CASH_ON_DELIVERY' && order.paymentStatus !== 'PAID';
+  const isPaid = ['PAID', 'COMPLETED', 'SUCCESS', 'SUCCEEDED'].includes(String(order.paymentStatus || '').toUpperCase());
+  const awaitingPayment = order.paymentMethod === 'PAYOS' && !isPaid;
+  const isUnpaidCod = order.paymentMethod === 'CASH_ON_DELIVERY' && !isPaid;
 
   return (
     <div className="fixed inset-0 z-[100] flex items-center justify-center bg-slate-900/50 p-4 responsive-modal overflow-y-auto">
       <section role="dialog" aria-modal="true" aria-labelledby="receipt-title" className="relative max-h-[90vh] w-full max-w-lg overflow-y-auto rounded-2xl bg-white p-6 shadow-xl dark:bg-zinc-900">
         <button type="button" aria-label="Đóng xác nhận đơn hàng" onClick={onClose} className="absolute right-4 top-4 p-2 text-slate-500"><X className="h-5 w-5" /></button>
         <CheckCircle2 className="mb-3 h-9 w-9 text-emerald-600" />
-        <h2 id="receipt-title" className="pr-8 text-xl font-bold">{awaitingPayment ? 'Đơn hàng chờ thanh toán' : 'Đặt hàng thành công'}</h2>
+        <h2 id="receipt-title" className="pr-8 text-xl font-bold">{awaitingPayment ? 'Đơn hàng chờ thanh toán' : isPaid ? 'Đơn hàng thanh toán thành công' : 'Đặt hàng thành công'}</h2>
         <p className="mt-2 break-words text-sm text-slate-500">Mã đơn: <strong>{order.orderNumber}</strong></p>
         {paymentError && <p role="alert" className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-amber-800">{paymentError}</p>}
         <h3 className="mb-3 mt-5 font-semibold">Thông tin nhận hàng đã gửi đến cửa hàng</h3>
@@ -34,7 +35,7 @@ export const StorefrontReceipt: React.FC<{
               <span className="inline-flex items-center gap-1.5 rounded-md bg-amber-50 px-2.5 py-1 text-xs font-semibold text-amber-700 border border-amber-200">
                 Chờ thanh toán PayOS
               </span>
-            ) : order.paymentStatus === 'PAID' ? (
+            ) : isPaid ? (
               <span className="inline-flex items-center gap-1.5 rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-bold text-emerald-700 border border-emerald-200">
                 ✓ Đã thanh toán thành công (PayOS)
               </span>

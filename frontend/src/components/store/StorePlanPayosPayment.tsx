@@ -7,6 +7,7 @@ import { getApiRetryUntil } from '../../services/request-backoff';
 import { BankError, bankButton } from '../common/BankingPrimitives';
 import { primaryButton } from '../../pages/operations/OperationPrimitives';
 import { subscriptionMoney } from '../../services/store-subscription-overview';
+import { notifyCatalogChanged } from '../../services/catalog-sync';
 
 const flow = createStorePlanFlow(api);
 type Payment = { planId: string; chargeId?: string; checkoutUrl?: string; amount?: number };
@@ -38,7 +39,7 @@ export const StorePlanPayosPayment: React.FC<{
       const result = await flow.charge(storeId, payment.chargeId);
       if (!alive.current) return;
       setStatus(result.status); setError('');
-      if (result.status === 'PAID' && !confirmed.current) { confirmed.current = true; save(null); confirmedCallback.current(); }
+      if (result.status === 'PAID' && !confirmed.current) { confirmed.current = true; save(null); notifyCatalogChanged(); confirmedCallback.current(); }
       else if (['CANCELLED', 'CANCELED', 'EXPIRED', 'FAILED'].includes(result.status)) save(null);
     } catch (error) { if (alive.current) setError(financeError(error)); }
     finally { running.current = false; if (alive.current) setBusy(false); }

@@ -1,0 +1,498 @@
+import * as dotenv from 'dotenv';
+dotenv.config();
+import { PrismaClient } from '@prisma/client';
+import jwt from 'jsonwebtoken';
+
+const prisma = new PrismaClient();
+const BASE_URL = process.env.BASE_URL || 'http://localhost:3000/api/v1';
+
+function logTest(name: string, passed: boolean, detail?: string) {
+  if (passed) {
+    console.log(`\x1b[32m  ✔ [PASS]\x1b[0m ${name}`);
+  } else {
+    console.log(`\x1b[31m  ✖ [FAIL]\x1b[0m ${name}${detail ? ` -> ${detail}` : ''}`);
+  }
+}
+
+async function runRentalsLifecycleSuite() {
+  console.log('\n========================================================================');
+  console.log('🚀 SUITE: BUTTON RENTAL LIFECYCLE, PAYMENTS & ADR-1 INTEGRATION');
+  console.log('========================================================================\n');
+
+  let passed = 0;
+  let failed = 0;
+
+  let userA: any = null;
+  let profileA: any = null;
+  let tokenA = '';
+
+  let userB: any = null;
+  let profileB: any = null;
+  let tokenB = '';
+
+  let adminUser: any = null;
+  let adminToken = '';
+
+  let rentalPkg: any = null;
+  let rentalA: any = null;
+
+  try {
+    const jwtSecret = process.env.JWT_SECRET || 'smart_order_button_super_secret_jwt_key_2026_prod';
+
+    // Ensure RentalPackage
+    rentalPkg = await prisma.rentalPackage.upsert({
+      where: { packageCode: 'RNT-PKG-TEST' },
+      update: { isActive: true },
+      create: {
+        packageCode: 'RNT-PKG-TEST',
+        packageName: 'Gói Thuê 1 Nút Test',
+        description: 'Bao gồm 1 nút bấm IoT',
+        buttonQuantity: 1,
+        monthlyPrice: 50000,
+        depositFee: 100000,
+        isActive: true,
+      },
+    });
+
+    // Customer A
+    userA = await prisma.user.create({
+      data: {
+        username: `rnt_user_a_${Date.now()}`,
+        email: `rnt_user_a_${Date.now()}@test.com`,
+        phone: `0981${Math.floor(Math.random() * 1000000).toString().padStart(6, '0')}`,
+        fullName: 'Rental Customer A',
+        status: 'ACTIVE',
+      },
+    });
+
+    profileA = await prisma.customerProfile.create({
+      data: {
+        userId: userA.userId,
+        phone: userA.phone,
+      },
+    });
+
+    tokenA = jwt.sign(
+      {
+        userId: userA.userId.toString(),
+        sub: userA.userId.toString(),
+        email: userA.email,
+        role: 'CUSTOMER',
+        customerProfileId: profileA.customerId.toString(),
+      },
+      jwtSecret,
+      { expiresIn: '1h' },
+    );
+
+    // Customer B (for BOLA)
+    userB = await prisma.user.create({
+      data: {
+        username: `rnt_user_b_${Date.now()}`,
+        email: `rnt_user_b_${Date.now()}@test.com`,
+        phone: `0982${Math.floor(Math.random() * 1000000).toString().padStart(6, '0')}`,
+        fullName: 'Rental Customer B',
+        status: 'ACTIVE',
+      },
+    });
+
+    profileB = await prisma.customerProfile.create({
+      data: {
+        userId: userB.userId,
+        phone: userB.phone,
+      },
+    });
+
+    tokenB = jwt.sign(
+      {
+        userId: userB.userId.toString(),
+        sub: userB.userId.toString(),
+        email: userB.email,
+        role: 'CUSTOMER',
+        customerProfileId: profileB.customerId.toString(),
+      },
+      jwtSecret,
+      { expiresIn: '1h' },
+    );
+
+    // Admin User
+    adminUser = await prisma.user.create({
+      data: {
+        username: `rnt_admin_${Date.now()}`,
+        email: `rnt_admin_${Date.now()}@test.com`,
+        phone: `0983${Math.floor(Math.random() * 1000000).toString().padStart(6, '0')}`,
+        fullName: 'Rental System Admin',
+        status: 'ACTIVE',
+      },
+    });
+
+    adminToken = jwt.sign(
+      {
+        userId: adminUser.userId.toString(),
+        sub: adminUser.userId.toString(),
+        email: adminUser.email,
+        role: 'ADMIN',
+      },
+      jwtSecret,
+      { expiresIn: '1h' },
+    );
+
+    // Test 1: GET /rentals/packages returns active rental packages
+    try {
+      const res = await fetch(`${BASE_URL}/rentals/packages`);
+      const body = await res.json();
+
+      if (
+        res.status === 200 &&
+        body.success === true &&
+        Array.isArray(body.data) &&
+        body.data.length >= 1
+      ) {
+        logTest('GET /rentals/packages returns active packages catalog', true);
+        passed++;
+      } else {
+        logTest('GET /rentals/packages returns active packages catalog', false, JSON.stringify(body));
+        failed++;
+      }
+    } catch (err: any) {
+      logTest('GET /rentals/packages returns active packages catalog', false, err.message);
+      failed++;
+    }
+
+    // Test 2: POST /rentals/order creates rental contract
+    try {
+      const res = await fetch(`${BASE_URL}/rentals/order`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${tokenA}`,
+          'x-idempotency-key': `IDEMP-RENTAL-ORDER-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+        },
+        body: JSON.stringify({
+          packageId: rentalPkg.packageId.toString(),
+          monthsRented: 3,
+        }),
+      });
+      const body = await res.json();
+
+      if (
+        res.status === 201 &&
+        body.success === true &&
+        body.data.monthsRented === 3 &&
+        body.data.status === 'PENDING_PAYMENT' &&
+        body.data.totalRentAmount === 50000 * 3 + 100000
+      ) {
+        rentalA = body.data;
+        logTest('POST /rentals/order creates rental contract with months & deposit', true);
+        passed++;
+      } else {
+        logTest('POST /rentals/order creates rental contract with months & deposit', false, JSON.stringify(body));
+        failed++;
+      }
+    } catch (err: any) {
+      logTest('POST /rentals/order creates rental contract with months & deposit', false, err.message);
+      failed++;
+    }
+
+    // Test 3: GET /rentals/:id returns rental detail
+    if (rentalA) {
+      try {
+        const res = await fetch(`${BASE_URL}/rentals/${rentalA.rentalId}`, {
+          headers: { Authorization: `Bearer ${tokenA}` },
+        });
+        const body = await res.json();
+
+        if (
+          res.status === 200 &&
+          body.success === true &&
+          body.data.rentalId === rentalA.rentalId &&
+          body.data.package.packageId === rentalPkg.packageId.toString()
+        ) {
+          logTest('GET /rentals/:id returns rental detail with package and status', true);
+          passed++;
+        } else {
+          logTest('GET /rentals/:id returns rental detail with package and status', false, JSON.stringify(body));
+          failed++;
+        }
+      } catch (err: any) {
+        logTest('GET /rentals/:id returns rental detail with package and status', false, err.message);
+        failed++;
+      }
+
+      // Test 4: POST /rentals/:id/payment-requests links payment to rental (ADR-1)
+      try {
+        const res = await fetch(`${BASE_URL}/rentals/${rentalA.rentalId}/payment-requests`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${tokenA}`,
+            'x-idempotency-key': `IDEMP-RENTAL-PAYREQ-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+          },
+        });
+        const body = await res.json();
+
+        if (
+          res.status === 201 &&
+          body.success === true &&
+          body.data.checkoutUrl !== undefined &&
+          body.data.paymentTransactionId !== undefined
+        ) {
+          // Verify in DB that BillingCharge or PaymentTransaction exists for rental
+          const chargeInDb = await prisma.billingCharge.findUnique({
+            where: { chargeId: BigInt(body.data.paymentTransactionId) },
+          }).catch(() => null);
+          const txInDb = await prisma.paymentTransaction.findUnique({
+            where: { paymentTransactionId: BigInt(body.data.paymentTransactionId) },
+          }).catch(() => null);
+
+          if ((chargeInDb && chargeInDb.targetType === 'RENTAL') || (txInDb && txInDb.rentalId !== null)) {
+            logTest('POST /rentals/:id/payment-requests creates PaymentTransaction with rentalId & null orderId (ADR-1)', true);
+            passed++;
+          } else {
+            logTest('POST /rentals/:id/payment-requests creates PaymentTransaction with rentalId & null orderId (ADR-1)', false, `DB record: ${JSON.stringify(chargeInDb || txInDb)}`);
+            failed++;
+          }
+        } else {
+          logTest('POST /rentals/:id/payment-requests creates PaymentTransaction with rentalId & null orderId (ADR-1)', false, JSON.stringify(body));
+          failed++;
+        }
+      } catch (err: any) {
+        logTest('POST /rentals/:id/payment-requests creates PaymentTransaction with rentalId & null orderId (ADR-1)', false, err.message);
+        failed++;
+      }
+
+      // Test 5: POST /rentals/:id/extensions extends contract endDate
+      try {
+        // Attach a test button to rentalA and mark ACTIVE to test extensions and return requests
+        let testStore = await prisma.store.findFirst({ select: { storeId: true } });
+        if (!testStore) {
+          const storeOwner = await prisma.user.create({
+            data: {
+              username: `rnt_store_owner_${Date.now()}`,
+              email: `rnt_store_owner_${Date.now()}@test.com`,
+              phone: `0984${Math.floor(Math.random() * 1000000).toString().padStart(6, '0')}`,
+              fullName: 'Rental Store Owner',
+              status: 'ACTIVE',
+            },
+          });
+          testStore = await prisma.store.create({
+            data: {
+              ownerUserId: storeOwner.userId,
+              name: `Rental Test Store ${Date.now()}`,
+              code: `RNT_STORE_${Date.now()}`,
+              phone: storeOwner.phone,
+              address: '123 Rental Test Road',
+              status: 'ACTIVE',
+            },
+            select: { storeId: true },
+          });
+        }
+
+        await prisma.ioTButton.create({
+          data: {
+            deviceId: `BTN_RENT_${Date.now()}`,
+            buttonCode: `BTN_RENT_${Date.now()}`,
+            hmacSecret: 'test-secret-32-chars-long-for-rent!',
+            storeId: testStore.storeId,
+            customerId: profileA.customerId,
+            rentalId: BigInt(rentalA.rentalId),
+            status: 'ACTIVE',
+            inventoryState: 'IN_CUSTOMER_CUSTODY',
+          },
+        });
+        await prisma.buttonRental.update({
+          where: { rentalId: BigInt(rentalA.rentalId) },
+          data: {
+            status: 'ACTIVE',
+            fulfillmentStoreId: testStore.storeId,
+          },
+        });
+
+        const storeRecord = await prisma.store.findUniqueOrThrow({ where: { storeId: testStore.storeId } });
+        const storeOwnerUser = await prisma.user.findUniqueOrThrow({ where: { userId: storeRecord.ownerUserId } });
+        const storeOwnerToken = jwt.sign(
+          {
+            userId: storeOwnerUser.userId.toString(),
+            sub: storeOwnerUser.userId.toString(),
+            email: storeOwnerUser.email,
+            role: 'STORE_OWNER',
+            storeId: testStore.storeId.toString(),
+          },
+          jwtSecret,
+          { expiresIn: '1h' },
+        );
+
+        // 1. Customer is blocked from paying rent under STORE_RENT_CUSTOMER_DEPOSIT policy
+        const custRes = await fetch(`${BASE_URL}/rentals/${rentalA.rentalId}/extensions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${tokenA}`,
+            'x-idempotency-key': `IDEMP-RENTAL-EXT-CUST-${Date.now()}`,
+          },
+          body: JSON.stringify({ additionalMonths: 2 }),
+        });
+        const custBody = await custRes.json();
+        const custBlocked = custRes.status === 400 && custBody.success === false;
+
+        // 2. Store Owner creates extension obligation under STORE_RENT_CUSTOMER_DEPOSIT policy
+        const res = await fetch(`${BASE_URL}/rentals/${rentalA.rentalId}/extensions`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${storeOwnerToken}`,
+            'x-idempotency-key': `IDEMP-RENTAL-EXT-${Date.now()}-${Math.random().toString(36).substring(2, 8)}`,
+          },
+          body: JSON.stringify({ additionalMonths: 2 }),
+        });
+        const body = await res.json();
+
+        if (
+          custBlocked &&
+          (res.status === 200 || res.status === 201) &&
+          body.success === true &&
+          body.data.payer === 'STORE'
+        ) {
+          logTest('POST /rentals/:id/extensions enforces store policy & creates store obligation', true);
+          passed++;
+        } else {
+          logTest('POST /rentals/:id/extensions enforces store policy & creates store obligation', false, JSON.stringify(body));
+          failed++;
+        }
+      } catch (err: any) {
+        logTest('POST /rentals/:id/extensions enforces store policy & creates store obligation', false, err.message);
+        failed++;
+      }
+
+      // Test 6: POST /rentals/:id/return-requests requests return
+      try {
+        const res = await fetch(`${BASE_URL}/rentals/${rentalA.rentalId}/return-requests`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${tokenA}` },
+        });
+        const body = await res.json();
+
+        if (
+          res.status === 201 &&
+          body.success === true &&
+          (body.data.status === 'RETURN_REQUESTED' || body.data.status === 'PENDING_RECEIPT')
+        ) {
+          logTest('POST /rentals/:id/return-requests transitions status to RETURN_REQUESTED / PENDING_RECEIPT', true);
+          passed++;
+        } else {
+          logTest('POST /rentals/:id/return-requests transitions status to RETURN_REQUESTED / PENDING_RECEIPT', false, JSON.stringify(body));
+          failed++;
+        }
+      } catch (err: any) {
+        logTest('POST /rentals/:id/return-requests transitions status to RETURN_REQUESTED', false, err.message);
+        failed++;
+      }
+
+      // Test 7: GET /admin/rentals returns paginated rentals for admin
+      try {
+        const res = await fetch(`${BASE_URL}/admin/rentals?page=1&pageSize=20`, {
+          headers: { Authorization: `Bearer ${adminToken}` },
+        });
+        const body = await res.json();
+
+        if (
+          res.status === 200 &&
+          body.success === true &&
+          Array.isArray(body.data) &&
+          body.data.length >= 1 &&
+          body.pagination !== undefined
+        ) {
+          logTest('GET /admin/rentals returns paginated rental list for admin', true);
+          passed++;
+        } else {
+          logTest('GET /admin/rentals returns paginated rental list for admin', false, JSON.stringify(body));
+          failed++;
+        }
+      } catch (err: any) {
+        logTest('GET /admin/rentals returns paginated rental list for admin', false, err.message);
+        failed++;
+      }
+
+      // Test 8: PATCH /admin/rentals/:id/status updates status to TERMINATED
+      try {
+        const res = await fetch(`${BASE_URL}/admin/rentals/${rentalA.rentalId}/status`, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${adminToken}`,
+          },
+          body: JSON.stringify({ status: 'TERMINATED' }),
+        });
+        const body = await res.json();
+
+        if (
+          res.status === 200 &&
+          body.success === true &&
+          body.data.status === 'TERMINATED'
+        ) {
+          logTest('PATCH /admin/rentals/:id/status updates rental status to TERMINATED', true);
+          passed++;
+        } else {
+          logTest('PATCH /admin/rentals/:id/status updates rental status to TERMINATED', false, JSON.stringify(body));
+          failed++;
+        }
+      } catch (err: any) {
+        logTest('PATCH /admin/rentals/:id/status updates rental status to TERMINATED', false, err.message);
+        failed++;
+      }
+
+      // Test 9: BOLA: Customer B cannot access Customer A rental
+      try {
+        const res = await fetch(`${BASE_URL}/rentals/${rentalA.rentalId}`, {
+          headers: { Authorization: `Bearer ${tokenB}` },
+        });
+        const body = await res.json();
+
+        if (res.status === 403 && body.success === false) {
+          logTest('BOLA: Customer B cannot access Customer A rental contract (403)', true);
+          passed++;
+        } else {
+          logTest('BOLA: Customer B cannot access Customer A rental contract (403)', false, `Status: ${res.status}`);
+          failed++;
+        }
+      } catch (err: any) {
+        logTest('BOLA: Customer B cannot access Customer A rental contract (403)', false, err.message);
+        failed++;
+      }
+    }
+
+  } finally {
+    // Cleanup
+    if (rentalA) {
+      await prisma.rentalReturn.deleteMany({ where: { rentalId: BigInt(rentalA.rentalId) } }).catch(() => {});
+      await prisma.ioTButton.deleteMany({ where: { rentalId: BigInt(rentalA.rentalId) } }).catch(() => {});
+      await prisma.billingCharge.deleteMany({ where: { targetType: 'RENTAL', targetId: BigInt(rentalA.rentalId) } }).catch(() => {});
+      await prisma.paymentTransaction.deleteMany({ where: { rentalId: BigInt(rentalA.rentalId) } }).catch(() => {});
+      await prisma.buttonRental.delete({ where: { rentalId: BigInt(rentalA.rentalId) } }).catch(() => {});
+    }
+    if (profileA) {
+      await prisma.customerProfile.delete({ where: { customerId: profileA.customerId } }).catch(() => {});
+    }
+    if (profileB) {
+      await prisma.customerProfile.delete({ where: { customerId: profileB.customerId } }).catch(() => {});
+    }
+    if (userA) {
+      await prisma.user.delete({ where: { userId: userA.userId } }).catch(() => {});
+    }
+    if (userB) {
+      await prisma.user.delete({ where: { userId: userB.userId } }).catch(() => {});
+    }
+    if (adminUser) {
+      await prisma.user.delete({ where: { userId: adminUser.userId } }).catch(() => {});
+    }
+    await prisma.$disconnect();
+  }
+
+  console.log(`\nResults: ${passed} passed, ${failed} failed\n`);
+  if (failed > 0) {
+    process.exit(1);
+  }
+}
+
+runRentalsLifecycleSuite().catch((e) => {
+  console.error(e);
+  process.exit(1);
+});

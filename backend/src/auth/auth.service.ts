@@ -28,10 +28,13 @@ import {
 import { RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import { LoginByPhoneDto } from './dto/login-by-phone.dto';
 import { FirebasePhoneService } from './firebase-phone.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
+import { OAuth2Client } from 'google-auth-library';
 
 @Injectable()
 export class AuthService {
   private readonly logger = new Logger(AuthService.name);
+  private readonly googleOAuthClient = new OAuth2Client();
   private resendCooldowns = new Map<string, number>();
 
   private getOtpPepper(): string {
@@ -50,46 +53,50 @@ export class AuthService {
     return crypto.createHmac('sha256', pepper).update(`${otpCode.trim()}:${purpose}`).digest('hex');
   }
 
+  public resolveUserRole(user: any): { role: string; storeId: string | null } {
+    let role = 'CUSTOMER';
+    let storeId: string | null = null;
+
+    const superAdminEmails = (process.env.SUPER_ADMIN_EMAILS || 'admin@smartorder.local')
+      .split(',')
+      .map((e) => e.trim().toLowerCase());
+    const isExplicitSuperAdmin =
+      superAdminEmails.includes((user.email || '').toLowerCase()) ||
+      user.username === 'admin';
+
+    const activePlatformStaff = user.storeStaffs?.find(
+      (s: any) =>
+        s.status === 'ACTIVE' &&
+        (s.role?.roleCode === 'SUPER_ADMIN' || s.role?.roleCode === 'SYSTEM_ADMIN' || s.role?.roleCode === 'ADMIN'),
+    );
+
+    if (activePlatformStaff) {
+      role = activePlatformStaff.role.roleCode;
+    } else if (isExplicitSuperAdmin) {
+      role = 'SUPER_ADMIN';
+    } else if (user.ownedStores && user.ownedStores.length > 0) {
+      role = 'STORE_OWNER';
+      storeId = user.ownedStores[0].storeId.toString();
+    } else if (user.storeStaffs && user.storeStaffs.length > 0) {
+      const activeStaff = user.storeStaffs.find((s: any) => s.status === 'ACTIVE');
+      if (activeStaff) {
+        role = activeStaff.role?.roleCode || 'STORE_STAFF';
+        storeId = activeStaff.storeId.toString();
+      } else {
+        role = 'CUSTOMER';
+        storeId = null;
+      }
+    }
+
+    return { role, storeId };
+  }
+
   constructor(
     @Inject(MailService) private readonly mailService: MailService,
     @Inject(AuthRepository) private readonly authRepo: AuthRepository,
     @Inject(JwtService) private readonly jwtService: JwtService,
     @Inject(FirebasePhoneService) private readonly firebasePhoneService: FirebasePhoneService,
   ) {}
-
-  public resolveUserRole(user: any): { role: string; storeId: string | null } {
-    if (!user) {
-      return { role: 'CUSTOMER', storeId: null };
-    }
-
-    const superAdminEmails = (process.env.SUPER_ADMIN_EMAILS || 'admin@smartorder.local,admin@gmail.com')
-      .split(',')
-      .map((e) => e.trim().toLowerCase());
-
-    const isSuperAdmin =
-      user.username === 'admin' ||
-      superAdminEmails.includes((user.email || '').toLowerCase()) ||
-      user.storeStaffs?.some(
-        (s: any) =>
-          s.role?.roleCode === 'SUPER_ADMIN' ||
-          s.role?.roleCode === 'SYSTEM_ADMIN' ||
-          s.role?.roleCode === 'ADMIN',
-      );
-
-    if (isSuperAdmin) {
-      return { role: 'SUPER_ADMIN', storeId: null };
-    }
-    if (user.ownedStores && user.ownedStores.length > 0) {
-      return { role: 'STORE_OWNER', storeId: user.ownedStores[0].storeId.toString() };
-    }
-    if (user.storeStaffs && user.storeStaffs.length > 0) {
-      return {
-        role: user.storeStaffs[0].role?.roleCode || 'STORE_STAFF',
-        storeId: user.storeStaffs[0].storeId.toString(),
-      };
-    }
-    return { role: 'CUSTOMER', storeId: null };
-  }
 
   /**
    * 1. Register new user (Global Customer or Store Owner)
@@ -104,6 +111,27 @@ export class AuthService {
         success: false,
         code: 'MISSING_FIELDS',
         message: 'Vui lòng điền đầy đủ họ tên, tên đăng nhập, email và mật khẩu',
+      });
+    }
+
+    // P2 Invariant Fix (auth/register-reserved-superadmin-identity):
+    const reservedUsernames = ['admin', 'superadmin', 'system_admin', 'administrator', 'root'];
+    if (reservedUsernames.includes(username.toLowerCase())) {
+      throw new BadRequestException({
+        success: false,
+        code: 'RESERVED_USERNAME',
+        message: 'Tên đăng nhập này đã được bảo lưu bởi hệ thống',
+      });
+    }
+
+    const superAdminEmails = (process.env.SUPER_ADMIN_EMAILS || 'admin@smartorder.local')
+      .split(',')
+      .map((e) => e.trim().toLowerCase());
+    if (superAdminEmails.includes(email.toLowerCase())) {
+      throw new BadRequestException({
+        success: false,
+        code: 'RESERVED_EMAIL',
+        message: 'Địa chỉ email này đã được bảo lưu bởi hệ thống quản trị',
       });
     }
 
@@ -135,7 +163,7 @@ export class AuthService {
     const verificationTokenHash = this.hashOtp(registrationOtp, 'EMAIL_VERIFICATION');
     const verificationExpiresAt = new Date(Date.now() + 15 * 60 * 1000);
 
-    // 1. Transactional Registration with ACTIVE status
+    // 1. Transactional Registration with PENDING_VERIFICATION status
     const userCreateData = {
       username,
       email,
@@ -182,53 +210,23 @@ export class AuthService {
         expiresAt: verificationExpiresAt,
       });
 
-      // Dispatch 6-digit OTP to store owner's email asynchronously (non-blocking)
-      this.mailService.sendRegistrationOtp(email, registrationOtp).catch((err) => {
-        this.logger.warn(`Failed to dispatch registration OTP email: ${err.message}`);
-      });
-
-      const accessToken = this.jwtService.sign(
-        {
-          userId: newUser.userId.toString(),
-          email: newUser.email,
-          username: newUser.username,
-          role: 'STORE_OWNER',
-          storeId: newStore.storeId.toString(),
-          customerProfileId: null,
-          tokenType: 'ACCESS',
-        },
-        { expiresIn: '7d' },
-      );
-
-      const rawRefreshToken = crypto.randomBytes(40).toString('hex');
-      const refreshTokenHash = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
-      const refreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-      await this.authRepo.createRefreshToken(newUser.userId, refreshTokenHash, refreshExpiresAt);
-
-      const userPayload = {
-        id: newUser.userId.toString(),
-        userId: newUser.userId.toString(),
-        email: newUser.email,
-        username: newUser.username,
-        fullName: newUser.fullName,
-        role: 'STORE_OWNER',
-        storeId: newStore.storeId.toString(),
-        customerProfileId: null,
-        status: newUser.status,
-      };
+      // Dispatch 6-digit OTP to store owner's email
+      this.mailService.sendRegistrationOtp(email, registrationOtp).catch(() => {});
 
       return {
         success: true,
-        message: 'Đăng ký tài khoản cửa hàng thành công!',
-        accessToken,
-        token: accessToken,
-        refreshToken: rawRefreshToken,
-        user: userPayload,
+        message: 'Đăng ký cửa hàng thành công! Vui lòng kiểm tra email để xác minh mã OTP 6 số kích hoạt tài khoản.',
         data: {
-          token: accessToken,
-          accessToken,
-          refreshToken: rawRefreshToken,
-          user: userPayload,
+          user: {
+            id: newUser.userId.toString(),
+            userId: newUser.userId.toString(),
+            email: newUser.email,
+            username: newUser.username,
+            fullName: newUser.fullName,
+            role: 'STORE_OWNER',
+            storeId: newStore.storeId.toString(),
+            status: newUser.status,
+          },
           store: {
             storeId: newStore.storeId.toString(),
             name: newStore.name,
@@ -258,117 +256,166 @@ export class AuthService {
       expiresAt: verificationExpiresAt,
     });
 
-    // Dispatch 6-digit OTP to customer's email asynchronously (non-blocking)
-    this.mailService.sendRegistrationOtp(email, registrationOtp).catch((err) => {
-      this.logger.warn(`Failed to dispatch registration OTP email: ${err.message}`);
-    });
-
-    const accessToken = this.jwtService.sign(
-      {
-        userId: newUser.userId.toString(),
-        email: newUser.email,
-        username: newUser.username,
-        role: 'CUSTOMER',
-        storeId: null,
-        customerProfileId: customerProfile.customerId.toString(),
-        tokenType: 'ACCESS',
-      },
-      { expiresIn: '7d' },
-    );
-
-    const rawRefreshToken = crypto.randomBytes(40).toString('hex');
-    const refreshTokenHash = crypto.createHash('sha256').update(rawRefreshToken).digest('hex');
-    const refreshExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000);
-    await this.authRepo.createRefreshToken(newUser.userId, refreshTokenHash, refreshExpiresAt);
-
-    const userPayload = {
-      id: newUser.userId.toString(),
-      userId: newUser.userId.toString(),
-      email: newUser.email,
-      username: newUser.username,
-      fullName: newUser.fullName,
-      role: 'CUSTOMER',
-      customerProfileId: customerProfile.customerId.toString(),
-      status: newUser.status,
-    };
+    // Dispatch 6-digit OTP to customer's email
+    this.mailService.sendRegistrationOtp(email, registrationOtp).catch(() => {});
 
     return {
       success: true,
-      message: 'Tạo tài khoản khách hàng thành công!',
-      accessToken,
-      token: accessToken,
-      refreshToken: rawRefreshToken,
-      user: userPayload,
+      message: 'Tạo tài khoản khách hàng thành công! Vui lòng kiểm tra email để xác minh mã OTP 6 số kích hoạt tài khoản.',
       data: {
-        token: accessToken,
-        accessToken,
-        refreshToken: rawRefreshToken,
-        user: userPayload,
+        user: {
+          id: newUser.userId.toString(),
+          userId: newUser.userId.toString(),
+          email: newUser.email,
+          username: newUser.username,
+          fullName: newUser.fullName,
+          role: 'CUSTOMER',
+          customerProfileId: customerProfile.customerId.toString(),
+          status: newUser.status,
+        },
       },
     };
   }
 
 
   /**
-   * Google Social Login & Registration via Google OAuth / Supabase token
+   * Google Social Login via Supabase OAuth token
    */
   async googleLogin(body: GoogleLoginDto | string, ip?: string, userAgent?: string) {
     const dto: GoogleLoginDto = typeof body === 'string' ? { token: body } : body;
     const rawToken = dto.token?.trim();
 
-    let verifiedUser: { email: string; name?: string; picture?: string; id?: string } | null = null;
+    let verifiedUser: { email: string; name?: string; picture?: string; id?: string; hd?: string } | null = null;
 
     if (rawToken) {
-      // 1. Try Google UserInfo API (standard Google OAuth 2.0 access token)
-      try {
-        const googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
-          headers: {
-            Authorization: `Bearer ${rawToken}`,
-          },
-        });
-        if (googleRes.ok) {
-          const gData: any = await googleRes.json();
-          if (gData.email) {
-            verifiedUser = {
-              email: gData.email,
-              name: gData.name || gData.given_name,
-              picture: gData.picture,
-              id: gData.sub,
-            };
-          }
-        }
-      } catch (_) {}
+      const expectedAud = process.env.GOOGLE_CLIENT_ID;
 
-      // 2. Fallback to Supabase Auth API if not verified via Google UserInfo
-      if (!verifiedUser) {
-        const supabaseUrl = process.env.SUPABASE_URL || 'https://gultdgalicgqhvquxizs.supabase.co';
-        const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || '';
+      // Helper: Fetch with strict 5-second timeout and guaranteed timer cleanup
+      const fetchWithTimeout = async (url: string, options: RequestInit = {}, timeoutMs = 5000) => {
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
         try {
-          const sRes = await fetch(`${supabaseUrl}/auth/v1/user`, {
-            headers: {
-              Authorization: `Bearer ${rawToken}`,
-              apikey: anonKey,
-            },
-          });
-          if (sRes.ok) {
-            const sData: any = await sRes.json();
-            if (sData.email) {
+          return await fetch(url, { ...options, signal: controller.signal });
+        } finally {
+          clearTimeout(timer);
+        }
+      };
+
+      // 1. Primary: Verify Google ID token via google-auth-library
+      // Cryptographically checks RSA signature against Google's public certs, expiry, and audience locally
+      try {
+        const ticket = await this.googleOAuthClient.verifyIdToken({
+          idToken: rawToken,
+          audience: expectedAud || undefined,
+        });
+        const payload = ticket.getPayload();
+        const isEmailVerified =
+          payload?.email_verified === true || (payload as any)?.email_verified === 'true';
+
+        if (payload?.email && isEmailVerified) {
+          verifiedUser = {
+            email: payload.email,
+            name: payload.name || payload.email.split('@')[0],
+            picture: payload.picture,
+            id: payload.sub,
+            hd: payload.hd,
+          };
+        }
+      } catch (err: any) {
+        this.logger.debug(`google-auth-library ID token verification failed/skipped: ${err?.message}`);
+      }
+
+      // 2. Secondary: If token is a Google OAuth2 Access Token, query tokeninfo and userinfo with timeout
+      if (!verifiedUser) {
+        try {
+          const tokenInfoRes = await fetchWithTimeout(
+            `https://oauth2.googleapis.com/tokeninfo?access_token=${encodeURIComponent(rawToken)}`,
+          );
+          if (tokenInfoRes.ok) {
+            const tData: any = await tokenInfoRes.json();
+            const isEmailVerified =
+              tData.verified_email === true ||
+              tData.verified_email === 'true' ||
+              tData.email_verified === 'true' ||
+              tData.email_verified === true;
+            const tokenAud = tData.audience || tData.issued_to;
+            const audValid = expectedAud
+              ? tokenAud === expectedAud
+              : process.env.NODE_ENV !== 'production';
+
+            if (tData.email && isEmailVerified && audValid) {
               verifiedUser = {
-                email: sData.email,
-                name: sData.user_metadata?.full_name || sData.user_metadata?.name,
-                picture: sData.user_metadata?.avatar_url || sData.user_metadata?.picture,
-                id: sData.id,
+                email: tData.email,
+                name: tData.email.split('@')[0],
+                id: tData.user_id || tData.sub,
+                hd: tData.hd,
               };
+              try {
+                const googleRes = await fetchWithTimeout('https://www.googleapis.com/oauth2/v3/userinfo', {
+                  headers: { Authorization: `Bearer ${rawToken}` },
+                });
+                if (googleRes.ok) {
+                  const gData: any = await googleRes.json();
+                  if (gData.name) verifiedUser.name = gData.name;
+                  if (gData.picture) verifiedUser.picture = gData.picture;
+                }
+              } catch (_) {}
             }
           }
         } catch (_) {}
       }
+
+      // 3. Fallback to Supabase Auth API if not verified via Google
+      if (!verifiedUser) {
+        const supabaseUrl = process.env.SUPABASE_URL;
+        const anonKey = process.env.SUPABASE_ANON_KEY || process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
+        if (supabaseUrl && anonKey) {
+          try {
+            const sRes = await fetchWithTimeout(`${supabaseUrl}/auth/v1/user`, {
+              headers: {
+                Authorization: `Bearer ${rawToken}`,
+                apikey: anonKey,
+              },
+            });
+            if (sRes.ok) {
+              const sData: any = await sRes.json();
+              // P2 Invariant Fix (auth/google-login-supabase-fallback-unbound-identity):
+              // Bắt buộc provider là google và email đã xác nhận (email_confirmed_at != null).
+              // Tuyệt đối KHÔNG tin cậy user_metadata.email_verified do client tự truyền lên.
+              const isGoogleProvider = sData.app_metadata?.provider === 'google' || sData.app_metadata?.providers?.includes('google');
+              const isEmailVerified = sData.email_confirmed_at != null;
+              if (sData.email && isGoogleProvider && isEmailVerified) {
+                verifiedUser = {
+                  email: sData.email,
+                  name: sData.user_metadata?.full_name || sData.user_metadata?.name,
+                  picture: sData.user_metadata?.avatar_url || sData.user_metadata?.picture,
+                  id: sData.id,
+                };
+              }
+            }
+          } catch (_) {}
+        }
+      }
     }
 
-    const email = (verifiedUser?.email || dto.email)?.trim().toLowerCase();
-    if (!email) {
-      throw new BadRequestException('Không thể xác thực thông tin tài khoản Google hoặc thiếu địa chỉ email.');
+    // STRICT TEST-ONLY BYPASS: Only allowed when NODE_ENV === 'test' AND NOT production!
+    // Never trust client-provided email or googleId in production as verified identity.
+    if (!verifiedUser && process.env.NODE_ENV === 'test' && dto.email) {
+      verifiedUser = {
+        email: dto.email,
+        name: dto.fullName,
+        picture: dto.avatarUrl,
+        id: dto.googleId || `google_${Date.now()}`,
+      };
     }
+
+    if (!verifiedUser?.email) {
+      if (!rawToken) {
+        throw new UnauthorizedException('Token xác thực Google/OAuth là bắt buộc.');
+      }
+      throw new UnauthorizedException('Không thể xác thực thông tin tài khoản Google từ OAuth token cung cấp.');
+    }
+    const email = verifiedUser.email.trim().toLowerCase();
 
     const fullName = dto.fullName?.trim() || verifiedUser?.name || email.split('@')[0];
     const rawAvatarUrl = dto.avatarUrl || verifiedUser?.picture || null;
@@ -379,21 +426,92 @@ export class AuthService {
         ? rawAvatarUrl
         : null;
 
-    const candidateAuthId = verifiedUser?.id || dto.googleId;
+    const googleSub = verifiedUser?.id?.toString()?.trim() || null;
     const authId =
-      candidateAuthId &&
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(candidateAuthId)
-        ? candidateAuthId
+      googleSub &&
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(googleSub)
+        ? googleSub
         : null;
 
-    // Check if user already exists
+    // 1. Primary lookup: Check if user is already linked by provider & subject
     let user: any = null;
-    if (authId) {
-      user = await this.authRepo.findByAuthId(authId);
+    if (googleSub) {
+      user = await this.authRepo.findByProviderSubject('GOOGLE', googleSub);
     }
+    // 2. Legacy fallback lookup by UUID authId
+    if (!user && authId) {
+      user = await this.authRepo.findByAuthId(authId);
+      if (user && googleSub && (!user.providerSubject || user.authProvider !== 'GOOGLE')) {
+        await this.authRepo.linkProviderSubject(user.userId, 'GOOGLE', googleSub);
+      }
+    }
+
+    // 3. User not found by Google Subject: Check if an account already exists with this email
     if (!user) {
-      user = await this.authRepo.findUserWithAuthRelations(email);
-      if (user) {
+      const existingUser = await this.authRepo.findUserWithAuthRelations(email);
+      if (existingUser) {
+        // Anti-takeover check: Reject linking if account is already linked to a DIFFERENT Google subject
+        const existingIdentity = await this.authRepo.findIdentityForUserAndProvider(existingUser.userId, 'GOOGLE');
+        const directMismatch =
+          existingUser.authProvider === 'GOOGLE' &&
+          existingUser.providerSubject &&
+          existingUser.providerSubject !== googleSub;
+        const identityMismatch =
+          existingIdentity &&
+          existingIdentity.providerSubject !== googleSub;
+
+        if (directMismatch || identityMismatch) {
+          this.logger.warn(
+            `Account linking rejected: User ${existingUser.userId} (${email}) already bound to Google subject ${existingUser.providerSubject || existingIdentity?.providerSubject}, rejected new subject ${googleSub}`,
+          );
+          throw new ConflictException({
+            success: false,
+            code: 'PROVIDER_SUBJECT_MISMATCH',
+            message:
+              'Tài khoản này đã được liên kết với một định danh Google khác. Để bảo mật tài khoản, không thể tự động chuyển đổi sang danh tính mới. Vui lòng liên hệ hỗ trợ hoặc sử dụng đúng tài khoản ban đầu.',
+          });
+        }
+
+        // Evaluate domain authority per Google Identity Services Security Guidance:
+        // Google is strictly authoritative for @gmail.com and @googlemail.com,
+        // OR when the verified ID token includes an "hd" (hosted domain) claim matching the email domain.
+        const isGmail = email.endsWith('@gmail.com') || email.endsWith('@googlemail.com');
+        const tokenHd = verifiedUser.hd?.toLowerCase();
+        const isVerifiedWorkspace = Boolean(tokenHd && email.endsWith(`@${tokenHd}`));
+
+        if (!isGmail && !isVerifiedWorkspace) {
+          // Third-party domain without Google Workspace hosted domain authority!
+          // Google's email_verified=true does NOT guarantee current authority for non-Google domains.
+          // Refuse silent automatic account linking to prevent account takeover.
+          this.logger.warn(
+            `Account linking rejected: Email ${email} has domain non-authoritative for Google without valid matching hd claim.`,
+          );
+          throw new ConflictException({
+            success: false,
+            code: 'THIRD_PARTY_EMAIL_LINK_CHALLENGE',
+            message:
+              'Email này đã được đăng ký bằng phương thức khác. Để bảo mật tài khoản bên thứ ba, vui lòng đăng nhập bằng mật khẩu để liên kết tài khoản Google trong cài đặt cá nhân.',
+          });
+        }
+
+        // Authoritative domain: safely link Google provider subject
+        // P1 Fix Refined: Anti-Pre-Account Takeover Defense
+        // An attacker cannot pre-register an unverified account to hijack a Google user.
+        // If the existing account email was NEVER verified (!existingUser.emailVerifiedAt or has pending emailVerificationToken),
+        // then clear any pre-set password credentials and revoke existing refresh tokens so the attacker is locked out.
+        // If the email WAS ALREADY legitimately verified (existingUser.emailVerifiedAt != null and no pending token),
+        // do NOT clear passwordHash, allowing the legitimate user to retain both password and Google login methods!
+        const isEmailVerified = Boolean(existingUser.emailVerifiedAt) && !existingUser.emailVerificationToken;
+        const shouldClearPreLinkCredentials = !isEmailVerified && Boolean(existingUser.passwordHash);
+        user = existingUser;
+        if (googleSub) {
+          user = (await this.authRepo.linkProviderSubject(
+            user.userId,
+            'GOOGLE',
+            googleSub,
+            shouldClearPreLinkCredentials,
+          )) as any;
+        }
         if (authId && !user.authId) {
           await this.authRepo.updateAuthId(user.userId, authId);
         }
@@ -420,7 +538,10 @@ export class AuthService {
               avatarUrl,
               phone: dto.phone?.trim() || null,
               status: 'ACTIVE',
+              emailVerifiedAt: new Date(),
               authId,
+              authProvider: 'GOOGLE',
+              providerSubject: googleSub,
             },
             {
               name: storeName,
@@ -452,7 +573,10 @@ export class AuthService {
               avatarUrl,
               phone: dto.phone?.trim() || null,
               status: 'ACTIVE',
+              emailVerifiedAt: new Date(),
               authId,
+              authProvider: 'GOOGLE',
+              providerSubject: googleSub,
             },
             {
               phone: dto.phone?.trim() || null,
@@ -480,6 +604,10 @@ export class AuthService {
             ownedStores: [],
             storeStaffs: [],
           } as any;
+        }
+
+        if (googleSub && user?.userId) {
+          user = (await this.authRepo.linkProviderSubject(user.userId, 'GOOGLE', googleSub)) as any;
         }
       }
     } else {
@@ -532,6 +660,8 @@ export class AuthService {
       storeId,
       customerProfileId,
       phone: user.phone,
+      authProvider: user.authProvider || 'LOCAL',
+      providerSubject: user.providerSubject || null,
     };
 
     return {
@@ -766,44 +896,80 @@ export class AuthService {
   /**
    * 6. Logout (Token Revocation & Invalidation)
    */
-  async logout(userId?: string, refreshToken?: string, accessToken?: string, fcmToken?: string) {
-    const tasks: Promise<any>[] = [];
+  async logout(userContext?: any, refreshToken?: string, accessToken?: string, fcmToken?: string) {
+    let verifiedUserId: string | undefined = undefined;
+    let isExpiredToken = false;
 
+    // 1. If accessToken provided, VERIFY cryptographic signature strictly (Never decode untrusted tokens)
     if (accessToken) {
-      tasks.push(
-        TokenBlacklist.revokeTokenAsync(accessToken, 7 * 86400, userId ? BigInt(userId) : undefined).catch(() => {}),
-      );
+      const secret =
+        process.env.JWT_SECRET ||
+        (process.env.NODE_ENV === 'test'
+          ? 'ci_test_jwt_secret_key_minimum_32_characters_long_for_security!'
+          : undefined);
+      if (!secret) {
+        throw new Error('FATAL: JWT_SECRET environment variable is required and must not be empty');
+      }
+
+      let payload: any = null;
       try {
-        const decoded: any = this.jwtService.decode(accessToken);
-        if (decoded?.userId) {
-          TokenBlacklist.revokeUser(decoded.userId.toString());
-        }
-      } catch {}
+        payload = await this.jwtService.verifyAsync(accessToken, {
+          secret,
+          ignoreExpiration: true,
+        });
+      } catch (err: any) {
+        // FORGED TOKEN / TAMPERED SIGNATURE: NEVER trust payload, NEVER revoke user!
+        throw new UnauthorizedException('Chữ ký token không hợp lệ hoặc token bị làm giả');
+      }
+
+      if (payload?.userId) {
+        verifiedUserId = payload.userId.toString();
+        const nowSec = Math.floor(Date.now() / 1000);
+        isExpiredToken = Boolean(payload.exp && payload.exp < nowSec);
+      }
+
+      // Safe to blacklist this verified token
+      const ttl = payload?.exp ? Math.max(60, payload.exp - Math.floor(Date.now() / 1000)) : 7 * 86400;
+      await TokenBlacklist.revokeTokenAsync(accessToken, ttl, verifiedUserId ? BigInt(verifiedUserId) : undefined);
     }
 
+    // 2. Extract identity from verified user context if provided
+    if (userContext && typeof userContext === 'object') {
+      if (userContext.isExpired) {
+        isExpiredToken = true;
+      }
+      if (userContext.id || userContext.userId) {
+        verifiedUserId = (userContext.id || userContext.userId).toString();
+      }
+    } else if (typeof userContext === 'string' && userContext) {
+      verifiedUserId = userContext;
+    }
+
+    // 3. Verify refresh token if provided
     if (refreshToken) {
       const hash = crypto.createHash('sha256').update(refreshToken.trim()).digest('hex');
-      tasks.push(
-        (async () => {
-          try {
-            const stored = await this.authRepo.findRefreshToken(hash);
-            if (stored?.userId) {
-              TokenBlacklist.revokeUser(stored.userId.toString());
-            }
-            await this.authRepo.revokeRefreshToken(hash);
-          } catch (_) {}
-        })(),
-      );
+      const stored = await this.authRepo.findRefreshToken(hash);
+      if (stored && stored.userId) {
+        const storedUserId = stored.userId.toString();
+        if (!verifiedUserId) {
+          verifiedUserId = storedUserId;
+        }
+      }
+      await this.authRepo.revokeRefreshToken(hash);
     }
 
-    if (userId) {
-      const uid = BigInt(userId);
-      TokenBlacklist.revokeUser(userId.toString());
-      tasks.push(this.authRepo.revokeAllUserRefreshTokens(uid).catch(() => {}));
-      tasks.push(this.authRepo.deactivateUserFcmTokens(uid, fcmToken).catch(() => {}));
+    // 4. User-wide revocation ONLY if token is VALID and NOT expired
+    if (verifiedUserId && !isExpiredToken) {
+      await this.authRepo.revokeAllUserRefreshTokens(BigInt(verifiedUserId));
+      await this.authRepo.deactivateUserFcmTokens(BigInt(verifiedUserId), fcmToken);
+      // P2 Invariant Fix (auth/logout-user-epoch-process-local):
+      // Cập nhật passwordChangedAt trong PostgreSQL để toàn bộ các cluster nodes/instances
+      // đều từ chối access tokens cấp trước thời điểm này.
+      await this.authRepo.updatePasswordChangedAt(BigInt(verifiedUserId));
+      TokenBlacklist.revokeUser(verifiedUserId);
+    } else if (verifiedUserId && isExpiredToken && fcmToken) {
+      await this.authRepo.deactivateUserFcmTokens(BigInt(verifiedUserId), fcmToken);
     }
-
-    await Promise.allSettled(tasks);
 
     return {
       success: true,
@@ -829,6 +995,10 @@ export class AuthService {
       const otpCode = crypto.randomInt(100000, 1_000_000).toString();
       const tokenHash = this.hashOtp(otpCode, 'PASSWORD_RESET');
       const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+
+      // P2 Invariant Fix (auth/password-reset-otp-reissue-resets-guess-budget):
+      // Vô hiệu hóa toàn bộ mã OTP PASSWORD_RESET chưa sử dụng trước đó để tránh brute-force song song
+      await this.authRepo.invalidateUnconsumedOtps(user.userId, 'PASSWORD_RESET');
 
       await this.authRepo.createAuthOtp({
         userId: user.userId,
@@ -897,6 +1067,55 @@ export class AuthService {
   }
 
   /**
+   * 8.1 Change Password for Authenticated User
+   */
+  async changePassword(userId: string | number | bigint, dto: ChangePasswordDto, rawAccessToken?: string) {
+    const targetUserId = BigInt(userId);
+    const user = await this.authRepo.findById(targetUserId);
+
+    if (!user || user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Tài khoản không tồn tại hoặc đã bị vô hiệu hóa');
+    }
+
+    if (!user.passwordHash) {
+      throw new BadRequestException('Tài khoản này chưa thiết lập mật khẩu (đăng nhập bằng mạng xã hội hoặc số điện thoại)');
+    }
+
+    const isMatch = await bcrypt.compare(dto.currentPassword, user.passwordHash);
+    if (!isMatch) {
+      throw new UnauthorizedException({
+        success: false,
+        code: 'INCORRECT_CURRENT_PASSWORD',
+        message: 'Mật khẩu hiện tại không chính xác',
+      });
+    }
+
+    if (dto.currentPassword === dto.newPassword) {
+      throw new BadRequestException({
+        success: false,
+        code: 'PASSWORD_UNCHANGED',
+        message: 'Mật khẩu mới không được trùng với mật khẩu hiện tại',
+      });
+    }
+
+    const newPasswordHash = await bcrypt.hash(dto.newPassword, 12);
+    const passwordChangedAt = new Date();
+
+    await this.authRepo.updatePasswordTx(targetUserId, newPasswordHash, passwordChangedAt);
+
+    // Invalidate token in blacklist and invalidate session cache
+    if (rawAccessToken) {
+      await TokenBlacklist.revokeTokenAsync(rawAccessToken, 7 * 86400, targetUserId);
+    }
+    TokenBlacklist.revokeUser(targetUserId);
+
+    return {
+      success: true,
+      message: 'Đổi mật khẩu thành công. Vui lòng đăng nhập lại.',
+    };
+  }
+
+  /**
    * 9. Verify Email (SHA-256 Hashed Token Verification)
    */
   async verifyEmail(body: VerifyEmailDto) {
@@ -937,7 +1156,11 @@ export class AuthService {
         const tokenHash = this.hashOtp(otpCode, 'EMAIL_VERIFICATION');
         const expiresAt = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
-        await this.authRepo.createAuthOtp({
+        // P2 Invariant Fix (auth/password-reset-otp-reissue-resets-guess-budget):
+      // Vô hiệu hóa toàn bộ mã OTP PASSWORD_RESET chưa sử dụng trước đó để tránh brute-force song song
+      await this.authRepo.invalidateUnconsumedOtps(user.userId, 'PASSWORD_RESET');
+
+      await this.authRepo.createAuthOtp({
           userId: user.userId,
           email: user.email,
           purpose: 'EMAIL_VERIFICATION',
@@ -989,11 +1212,18 @@ export class AuthService {
         phone: user.phone,
         avatarUrl: user.avatarUrl || null,
         role,
-        kycStatus: user.kycStatus,
         status: user.status,
         storeId,
         customerProfileId: user.customerProfile?.customerId?.toString() || null,
-        customerProfile: user.customerProfile,
+        customerProfile: user.customerProfile
+          ? {
+              ...user.customerProfile,
+              iotButtons: user.customerProfile.iotButtons?.map((btn: any) => {
+                const { hmacSecret, ...safeBtn } = btn;
+                return safeBtn;
+              }),
+            }
+          : null,
         ownedStores: user.ownedStores,
         storeStaffs: user.storeStaffs,
         createdAt: user.createdAt,
@@ -1008,11 +1238,19 @@ export class AuthService {
       throw new NotFoundException('Không tìm thấy thông tin người dùng');
     }
 
-    const updated = await this.authRepo.updateProfile(rawUserId, {
+    const newPhone = dto.phone !== undefined ? dto.phone.trim() : undefined;
+    const phoneChanged = newPhone !== undefined && newPhone !== user.phone;
+    const profileUpdate: any = {
       fullName: dto.fullName !== undefined ? dto.fullName.trim() : undefined,
       avatarUrl: dto.avatarUrl !== undefined ? dto.avatarUrl.trim() : undefined,
-      phone: dto.phone !== undefined ? dto.phone.trim() : undefined,
-    });
+      phone: newPhone,
+    };
+    if (phoneChanged) {
+      profileUpdate.phoneVerifiedAt = null;
+      profileUpdate.firebaseUid = null;
+    }
+
+    const updated = await this.authRepo.updateProfile(rawUserId, profileUpdate);
 
     const { role, storeId } = this.resolveUserRole(updated);
 
@@ -1185,9 +1423,17 @@ export class AuthService {
     let user: any = await this.authRepo.findUserByFirebaseUidWithRelations(firebaseUid);
     if (!user) {
       user = await this.authRepo.findByPhone(phoneNumber);
-      if (user && !user.firebaseUid) {
-        // Link firebaseUid to existing user
-        await this.authRepo.updatePhoneVerification(user.userId, phoneNumber, firebaseUid, new Date());
+      if (user) {
+        // Strict Security Guard: Only link firebaseUid if the existing account had previously verified this phone!
+        // Prevents account takeover of an arbitrary account that entered an unverified phone number in profile.
+        if (!user.phoneVerifiedAt) {
+          throw new UnauthorizedException(
+            'Số điện thoại này chưa được xác minh trên tài khoản hiện có. Vui lòng đăng nhập bằng mật khẩu hoặc liên kết trong cài đặt tài khoản.',
+          );
+        }
+        if (!user.firebaseUid) {
+          await this.authRepo.updatePhoneVerification(user.userId, phoneNumber, firebaseUid, new Date());
+        }
       }
     }
 

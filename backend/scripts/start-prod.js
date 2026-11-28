@@ -1,5 +1,4 @@
 require('dotenv/config');
-const { execSync } = require('child_process');
 const path = require('path');
 
 console.log('🔄 Checking database environment...');
@@ -10,17 +9,6 @@ if (!dbUrl) {
   process.exit(1);
 }
 
-console.log('🐘 PostgreSQL detected. Deploying database migrations...');
-try {
-  execSync('npx prisma migrate deploy', {
-    stdio: 'inherit',
-    cwd: path.resolve(__dirname, '..'),
-  });
-  console.log('✅ Migrations applied successfully or already up to date.');
-} catch (err) {
-  console.error('❌ [FATAL] Database migration failed:', err.message);
-  process.exit(1);
-}
-
+// Launch NestJS Production Server immediately for fast zero-downtime container readiness
 console.log('🚀 Launching NestJS Production Server...');
 require(path.resolve(__dirname, '../dist/src/main.js'));

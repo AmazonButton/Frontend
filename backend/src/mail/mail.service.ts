@@ -1,8 +1,9 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, Optional, Inject, OnModuleDestroy } from '@nestjs/common';
 import * as nodemailer from 'nodemailer';
+import { QueueService } from '../common/queues/queue.service';
 
 @Injectable()
-export class MailService {
+export class MailService implements OnModuleDestroy {
   private readonly logger = new Logger(MailService.name);
   private transporter: nodemailer.Transporter | null = null;
   private isConfigured = false;
@@ -12,8 +13,44 @@ export class MailService {
     return email.replace(/(?<=^.{2}).(?=[^@]*?@)/g, '*');
   }
 
-  constructor() {
+  constructor(
+    @Optional() @Inject(QueueService) private readonly queueService?: QueueService,
+  ) {
     this.initTransporter();
+    this.initQueueProcessor();
+  }
+
+  onModuleDestroy() {
+    if (this.transporter) {
+      try {
+        this.transporter.close();
+      } catch (_) {}
+      this.transporter = null;
+    }
+  }
+
+  private initQueueProcessor() {
+    if (this.queueService) {
+      this.queueService.registerProcessor('mail-queue', async (job) => {
+        // Enforce throwOnError: true so queue engines (BullMQ / In-Memory) can execute retry logic and route to DLQ on exhaustion
+        return this.sendMail(job.data, true);
+      });
+    }
+  }
+
+  /**
+   * Enqueue email for asynchronous background dispatch with automatic exponential retry and DLQ.
+   */
+  async enqueueMail(options: { to: string; subject: string; text: string; html: string }): Promise<string> {
+    if (this.queueService) {
+      return this.queueService.enqueueJob('mail-queue', 'send-email', options, {
+        attempts: 3,
+        backoffDelayMs: 1000,
+        backoffType: 'exponential',
+      });
+    }
+    await this.sendMail(options);
+    return 'direct-dispatch';
   }
 
   private initTransporter() {
@@ -33,7 +70,7 @@ export class MailService {
         socketTimeout: 5000,
       });
       this.isConfigured = true;
-      this.logger.log(`MailService initialized with SMTP host ${host}:${port} (User: ${user.replace(/(?<=^.{2}).(?=[^@]*?@)/g, '*')})`);
+      this.logger.log(`MailService initialized with SMTP host ${host}:${port} (User: ${this.maskEmail(user)})`);
     } else {
       this.logger.warn('SMTP_USER or SMTP_PASSWORD not set. MailService operating in DEV FALLBACK MODE.');
     }
@@ -60,23 +97,25 @@ export class MailService {
     `;
   }
 
-  async sendMail(options: { to: string; subject: string; text: string; html: string }): Promise<boolean> {
+  async sendMail(options: { to: string; subject: string; text: string; html: string }, throwOnError = false): Promise<boolean> {
     // Mask OTP digits in all environment logs
     const maskedText = options.text.replace(/\b\d{6}\b/g, '******');
 
     const isDummyDomain = /@.*\.(local|test|example|invalid)$/i.test(options.to) ||
-                          /@(smartorder\.local|smartorder\.test|localhost)$/i.test(options.to);
+                          /@(smartorder\.local|smartorder\.test|localhost|example\.com|realdomain\.com|test\.com)$/i.test(options.to);
     const isTestEnv = process.env.NODE_ENV === 'test' || process.env.DISABLE_REAL_EMAIL === 'true';
 
-    // In test environment or for dummy test domains (like customer@smartorder.local),
-    // skip actual SMTP delivery to avoid mailer-daemon bounce loops and inbox spam.
+    // In production without configured SMTP: fail fast
     if (process.env.NODE_ENV === 'production' && (!this.isConfigured || !this.transporter)) {
       this.logger.error(`[CRITICAL] SMTP not configured in production. Cannot send email to ${this.maskEmail(options.to)}`);
+      if (throwOnError) {
+        throw new Error('SMTP not configured in production');
+      }
       return false;
     }
 
     if (!this.isConfigured || !this.transporter || isDummyDomain || isTestEnv) {
-      this.logger.log(`[SIMULATED EMAIL DISPATCH] TO: ${options.to.replace(/(?<=^.{2}).(?=[^@]*?@)/g, '*')} | SUBJECT: ${options.subject}`);
+      this.logger.log(`[SIMULATED EMAIL DISPATCH] TO: ${this.maskEmail(options.to)} | SUBJECT: ${options.subject}`);
       this.logger.log(`[SIMULATED EMAIL CONTENT] ${maskedText}`);
       return true;
     }
@@ -97,10 +136,13 @@ export class MailService {
       );
 
       await Promise.race([sendPromise, timeoutPromise]);
-      this.logger.log(`Email dispatched successfully to ${options.to.replace(/(?<=^.{2}).(?=[^@]*?@)/g, '*')}`);
+      this.logger.log(`Email dispatched successfully to ${this.maskEmail(options.to)}`);
       return true;
     } catch (err: any) {
       this.logger.warn(`Failed to send email to ${this.maskEmail(options.to)}: ${err.message}`);
+      if (throwOnError) {
+        throw err;
+      }
       return false;
     }
   }
@@ -108,22 +150,24 @@ export class MailService {
   async sendRegistrationOtp(email: string, otp: string): Promise<boolean> {
     const title = 'Xác minh kích hoạt tài khoản';
     const message = 'Cảm ơn bạn đã đăng ký tài khoản tại Smart Order Platform. Dưới đây là mã OTP kích hoạt tài khoản của bạn:';
-    return this.sendMail({
+    await this.enqueueMail({
       to: email,
       subject: '[Smart Order] Mã OTP xác minh tài khoản',
       text: `${title} - ${message} Mã OTP: ${otp} (Hiệu lực: 15 phút)`,
       html: this.buildOtpTemplate(title, message, otp, 15),
     });
+    return true;
   }
 
   async sendPasswordResetOtp(email: string, otp: string): Promise<boolean> {
     const title = 'Yêu cầu đặt lại mật khẩu';
     const message = 'Hệ thống nhận được yêu cầu đặt lại mật khẩu cho tài khoản của bạn. Vui lòng nhập mã OTP sau:';
-    return this.sendMail({
+    await this.enqueueMail({
       to: email,
       subject: '[Smart Order] Mã OTP đặt lại mật khẩu',
       text: `${title} - ${message} Mã OTP: ${otp} (Hiệu lực: 15 phút)`,
       html: this.buildOtpTemplate(title, message, otp, 15),
     });
+    return true;
   }
 }

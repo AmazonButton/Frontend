@@ -12,6 +12,9 @@ export function deviceRuntime(device: any, now = Date.now()) {
   }
   const expiry = device.rental?.effectiveExpiresAt;
   const expired = expiry && Number.isFinite(Date.parse(expiry)) && Date.parse(expiry) <= now;
+  if (device.customerChildLock === true) {
+    return result('Khóa trẻ em', device.canOrderReason || 'Khách hàng đang bật khóa trẻ em. Nút vật lý tạm ngừng nhận lệnh đặt hàng.', false, false);
+  }
   if (device.canOrder === false || device.inventoryState === 'RETURN_IN_TRANSIT' || expired || (device.rentalStatus && device.rentalStatus !== 'ACTIVE')) {
     return result('Chưa thể đặt hàng', device.canOrderReason || 'Quyền đặt hàng hoặc hợp đồng của nút chưa sẵn sàng.');
   }

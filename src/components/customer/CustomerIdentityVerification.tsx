@@ -1,8 +1,11 @@
 import React, { useCallback, useEffect, useState } from 'react';
+import { Link } from 'react-router-dom';
 import {
   AlertCircle,
+  ArrowRight,
   BadgeCheck,
   Banknote,
+  Camera,
   CheckCircle2,
   Clock3,
   CreditCard,
@@ -18,6 +21,7 @@ import {
   Sparkles,
   UserCheck,
   WalletCards,
+  X,
   XCircle,
 } from 'lucide-react';
 import { api } from '../../services';
@@ -35,7 +39,37 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
   const [message, setMessage] = useState('');
   const [messageType, setMessageType] = useState<'info' | 'success' | 'error'>('info');
   const [trackingSessionId, setTrackingSessionId] = useState<string | null>(null);
+  const [showPreflightModal, setShowPreflightModal] = useState(false);
+  const [cameraState, setCameraState] = useState<'idle' | 'checking' | 'granted' | 'denied' | 'unsupported'>('idle');
+  const [cameraError, setCameraError] = useState('');
   const sectionRef = React.useRef<HTMLElement>(null);
+
+  const checkCameraPermission = async () => {
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      setCameraState('unsupported');
+      setCameraError('Trình duyệt không hỗ trợ kiểm tra Camera trực tiếp. Bạn vẫn có thể mở trang Didit trên điện thoại hoặc trình duyệt hỗ trợ Camera.');
+      return;
+    }
+    setCameraState('checking');
+    setCameraError('');
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+      stream.getTracks().forEach((track) => track.stop());
+      setCameraState('granted');
+    } catch (err: any) {
+      setCameraState('denied');
+      setCameraError(
+        err?.name === 'NotAllowedError'
+          ? 'Trình duyệt đang chặn quyền Camera. Hãy bấm vào biểu tượng ổ khóa trên thanh địa chỉ ➔ Cho phép Camera rồi kiểm tra lại.'
+          : 'Không tìm thấy hoặc không truy cập được Camera trên thiết bị này.'
+      );
+    }
+  };
+
+  const openPreflight = () => {
+    setShowPreflightModal(true);
+    void checkCameraPermission();
+  };
   useEffect(() => {
     if (embedded && window.location.hash === '#customer-identity-verification') {
       sectionRef.current?.scrollIntoView({ block: 'start' });
@@ -263,11 +297,18 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
                 Hồ sơ của bạn đã được xác minh qua Didit. Xem lại trạng thái và thông tin phiên xác minh bên dưới.
               </p>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2.5">
               <div className="inline-flex cursor-default select-none items-center gap-1.5 rounded-full border border-emerald-300/30 bg-emerald-950/40 px-3.5 py-1.5 text-xs font-semibold tracking-wide text-emerald-200 backdrop-blur-md">
                 <CheckCircle2 className="h-4 w-4 text-emerald-300" />
                 ĐÃ HOÀN TẤT eKYC
               </div>
+              <Link
+                to="/customer/become-store-owner"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-white px-4 py-2 text-xs font-bold text-emerald-900 shadow-sm hover:bg-emerald-50 transition"
+              >
+                <span>Tiếp tục đăng ký mở Cửa hàng</span>
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
             </div>
           </div>
         </section>
@@ -289,7 +330,7 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <button
-                onClick={start}
+                onClick={openPreflight}
                 disabled={starting}
                 className="inline-flex items-center gap-2 rounded-lg bg-white px-4 py-2.5 text-xs font-bold text-amber-900 shadow-sm hover:bg-amber-50 disabled:opacity-60 transition"
               >
@@ -352,7 +393,7 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
               </p>
             </div>
             <button
-              onClick={start}
+              onClick={openPreflight}
               disabled={starting}
               className="rounded-lg bg-white px-4 py-2.5 text-xs font-bold text-[#0E6BA8] shadow-sm hover:bg-sky-50 disabled:opacity-60 transition"
             >
@@ -694,6 +735,94 @@ export const CustomerIdentityVerification: React.FC<{ embedded?: boolean }> = ({
             ))}
           </div>
         </section>
+      )}
+
+      {/* Pre-flight Checklist Modal before launching Didit */}
+      {showPreflightModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
+          <div className="w-full max-w-md rounded-2xl border border-zinc-200 bg-white p-5 shadow-2xl dark:border-zinc-800 dark:bg-zinc-900 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="flex items-center gap-2.5">
+                <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-sky-50 text-[#287DA8] dark:bg-sky-950/50 dark:text-sky-400">
+                  <Camera className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Kiểm tra trước khi xác minh eKYC</h3>
+                  <p className="text-[11px] text-zinc-500">Đảm bảo đủ 3 điều kiện để Didit duyệt nhanh nhất</p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowPreflightModal(false)}
+                className="rounded-lg p-1 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-600 dark:hover:bg-zinc-800"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-2.5 text-xs">
+              <div className={`rounded-xl border p-3 ${
+                cameraState === 'granted'
+                  ? 'border-emerald-200 bg-emerald-50/70 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200'
+                  : cameraState === 'denied'
+                    ? 'border-rose-200 bg-rose-50/70 text-rose-900 dark:border-rose-900/50 dark:bg-rose-950/30 dark:text-rose-200'
+                    : 'border-zinc-200 bg-zinc-50 text-zinc-800 dark:border-zinc-800 dark:bg-zinc-800/50 dark:text-zinc-200'
+              }`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span className="font-semibold flex items-center gap-1.5">
+                    <Camera className="h-3.5 w-3.5" />
+                    1. Quyền Camera trình duyệt:
+                  </span>
+                  <span className="font-bold">
+                    {cameraState === 'checking' ? 'Đang kiểm tra...' : cameraState === 'granted' ? 'Đã cấp quyền ✓' : cameraState === 'denied' ? 'Bị chặn' : 'Cần xác nhận'}
+                  </span>
+                </div>
+                {cameraError && <p className="mt-1.5 text-[11px] leading-relaxed">{cameraError}</p>}
+                {cameraState !== 'granted' && (
+                  <button
+                    type="button"
+                    onClick={() => void checkCameraPermission()}
+                    className="mt-2 rounded-lg border border-current/25 bg-white/80 dark:bg-zinc-900/60 px-2.5 py-1 text-[11px] font-semibold hover:bg-white transition"
+                  >
+                    Kiểm tra lại Camera
+                  </button>
+                )}
+              </div>
+
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-800/40 space-y-1.5 text-zinc-700 dark:text-zinc-300">
+                <p className="font-semibold text-zinc-900 dark:text-white">2. Chuẩn bị CCCD / CMND bản gốc:</p>
+                <p className="text-[11px] text-zinc-500">Không dùng ảnh chụp qua màn hình khác, không bị mất góc hoặc lóa ánh sáng.</p>
+              </div>
+
+              <div className="rounded-xl border border-zinc-200 bg-zinc-50 p-3 dark:border-zinc-800 dark:bg-zinc-800/40 space-y-1.5 text-zinc-700 dark:text-zinc-300">
+                <p className="font-semibold text-zinc-900 dark:text-white">3. Quét khuôn mặt (Liveness):</p>
+                <p className="text-[11px] text-zinc-500">Ngồi nơi đủ sáng, tháo khẩu trang và kính râm khi hệ thống chụp chân dung.</p>
+              </div>
+            </div>
+
+            <div className="flex flex-wrap items-center justify-end gap-2 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+              <button
+                type="button"
+                onClick={() => setShowPreflightModal(false)}
+                className="rounded-lg border border-zinc-200 px-3.5 py-2 text-xs font-semibold text-zinc-600 hover:bg-zinc-50 dark:border-zinc-700 dark:text-zinc-300 dark:hover:bg-zinc-800"
+              >
+                Để sau
+              </button>
+              <button
+                type="button"
+                disabled={starting}
+                onClick={() => {
+                  setShowPreflightModal(false);
+                  void start();
+                }}
+                className={`${primaryButton} !py-2 !px-4 !text-xs`}
+              >
+                <BadgeCheck className="h-4 w-4" />
+                <span>{starting ? 'Đang mở Didit...' : 'Tôi đã sẵn sàng — Mở trang xác minh Didit'}</span>
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </Container>
   );

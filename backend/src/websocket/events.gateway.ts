@@ -12,6 +12,17 @@ import { JwtService } from '@nestjs/jwt';
 import { PrismaService } from '../prisma/prisma.service';
 import { TokenBlacklist } from '../auth/token-blacklist';
 
+function getJwtSecret(): string {
+  const secret = process.env.JWT_SECRET;
+  if (!secret) {
+    if (process.env.NODE_ENV === 'test') {
+      return 'ci_test_jwt_secret_key_minimum_32_characters_long_for_security!';
+    }
+    throw new Error('FATAL: JWT_SECRET environment variable is required and must not be empty');
+  }
+  return secret;
+}
+
 @Injectable()
 @WebSocketGateway({
   cors: {
@@ -28,47 +39,37 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   private readonly logger = new Logger(EventsGateway.name);
   constructor(@Optional() private readonly prisma?: PrismaService) {}
   private readonly jwtService = new JwtService({
-    secret: process.env.JWT_SECRET || 'sob_jwt_secret_dev_2026',
+    secret: getJwtSecret(),
   });
 
   async handleConnection(client: Socket) {
     try {
+      // Security: Only accept token via Authorization header or Socket.IO handshake.auth
+      // Query parameters are strictly rejected to prevent tokens appearing in access/proxy logs
       const authHeader =
         client.handshake.headers?.authorization ||
-        client.handshake.auth?.token ||
-        (client.handshake.query?.token as string);
+        client.handshake.auth?.token;
 
       let token = '';
       if (typeof authHeader === 'string') {
         token = authHeader.startsWith('Bearer ') ? authHeader.slice(7).trim() : authHeader.trim();
       }
 
-      await this.authenticateSocket(client, token);
-    } catch (err: any) {
-      this.logger.warn(`⚠️ [WS] Fallback to guest connection for socket ${client.id}: ${err.message}`);
-      client.join('public');
-      client.join('storefront');
-    }
-  }
-
-  async authenticateSocket(client: Socket, token: string) {
-    client.join('public');
-    client.join('storefront');
-
-    if (!token) {
-      this.logger.log(`⚡ [WS] Guest/Storefront socket connected: ${client.id}`);
-      return;
-    }
-
-    try {
-      const secret = process.env.JWT_SECRET || 'sob_jwt_secret_dev_2026';
-      const payload: any = this.jwtService.verify(token, { secret });
-      if (!payload || !payload.userId) {
-        this.logger.warn(`⚠️ [WS] Invalid token payload for socket: ${client.id}`);
+      if (!token) {
+        this.logger.warn(`⚠️ [WS] Rejecting unauthenticated socket connection: ${client.id}`);
+        client.disconnect(true);
         return;
       }
 
-      // 1. Check if token is in blacklist
+      const secret = getJwtSecret();
+      const payload: any = this.jwtService.verify(token, { secret });
+      if (!payload || !payload.userId) {
+        this.logger.warn(`⚠️ [WS] Invalid token payload for socket: ${client.id}`);
+        client.disconnect(true);
+        return;
+      }
+
+      // 1. Check if token is in blacklist (multi-instance PostgreSQL + in-memory fallback)
       if (this.prisma) {
         const tokenHash = crypto.createHash('sha256').update(token.trim()).digest('hex');
         const dbRevoked = await this.prisma.revokedToken.findUnique({
@@ -76,34 +77,36 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         });
         if (dbRevoked) {
           this.logger.warn(`⚠️ [WS] Token found in PostgreSQL revoked_tokens for socket: ${client.id}`);
+          client.disconnect(true);
           return;
         }
       }
 
-      // Check in-memory blacklist
+      // Check in-memory blacklist with correct parameter order: (userId, iat, rawToken)
       const isRevoked = TokenBlacklist.isRevoked(payload.userId, payload.iat, token);
       if (isRevoked) {
         this.logger.warn(`⚠️ [WS] Token revoked in memory for socket: ${client.id}`);
+        client.disconnect(true);
         return;
       }
 
       // 2. Query user to verify ACTIVE status and passwordChangedAt
-      const dbUser = this.prisma
-        ? await this.prisma.user.findUnique({
-            where: { userId: BigInt(payload.userId) },
-            select: { status: true, passwordChangedAt: true },
-          })
-        : null;
+      const dbUser = this.prisma ? await this.prisma.user.findUnique({
+        where: { userId: BigInt(payload.userId) },
+        select: { status: true, passwordChangedAt: true },
+      }) : null;
 
       if (this.prisma && (!dbUser || dbUser.status !== 'ACTIVE')) {
         this.logger.warn(`⚠️ [WS] Inactive or non-existent user for socket: ${client.id}`);
+        client.disconnect(true);
         return;
       }
 
-      if (dbUser?.passwordChangedAt && payload.iat) {
+      if (dbUser.passwordChangedAt && payload.iat) {
         const pwTimeSec = Math.floor(dbUser.passwordChangedAt.getTime() / 1000);
         if (payload.iat < pwTimeSec) {
           this.logger.warn(`⚠️ [WS] Token invalidated by password change for socket: ${client.id}`);
+          client.disconnect(true);
           return;
         }
       }
@@ -119,142 +122,188 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
       client.join(`user:${payload.userId}`);
       client.join(`user_${payload.userId}`);
       client.join(`driver:${payload.userId}`);
-      if (payload.storeId) {
-        client.join(`store_${payload.storeId}`);
-        client.join(`store:${payload.storeId}`);
+
+      const targetStoreIds = new Set<string>();
+
+      // Query database for all stores owned by this user or where they are active staff
+      if (this.prisma) {
+        try {
+          const userBigInt = BigInt(payload.userId);
+          const [ownedStores, staffStores] = await Promise.all([
+            this.prisma.store.findMany({
+              where: { ownerUserId: userBigInt, status: 'ACTIVE' },
+              select: { storeId: true },
+            }),
+            this.prisma.storeStaff.findMany({
+              where: { userId: userBigInt, status: 'ACTIVE' },
+              select: { storeId: true },
+            }),
+          ]);
+
+          for (const s of ownedStores) {
+            targetStoreIds.add(s.storeId.toString());
+          }
+          for (const s of staffStores) {
+            targetStoreIds.add(s.storeId.toString());
+          }
+          if (payload.storeId && !targetStoreIds.has(payload.storeId.toString())) {
+            client.data.user.storeId = null;
+          }
+        } catch (storeQueryErr: any) {
+          this.logger.warn(`⚠️ [WS] Failed to fetch stores for user ${payload.userId}: ${storeQueryErr.message}`);
+        }
       }
+
+      for (const sId of targetStoreIds) {
+        client.join(`store_${sId}`);
+        client.join(`store:${sId}`);
+      }
+
       if (payload.customerProfileId) {
         client.join(`customer_${payload.customerProfileId}`);
         client.join(`customer:${payload.customerProfileId}`);
       }
-      if (payload.role === 'SUPER_ADMIN' || payload.role === 'SYSTEM_ADMIN' || payload.role === 'ADMIN') {
-        client.join('admin');
-      }
 
-      // Automatically join all stores owned or staffed by this user
-      if (this.prisma && payload.userId) {
-        try {
-          const userStores = await this.prisma.user.findUnique({
-            where: { userId: BigInt(payload.userId) },
-            select: {
-              ownedStores: { select: { storeId: true } },
-              storeStaffs: { select: { storeId: true } },
-            },
-          });
-          if (userStores) {
-            for (const s of userStores.ownedStores) {
-              client.join(`store_${s.storeId}`);
-              client.join(`store:${s.storeId}`);
-              this.logger.log(`🔌 [WS] User ${payload.userId} joined owned store_${s.storeId}`);
-            }
-            for (const s of userStores.storeStaffs) {
-              client.join(`store_${s.storeId}`);
-              client.join(`store:${s.storeId}`);
-              this.logger.log(`🔌 [WS] User ${payload.userId} joined staff store_${s.storeId}`);
-            }
-          }
-        } catch (err: any) {
-          this.logger.warn(`Failed to auto-join store rooms: ${err.message}`);
+      // Schedule disconnect timer when token expires
+      if (payload.exp) {
+        const expiresInMs = payload.exp * 1000 - Date.now();
+        if (expiresInMs <= 0) {
+          this.logger.warn(`⚠️ [WS] Token already expired for socket: ${client.id}`);
+          client.disconnect(true);
+          return;
         }
+        const timer = setTimeout(() => {
+          this.logger.warn(`⚠️ [WS] Token expired for socket: ${client.id}, disconnecting`);
+          client.emit('auth:expired', { message: 'Phiên kết nối đã hết hạn, vui lòng kết nối lại' });
+          client.disconnect(true);
+        }, Math.min(expiresInMs, 2147483647));
+        client.data.disconnectTimer = timer;
       }
 
-      this.logger.log(
-        `⚡ [WS] Authenticated socket connected: ${client.id} (User: ${payload.userId}, Role: ${payload.role}${
-          payload.storeId ? ', Store: ' + payload.storeId : ''
-        })`,
-      );
-      client.emit('authenticated', { success: true, user: client.data.user });
+      this.logger.log(`⚡ [WS] Authenticated socket connected: ${client.id} (User: ${payload.userId}, Role: ${payload.role})`);
     } catch (err: any) {
-      this.logger.warn(`⚠️ [WS] Token verification failed for socket ${client.id}: ${err.message}`);
-    }
-  }
-
-  @SubscribeMessage('authenticate')
-  async handleClientAuth(client: Socket, data: { token: string }) {
-    const token = typeof data === 'string' ? data : data?.token;
-    if (token) {
-      await this.authenticateSocket(client, token);
+      this.logger.warn(`⚠️ [WS] Authentication failed for socket ${client.id}: ${err.message}`);
+      client.disconnect(true);
     }
   }
 
   handleDisconnect(client: Socket) {
+    if (client.data?.disconnectTimer) {
+      clearTimeout(client.data.disconnectTimer);
+    }
     this.logger.log(`❌ [WS] Socket disconnected: ${client.id}`);
   }
 
   @SubscribeMessage('subscribe:store')
-  handleSubscribeStore(client: Socket, storeId: string) {
-    if (!storeId) return;
+  async handleSubscribeStore(client: Socket, storeId: string) {
     const user = client.data?.user;
     if (!user) {
-      client.emit('error', { code: 'UNAUTHORIZED', message: 'Vui lòng xác thực trước khi tham gia room cửa hàng' });
+      client.emit('error', { code: 'UNAUTHORIZED', message: 'Vui lòng xác thực trước khi tham gia room' });
       return;
     }
 
-    const cleanStoreId = storeId.toString().trim();
-    const isStoreStaff = Boolean(user.storeId && user.storeId.toString() === cleanStoreId);
+    const isSuperAdmin = user.role === 'SUPER_ADMIN' || user.role === 'SYSTEM_ADMIN';
+    let isAuthorized = isSuperAdmin;
 
-    if (isStoreStaff) {
-      client.join(`store_${cleanStoreId}`);
-      client.join(`store:${cleanStoreId}`);
-      this.logger.log(`🔌 Socket ${client.id} (Store: ${user.storeId}) joined store_${cleanStoreId}`);
+    if (!isAuthorized && this.prisma && storeId) {
+      try {
+        const uId = BigInt(user.userId);
+        const sId = BigInt(storeId);
+        const [owned, staff] = await Promise.all([
+          this.prisma.store.findFirst({
+            where: { storeId: sId, ownerUserId: uId, status: 'ACTIVE' },
+            select: { storeId: true },
+          }),
+          this.prisma.storeStaff.findFirst({
+            where: { storeId: sId, userId: uId, status: 'ACTIVE' },
+            select: { storeId: true },
+          }),
+        ]);
+        if (owned || staff) {
+          isAuthorized = true;
+        }
+      } catch (err: any) {
+        this.logger.warn(`⚠️ [WS] Error verifying store authority: ${err.message}`);
+      }
+    } else if (!isAuthorized && !this.prisma) {
+      isAuthorized = user.storeId && user.storeId.toString() === storeId?.toString();
+    }
+
+    if (isAuthorized) {
+      client.join(`store_${storeId}`);
+      client.join(`store:${storeId}`);
+      this.logger.log(`🔌 Socket ${client.id} joined store_${storeId} and store:${storeId}`);
     } else {
-      this.logger.warn(`⛔ [WS] Socket ${client.id} (role: ${user.role}) denied access to store_${cleanStoreId}`);
+      this.logger.warn(`⛔ [WS] Socket ${client.id} denied access to store_${storeId}`);
       client.emit('error', { code: 'FORBIDDEN', message: 'Bạn không có quyền truy cập kênh của cửa hàng này' });
     }
   }
 
   @SubscribeMessage('subscribe:customer')
-  handleSubscribeCustomer(client: Socket, customerId: string) {
+  async handleSubscribeCustomer(client: Socket, customerId: string) {
     const user = client.data?.user;
     if (!user) {
-      client.emit('error', { code: 'UNAUTHORIZED', message: 'Vui lòng xác thực trước khi tham gia room khách hàng' });
+      client.emit('error', { code: 'UNAUTHORIZED', message: 'Vui lòng xác thực trước khi tham gia room' });
       return;
     }
 
-    // Only this specific customer can subscribe to their personal order tracking channel
-    const isCustomer = user.role === 'CUSTOMER' && Boolean(user.customerId && user.customerId.toString() === customerId?.toString());
+    const isSuperAdmin = user.role === 'SUPER_ADMIN' || user.role === 'SYSTEM_ADMIN';
+    let isAuthorized = isSuperAdmin;
 
-    if (isCustomer) {
-      client.join(`customer_${customerId}`);
-      client.join(`customer:${customerId}`);
-      this.logger.log(`🔌 Socket ${client.id} (Customer: ${user.customerId}) joined customer_${customerId}`);
-    } else {
-      this.logger.warn(`⛔ [WS] Socket ${client.id} (role: ${user.role}) denied access to customer_${customerId}`);
-      client.emit('error', { code: 'FORBIDDEN', message: 'Bạn không có quyền truy cập kênh của khách hàng này' });
+    if (!isAuthorized && this.prisma && customerId) {
+      try {
+        const uId = BigInt(user.userId);
+        const cId = BigInt(customerId);
+        const profile = await this.prisma.customerProfile.findFirst({
+          where: { customerId: cId, userId: uId },
+          select: { customerId: true },
+        });
+        if (profile) {
+          isAuthorized = true;
+        }
+      } catch (err: any) {
+        this.logger.warn(`⚠️ [WS] Error verifying customer authority: ${err.message}`);
+      }
+    } else if (!isAuthorized && !this.prisma) {
+      isAuthorized = user.customerId && user.customerId.toString() === customerId?.toString();
     }
-  }
 
-  emitToAdmin(event: string, payload: any) {
-    if (this.server) {
-      this.server.to('admin').emit(event, payload);
-      this.logger.log(`📢 [WS -> Admin] ${event}`);
+    if (isAuthorized) {
+      client.join(`customer_${customerId}`);
+      this.logger.log(`🔌 Socket ${client.id} joined customer_${customerId}`);
+    } else {
+      this.logger.warn(`⛔ [WS] Socket ${client.id} denied access to customer_${customerId}`);
+      client.emit('error', { code: 'FORBIDDEN', message: 'Bạn không có quyền truy cập kênh của khách hàng này' });
     }
   }
 
   emitToStore(storeId: string, event: string, payload: any) {
     if (this.server) {
-      this.server.to(`store_${storeId}`).to(`store:${storeId}`).emit(event, payload);
+      this.server.to(`store_${storeId}`).emit(event, payload);
+      this.server.to(`store:${storeId}`).emit(event, payload);
       this.logger.log(`📢 [WS -> Store ${storeId}] ${event}`);
-    }
-  }
-
-  emitToUser(userId: string, event: string, payload: any) {
-    if (this.server) {
-      this.server.to(`user:${userId}`).to(`user_${userId}`).emit(event, payload);
-      this.logger.log(`📢 [WS -> User ${userId}] ${event}`);
     }
   }
 
   emitToDriver(driverId: string, event: string, payload: any) {
     if (this.server) {
-      this.server.to(`driver:${driverId}`).to(`user:${driverId}`).emit(event, payload);
+      this.server.to(`driver:${driverId}`).emit(event, payload);
+      this.server.to(`user:${driverId}`).emit(event, payload);
       this.logger.log(`📢 [WS -> Driver ${driverId}] ${event}`);
+    }
+  }
+
+  emitToUser(userId: string, event: string, payload: any) {
+    if (this.server) {
+      this.server.to(`user:${userId}`).emit(event, payload);
+      this.server.to(`user_${userId}`).emit(event, payload);
+      this.logger.log(`📢 [WS -> User ${userId}] ${event}`);
     }
   }
 
   emitToCustomer(customerId: string, event: string, payload: any) {
     if (this.server) {
-      this.server.to(`customer_${customerId}`).to(`customer:${customerId}`).emit(event, payload);
+      this.server.to(`customer_${customerId}`).emit(event, payload);
       this.logger.log(`📢 [WS -> Customer ${customerId}] ${event}`);
     }
   }

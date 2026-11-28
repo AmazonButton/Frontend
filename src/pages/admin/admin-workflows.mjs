@@ -35,17 +35,12 @@ export function prepareWithdrawalBatch(items) {
 export async function performWithdrawalAction(client, item, action, fields = {}) {
   const id = withdrawalId(item);
   if (!/^\d+$/.test(id)) throw new Error('Mã yêu cầu rút tiền không hợp lệ.');
-  if (!['transfer', 'reject', 'payout', 'sync-payout'].includes(action)) throw new Error('Thao tác không hợp lệ.');
+  if (action === 'transfer') throw new Error('Phương thức chuyển khoản thủ công đã ngừng hỗ trợ (MANUAL_TRANSFER_DEPRECATED). Mọi khoản rút tiền phải chi qua PayOS Payout.');
+  if (!['reject', 'payout', 'sync-payout'].includes(action)) throw new Error('Thao tác không hợp lệ.');
   if (action !== 'sync-payout' && item.status !== 'PENDING') throw new Error('Yêu cầu đã được xử lý. Hãy tải lại danh sách.');
   if (action === 'payout' && !canPayout(item)) throw new Error('Yêu cầu chưa đủ thông tin chi trả.');
   let payload = {};
   if (action === 'reject') { if (!String(fields.reason || '').trim()) throw new Error('Nhập lý do từ chối.'); payload = { reason: String(fields.reason).trim() }; }
-  if (action === 'transfer') {
-    const evidence = String(fields.transferEvidenceUrl || '').trim(); let url;
-    try { url = new URL(evidence); } catch { throw new Error('Nhập đường dẫn chứng từ hợp lệ.'); }
-    if (!['https:', 'http:'].includes(url.protocol)) throw new Error('Chứng từ cần sử dụng đường dẫn http hoặc https.');
-    payload = { transferEvidenceUrl: evidence };
-  }
   return checkedData(await client.post(`/admin/withdrawals/${encodeURIComponent(id)}/${action}`, payload));
 }
 export async function executeWithdrawalQueue(client, items, onProgress = (_results) => {}) {

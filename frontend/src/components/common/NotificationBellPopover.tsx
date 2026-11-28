@@ -1054,12 +1054,17 @@ export const NotificationBellPopover: React.FC = () => {
     setIsOpen(false);
 
     if (isAdmin) {
+      const targetId = (notif as any).rentalId || notif.storeId || notif.orderId || '';
       if (notif.type === 'STORE_PENDING') {
-        navigate('/admin/dashboard?tab=STORES');
+        navigate(`/admin/dashboard?tab=STORES${notif.storeId ? `&id=${encodeURIComponent(notif.storeId)}` : ''}`);
         return;
       }
       if (notif.type === 'WITHDRAWAL_PENDING') {
-        navigate('/admin/dashboard?tab=WITHDRAWALS');
+        navigate(`/admin/dashboard?tab=WITHDRAWALS${targetId ? `&id=${encodeURIComponent(targetId)}` : ''}`);
+        return;
+      }
+      if (['DEPOSIT_REFUND_APPROVED', 'DEPOSIT_REFUND_COMPLETED'].includes(notif.type)) {
+        navigate(`/admin/refunds?tab=DEPOSIT_REFUNDS${targetId ? `&id=${encodeURIComponent(targetId)}` : ''}`);
         return;
       }
       navigate('/admin/dashboard');
@@ -1075,20 +1080,31 @@ export const NotificationBellPopover: React.FC = () => {
         navigate('/store/devices');
         return;
       }
-      navigate(`/store/dashboard${notif.orderNumber ? `?order=${encodeURIComponent(notif.orderNumber)}` : ''}`);
+      const storeParams = new URLSearchParams();
+      if (notif.orderId) storeParams.set('id', notif.orderId);
+      if (notif.orderNumber) storeParams.set('order', notif.orderNumber);
+      const qs = storeParams.toString();
+      navigate(`/store/dashboard${qs ? `?${qs}` : ''}`);
       return;
     }
 
     if (isCustomer) {
       if (['DEPOSIT_REFUND_COMPLETED', 'RENTAL_EXPIRED', 'RENTAL_RETURN_REQUESTED', 'DEPOSIT_REFUND_APPROVED'].includes(notif.type)) {
-        navigate('/customer/rentals');
+        const rId = (notif as any).rentalId;
+        navigate(`/customer/rentals${rId ? `?id=${encodeURIComponent(rId)}` : ''}`);
         return;
       }
       if (['ORDER_REJECTED_STORE_INACTIVE', 'DELIVERY_INELIGIBLE'].includes(notif.type)) {
         navigate('/customer/home');
         return;
       }
-      navigate(`/customer/orders?orderId=${encodeURIComponent(notif.orderId || '')}&order=${encodeURIComponent(notif.orderNumber || '')}`);
+      const custParams = new URLSearchParams();
+      if (notif.orderId) {
+        custParams.set('id', notif.orderId);
+        custParams.set('orderId', notif.orderId);
+      }
+      if (notif.orderNumber) custParams.set('order', notif.orderNumber);
+      navigate(`/customer/orders?${custParams.toString()}`);
       return;
     }
   };

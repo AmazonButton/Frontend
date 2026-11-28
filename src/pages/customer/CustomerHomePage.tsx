@@ -1,6 +1,6 @@
 import React, { Suspense, useRef, useState, useEffect } from 'react';
 import { createPortal } from 'react-dom';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import { createDeviceTelemetry, deviceRuntime } from '../../services/device-runtime';
 import { api, apiSessionMarker } from '../../services/api';
@@ -120,11 +120,18 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
             <p className="text-xs text-slate-500 mt-0.5 truncate">
               {productDesc || cfg?.product?.name || 'Nút bấm thông minh 1 chạm'}
             </p>
+            {dev.customerChildLock && (
+              <span className="inline-flex items-center gap-1 mt-1 text-[10px] font-medium text-amber-700 bg-amber-50 dark:bg-amber-950/40 dark:text-amber-300 px-1.5 py-0.5 rounded border border-amber-200 dark:border-amber-900">
+                👶 Đang bật khóa trẻ em
+              </span>
+            )}
           </div>
           <div className="flex items-center gap-1.5 shrink-0 pt-0.5">
             <span
               className={`w-2 h-2 rounded-full ${
-                dev.status === 'DISABLED'
+                dev.customerChildLock
+                  ? 'bg-amber-400'
+                  : dev.status === 'DISABLED'
                   ? 'bg-rose-400'
                   : runtime.running
                   ? 'bg-emerald-500'
@@ -221,6 +228,14 @@ const DeviceCardUI: React.FC<DeviceCardUIProps> = ({
                     <Wifi className="w-3 h-3 text-slate-400 group-hover:text-[#0E6BA8] transition-colors shrink-0" />
                     <span>Wi-Fi</span>
                   </motion.button>
+                  <Link
+                    to={`/customer/devices/${dev.deviceId}`}
+                    title="Xem chi tiết phần cứng & telemetry"
+                    className="px-2.5 py-1.5 rounded-lg border border-slate-200 bg-white hover:bg-slate-50 hover:border-[#0E6BA8]/50 hover:text-[#0E6BA8] text-slate-600 text-[11px] font-medium flex items-center justify-center gap-1 transition-colors shadow-2xs shrink-0"
+                  >
+                    <Cpu className="w-3 h-3 shrink-0" />
+                    <span>Chi tiết</span>
+                  </Link>
                   <motion.button
                     whileTap={{ scale: 0.94 }}
                     type="button"
@@ -277,6 +292,53 @@ const CustomerHomeWorkspace: React.FC = () => {
   const [addQrInput, setAddQrInput] = useState('');
   const [addSubmitting, setAddSubmitting] = useState(false);
 
+  // Customer Dashboard KPI & Detailed Analytics (Item 12.1)
+  const [customerDashboard, setCustomerDashboard] = useState<any | null>(null);
+  const [analyticsOpen, setAnalyticsOpen] = useState(false);
+  const [analyticsLoading, setAnalyticsLoading] = useState(false);
+  const [analyticsDetail, setAnalyticsDetail] = useState<{
+    orders?: any;
+    devices?: any;
+    rentals?: any;
+  } | null>(null);
+
+  useEffect(() => {
+    if (!user) return;
+    let active = true;
+    api
+      .get('/customers/me/dashboard')
+      .then((res) => {
+        if (active && res.data?.data) setCustomerDashboard(res.data.data);
+        else if (active && res.data && res.data.ordersSummary) setCustomerDashboard(res.data);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  const handleToggleDetailedAnalytics = async () => {
+    const next = !analyticsOpen;
+    setAnalyticsOpen(next);
+    if (next && !analyticsDetail) {
+      setAnalyticsLoading(true);
+      try {
+        const [oRes, dRes, rRes] = await Promise.allSettled([
+          api.get('/customers/me/analytics/orders'),
+          api.get('/customers/me/analytics/devices'),
+          api.get('/customers/me/analytics/rentals'),
+        ]);
+        setAnalyticsDetail({
+          orders: oRes.status === 'fulfilled' ? (oRes.value.data?.data ?? oRes.value.data) : null,
+          devices: dRes.status === 'fulfilled' ? (dRes.value.data?.data ?? dRes.value.data) : null,
+          rentals: rRes.status === 'fulfilled' ? (rRes.value.data?.data ?? rRes.value.data) : null,
+        });
+      } finally {
+        setAnalyticsLoading(false);
+      }
+    }
+  };
+
   // Device Transfer & Change Wi-Fi Modals
   const [transferringDevice, setTransferringDevice] = useState<Device | null>(null);
   const [transferResult, setTransferResult] = useState<any | null>(null);
@@ -316,6 +378,7 @@ const CustomerHomeWorkspace: React.FC = () => {
   const [configProductId, setConfigProductId] = useState('');
   const [configQuantity, setConfigQuantity] = useState(1);
   const [configStatus, setConfigStatus] = useState<'ACTIVE' | 'DISABLED'>('ACTIVE');
+  const [configChildLock, setConfigChildLock] = useState<boolean>(false);
   const [configLoading, setConfigLoading] = useState(false);
   const [configSuccessMsg, setConfigSuccessMsg] = useState<string | null>(null);
   const [configError, setConfigError] = useState<string | null>(null);
@@ -700,13 +763,6 @@ const CustomerHomeWorkspace: React.FC = () => {
         return;
       }
     } catch (err: any) {
-      try {
-        await api.post(`/devices/${foundDevice.deviceId}/claim`);
-        confetti({ particleCount: 75, spread: 65, origin: { y: 0.5 } });
-        setAddStep(3);
-        fetchData();
-        return;
-      } catch {}
       alert(err.response?.data?.message || 'Không thể liên kết thiết bị vào tài khoản');
     } finally {
       setAddSubmitting(false);
@@ -844,6 +900,7 @@ const CustomerHomeWorkspace: React.FC = () => {
     setConfigProductId(dev.configuration?.productId || dev.productId || '');
     setConfigQuantity(dev.configuration?.defaultQuantity || (dev as any).products?.[0]?.quantity || 1);
     setConfigStatus(dev.status === 'ACTIVE' ? 'ACTIVE' : 'DISABLED');
+    setConfigChildLock(dev.customerChildLock === true);
     setConfigSuccessMsg(null);
     setConfigError(null);
   };
@@ -868,7 +925,13 @@ const CustomerHomeWorkspace: React.FC = () => {
         }, 800);
       }
     } catch (err: any) {
-      setConfigError(err.response?.data?.message || 'Không thể lưu cấu hình nút');
+      const code = err.response?.data?.code;
+      const msg = err.response?.data?.message || 'Không thể lưu cấu hình nút';
+      setConfigError(
+        code === 'ADDRESS_COORDINATES_MISSING' || /ADDRESS_COORDINATES_MISSING|tọa độ/i.test(msg)
+          ? `${msg} (Cần ghim GPS trong Hồ sơ → Sổ địa chỉ)`
+          : msg
+      );
     } finally {
       setConfigLoading(false);
     }
@@ -985,6 +1048,139 @@ const CustomerHomeWorkspace: React.FC = () => {
             Tự động đồng bộ qua Wi-Fi 2.4GHz & Bluetooth
           </span>
         </div>
+
+        {/* Customer Personal KPI Strip & Detailed Analytics (Item 12.1) */}
+        {customerDashboard && (
+          <div className="space-y-2.5">
+            <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+              <Link
+                to="/customer/orders"
+                className="rounded-xl border border-slate-200/80 bg-white p-3.5 hover:border-[#0E6BA8]/40 transition-colors"
+              >
+                <p className="text-[11px] font-medium text-slate-500">Đơn hàng của tôi</p>
+                <p className="mt-1 text-lg font-bold text-slate-900 tabular-nums">
+                  {customerDashboard.ordersSummary?.total ?? 0}
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  {customerDashboard.ordersSummary?.pending ?? 0} chờ xử lý · {customerDashboard.ordersSummary?.delivering ?? 0} đang giao
+                </p>
+              </Link>
+
+              <Link
+                to="/customer/orders?status=COMPLETED"
+                className="rounded-xl border border-slate-200/80 bg-white p-3.5 hover:border-[#0E6BA8]/40 transition-colors"
+              >
+                <p className="text-[11px] font-medium text-slate-500">Tổng chi tiêu</p>
+                <p className="mt-1 text-lg font-bold text-[#0E6BA8] tabular-nums">
+                  {new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(
+                    Number(customerDashboard.ordersSummary?.totalSpent || 0)
+                  )}
+                </p>
+                <p className="mt-0.5 text-[11px] text-slate-500">
+                  {Array.isArray(customerDashboard.connectedStores) ? customerDashboard.connectedStores.length : 0} cửa hàng đã kết nối
+                </p>
+              </Link>
+
+              <div className="rounded-xl border border-slate-200/80 bg-white p-3.5">
+                <p className="text-[11px] font-medium text-slate-500">Thiết bị IoT</p>
+                <p className="mt-1 text-lg font-bold text-slate-900 tabular-nums">
+                  {customerDashboard.devices?.active ?? 0}/{customerDashboard.devices?.total ?? 0}
+                </p>
+                <p className={`mt-0.5 text-[11px] ${(customerDashboard.devices?.lowBattery ?? 0) > 0 ? 'text-amber-600 font-semibold' : 'text-slate-500'}`}>
+                  {(customerDashboard.devices?.lowBattery ?? 0) > 0
+                    ? `${customerDashboard.devices.lowBattery} thiết bị pin yếu`
+                    : 'Pin thiết bị ổn định'}
+                </p>
+              </div>
+
+              <Link
+                to="/customer/rentals"
+                className="rounded-xl border border-slate-200/80 bg-white p-3.5 hover:border-[#0E6BA8]/40 transition-colors"
+              >
+                <p className="text-[11px] font-medium text-slate-500">Hợp đồng thuê nút</p>
+                <p className="mt-1 text-lg font-bold text-slate-900 tabular-nums">
+                  {customerDashboard.rentals?.active ?? 0}/{customerDashboard.rentals?.total ?? 0}
+                </p>
+                <p className={`mt-0.5 text-[11px] ${(customerDashboard.rentals?.expiringSoon ?? 0) > 0 ? 'text-amber-600 font-semibold' : 'text-slate-500'}`}>
+                  {(customerDashboard.rentals?.expiringSoon ?? 0) > 0
+                    ? `${customerDashboard.rentals.expiringSoon} gói sắp hết hạn`
+                    : 'Xem chi tiết gói thuê →'}
+                </p>
+              </Link>
+            </div>
+
+            <div className="flex justify-end">
+              <button
+                type="button"
+                onClick={() => void handleToggleDetailedAnalytics()}
+                className="text-xs font-semibold text-[#0E6BA8] hover:underline inline-flex items-center gap-1"
+              >
+                <span>{analyticsOpen ? 'Thu gọn thống kê chi tiết' : 'Xem thống kê chi tiết'}</span>
+                <ChevronDown className={`w-3.5 h-3.5 transition-transform ${analyticsOpen ? 'rotate-180' : ''}`} />
+              </button>
+            </div>
+
+            {analyticsOpen && (
+              <div className="rounded-2xl border border-slate-200 bg-white p-4 grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
+                {analyticsLoading ? (
+                  <p className="col-span-3 py-4 text-center text-slate-500">Đang tải thống kê chi tiết...</p>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <p className="font-bold text-slate-800">Sản phẩm đặt nhiều</p>
+                      {(analyticsDetail?.orders?.topProducts || []).slice(0, 4).length === 0 ? (
+                        <p className="text-slate-400">Chưa có dữ liệu đơn hàng.</p>
+                      ) : (
+                        <ul className="space-y-1.5">
+                          {(analyticsDetail?.orders?.topProducts || []).slice(0, 4).map((p: any, idx: number) => (
+                            <li key={idx} className="flex items-center justify-between text-slate-600">
+                              <span className="truncate pr-2">{p.productName}</span>
+                              <span className="font-semibold text-slate-900 shrink-0">{p.totalQuantity} lần</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <p className="font-bold text-slate-800">Tình trạng thiết bị</p>
+                      {(analyticsDetail?.devices?.devices || []).slice(0, 4).length === 0 ? (
+                        <p className="text-slate-400">Chưa có thiết bị nào.</p>
+                      ) : (
+                        <ul className="space-y-1.5">
+                          {(analyticsDetail?.devices?.devices || []).slice(0, 4).map((d: any) => (
+                            <li key={d.deviceId} className="flex items-center justify-between text-slate-600">
+                              <Link to={`/customer/devices/${d.deviceId}`} className="truncate pr-2 text-[#0E6BA8] hover:underline">
+                                {d.buttonName || d.buttonCode || `#${d.deviceId}`}
+                              </Link>
+                              <span className="font-semibold text-slate-800 shrink-0">
+                                Pin {d.batteryLevel !== null && d.batteryLevel !== undefined ? `${d.batteryLevel}%` : '—'}
+                              </span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                    <div className="space-y-2">
+                      <p className="font-bold text-slate-800">Phân bổ hợp đồng thuê</p>
+                      {(analyticsDetail?.rentals?.rentals || []).slice(0, 4).length === 0 ? (
+                        <p className="text-slate-400">Chưa có hợp đồng thuê nào.</p>
+                      ) : (
+                        <ul className="space-y-1.5">
+                          {(analyticsDetail?.rentals?.rentals || []).slice(0, 4).map((r: any) => (
+                            <li key={r.rentalId} className="flex items-center justify-between text-slate-600">
+                              <span className="truncate pr-2">{r.packageName || `Hợp đồng #${r.rentalId}`}</span>
+                              <span className="font-semibold text-slate-900 shrink-0">{r.status}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
+                    </div>
+                  </>
+                )}
+              </div>
+            )}
+          </div>
+        )}
       </motion.div>
 
       {/* Cancelled Toast at Bottom-Right */}
@@ -1733,9 +1929,19 @@ const CustomerHomeWorkspace: React.FC = () => {
 
             {/* Error / Success Alerts */}
             {configError && (
-              <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-lg text-xs text-rose-600 dark:text-rose-400 flex items-center gap-2">
-                <AlertCircle className="w-4 h-4 shrink-0" />
-                <span>{configError}</span>
+              <div className="p-3 bg-rose-50 dark:bg-rose-950/30 border border-rose-200 dark:border-rose-900/50 rounded-lg text-xs text-rose-600 dark:text-rose-400 space-y-1.5">
+                <div className="flex items-center gap-2">
+                  <AlertCircle className="w-4 h-4 shrink-0" />
+                  <span>{configError}</span>
+                </div>
+                {/GPS|tọa độ|Sổ địa chỉ/i.test(configError) && (
+                  <Link
+                    to="/customer/profile?tab=ADDRESSES"
+                    className="inline-block font-semibold text-[#0E6BA8] hover:underline pl-6"
+                  >
+                    Cập nhật tọa độ GPS tại Sổ địa chỉ →
+                  </Link>
+                )}
               </div>
             )}
             {configSuccessMsg && (
@@ -1818,29 +2024,59 @@ const CustomerHomeWorkspace: React.FC = () => {
                 </p>
               </div>
 
-              {/* 4. Cho phép đặt hàng từ nút này (Toggle Switch phẳng có spring animation) */}
+              {/* 4. Khóa nút trẻ em (customerChildLock) */}
               <div className="border-t border-slate-100 dark:border-zinc-800 pt-4 flex items-center justify-between">
                 <div>
-                  <h4 className="text-sm font-medium text-slate-900 dark:text-white">
-                    Cho phép đặt hàng từ nút này
+                  <h4 className="text-sm font-medium text-slate-900 dark:text-white flex items-center gap-2">
+                    <span>Khóa nút trẻ em</span>
+                    {configChildLock && (
+                      <span className="text-[10px] font-medium px-2 py-0.5 rounded-full bg-amber-100 text-amber-800 dark:bg-amber-950/60 dark:text-amber-300">
+                        Đang khóa
+                      </span>
+                    )}
                   </h4>
                   <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
-                    Trạng thái được hệ thống và cửa hàng quản lý; liên hệ cửa hàng nếu cần tạm ngừng nút.
+                    {configChildLock
+                      ? 'Nút vật lý đang tạm ngừng nhận lệnh đặt. Bấm để mở lại cho phép đặt hàng.'
+                      : 'Nút đang mở sẵn sàng. Bật khóa để tránh trẻ nhỏ hoặc vô tình bấm nút tạo đơn.'}
                   </p>
                 </div>
                 <motion.button
                   whileTap={{ scale: 0.92 }}
                   type="button"
-                  disabled aria-label="Trạng thái nút do cửa hàng quản lý" title="Trạng thái nút do cửa hàng quản lý"
+                  onClick={async () => {
+                    if (!configModalDevice) return;
+                    const nextLock = !configChildLock;
+                    setConfigChildLock(nextLock);
+                    try {
+                      await api.patch(`/devices/${configModalDevice.deviceId}`, {
+                        canOrder: !nextLock,
+                        customerChildLock: nextLock,
+                      }).catch(() => api.put(`/devices/${configModalDevice.deviceId}/customer-config`, {
+                        buttonName: configCustomName || configModalDevice.customName,
+                        productId: configProductId || configModalDevice.configuration?.productId || configModalDevice.productId,
+                        quantity: configQuantity,
+                        customerChildLock: nextLock,
+                        canOrder: !nextLock,
+                      }));
+                      toast.success(nextLock ? 'Đã bật Khóa trẻ em cho nút' : 'Đã mở khóa trẻ em cho nút');
+                      await fetchData(true);
+                    } catch (err: any) {
+                      setConfigChildLock(!nextLock);
+                      toast.error(err.response?.data?.message || 'Không thể thay đổi trạng thái khóa trẻ em');
+                    }
+                  }}
+                  aria-label="Khóa nút trẻ em"
+                  title={configChildLock ? 'Bấm để mở khóa trẻ em' : 'Bấm để bật khóa trẻ em'}
                   className={`relative inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
-                    configStatus === 'ACTIVE' ? 'bg-[#0E6BA8]' : 'bg-slate-200 dark:bg-zinc-700'
+                    configChildLock ? 'bg-amber-500' : 'bg-slate-200 dark:bg-zinc-700'
                   }`}
                 >
                   <motion.span
                     layout
                     transition={{ type: 'spring', stiffness: 500, damping: 30 }}
                     className={`pointer-events-none inline-block h-5 w-5 transform rounded-full bg-white shadow ring-0 ${
-                      configStatus === 'ACTIVE' ? 'translate-x-5' : 'translate-x-0'
+                      configChildLock ? 'translate-x-5' : 'translate-x-0'
                     }`}
                   />
                 </motion.button>

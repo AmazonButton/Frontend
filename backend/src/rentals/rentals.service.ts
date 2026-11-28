@@ -1,22 +1,92 @@
-import { Injectable, NotFoundException, BadRequestException, Inject } from '@nestjs/common';
+import {
+  Injectable,
+  NotFoundException,
+  BadRequestException,
+  ForbiddenException,
+  Inject,
+  Optional,
+  Logger,
+  forwardRef,
+} from '@nestjs/common';
 import { RentalsRepository } from './rentals.repository';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateRentalOrderDto } from './dto/rentals.dto';
+import { RentalResponseDto } from './dto/rental-response.dto';
+import { RentalExtensionDto } from './dto/rental-extension.dto';
+import { DashboardCacheService } from '../common/cache/dashboard-cache.service';
+import { PayOSPayoutService } from '../payments/payos-payout.service';
+import { BillingChargesService } from '../billing-charges/billing-charges.service';
+import { verifyDepositRefundPayoutEvidence } from './deposit-payout-verifier';
+import { calculateRentalPricing } from './rental-pricing';
+import { invalidateRentalMutationCaches } from './rental-cache-invalidation';
+import { toRentalRefundDto, toRentalRefundOperationDto } from './dto/rental-refund-response.dto';
 
 @Injectable()
 export class RentalsService {
+  private readonly logger = new Logger(RentalsService.name);
   private readonly rentalsRepo: RentalsRepository;
 
-  constructor(@Inject(RentalsRepository) repoOrPrisma: RentalsRepository | PrismaService) {
-    if (repoOrPrisma && 'listAvailablePackages' in repoOrPrisma) {
+  constructor(
+    @Inject(RentalsRepository) repoOrPrisma: RentalsRepository | PrismaService,
+    @Optional() private readonly cacheService?: DashboardCacheService,
+    @Optional() @Inject(PayOSPayoutService) private readonly payosPayoutService?: PayOSPayoutService,
+    @Optional() @Inject(forwardRef(() => BillingChargesService)) private readonly billingChargesService?: any,
+  ) {
+    if (repoOrPrisma && ('listAvailablePackages' in repoOrPrisma || 'findRentalById' in repoOrPrisma || 'findDepositRefundById' in repoOrPrisma)) {
       this.rentalsRepo = repoOrPrisma as RentalsRepository;
     } else {
       this.rentalsRepo = new RentalsRepository(repoOrPrisma as PrismaService);
     }
   }
 
+  private async invalidateRentalCaches(
+    customerUserId?: string | number | bigint,
+    storeId?: string | number | bigint,
+  ) {
+    if (!this.cacheService) return;
+    try {
+      const promises: Promise<void>[] = [
+        this.cacheService.invalidatePrefix('admin:dashboard:'),
+        this.cacheService.invalidatePrefix('admin:operations'),
+      ];
+      if (customerUserId != null) {
+        const id = customerUserId.toString();
+        promises.push(
+          this.cacheService.invalidateKey(`customer:dashboard:${id}`),
+          this.cacheService.invalidateKey(`customer:rentals:${id}`),
+          this.cacheService.invalidateKey(`customer:devices:${id}`),
+        );
+      }
+      if (storeId != null) {
+        promises.push(this.cacheService.invalidatePrefix(`dash:store:${storeId.toString()}:`));
+        promises.push(this.cacheService.invalidatePrefix(`staff:dashboard:store:${storeId.toString()}:`));
+      }
+      await Promise.all(promises);
+    } catch (error) {
+      this.logger.warn(
+        `Failed to invalidate rental caches: ${error instanceof Error ? error.message : 'unknown error'}`,
+      );
+    }
+  }
+
   async listAvailablePackages() {
-    return this.rentalsRepo.listAvailablePackages();
+    if (this.cacheService) {
+      try {
+        const cached = await this.cacheService.get('rentals:available_packages');
+        if (cached) return cached;
+      } catch {
+        // Fallback to repository
+      }
+    }
+    const data = await this.rentalsRepo.listAvailablePackages();
+    if (this.cacheService && data) {
+      try {
+        await this.cacheService.set('rentals:available_packages', data, 60); // 60s TTL
+      } catch {
+        // Best effort caching
+      }
+    }
+    return data;
   }
 
   async createRentalContract(customerId: string | number | bigint, dto: CreateRentalOrderDto) {
@@ -28,42 +98,485 @@ export class RentalsService {
       throw new NotFoundException('Gói thuê nút không tồn tại hoặc đã tạm dừng cung cấp');
     }
 
-    const months = Number(dto.monthsRented) || 1;
-    const monthlyPrice = Number(pkg.monthlyPrice);
-    const depositFee = Number(pkg.depositFee || 0);
-    const totalRentAmount = monthlyPrice * months + depositFee;
+    const months = Math.max(1, Math.min(12, Math.floor(Number(dto.monthsRented ?? 1))));
+    const buttonQuantity = (pkg as any).buttonQuantity ?? 1;
+    const pricing = calculateRentalPricing({
+      buttonQuantity,
+      months,
+      monthlyPackagePrice: pkg.monthlyPrice,
+      packageDepositFee: pkg.depositFee || 0,
+    });
 
     const startDate = new Date();
     const endDate = new Date(startDate.getTime() + months * 30 * 24 * 60 * 60 * 1000);
     const rentalCode = `RNT-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
 
-    return this.rentalsRepo.createRental({
+    const created = await this.rentalsRepo.createRental({
       rentalCode,
       customerId: rawCustomerId,
       packageId: rawPackageId,
       monthsRented: months,
-      totalRentAmount,
-      depositAmount: depositFee,
+      totalRentAmount: pricing.totalAmount,
+      depositAmount: pricing.depositTotal,
+      buttonQuantity,
+      depositPerButton: pricing.depositPerButton,
+      rentPerButton: pricing.rentPerButton,
+      monthlyRentPerButtonSnapshot: pricing.monthlyRentPerButton,
+      pricingReviewRequired: false,
       startDate,
       endDate,
       status: 'PENDING_PAYMENT',
+      pricing,
     });
+
+    await this.invalidateRentalCaches(created.customer?.userId);
+    return RentalResponseDto.fromEntity(created);
   }
 
   async listCustomerRentals(customerId: string | number | bigint) {
     const rawCustomerId = BigInt(customerId);
-    return this.rentalsRepo.listCustomerRentals(rawCustomerId);
+    const items = await this.rentalsRepo.listCustomerRentals(rawCustomerId);
+    return items.map(RentalResponseDto.fromEntity);
   }
 
-  async activateRental(rentalId: string | number | bigint) {
+  private async authorizeRentalAccess(rentalId: bigint, user: any) {
+    const rental = await this.rentalsRepo.findRentalById(rentalId);
+    if (!rental) {
+      throw new NotFoundException('Hợp đồng thuê không tồn tại');
+    }
+
+    const role = user?.role || user?.roleCode;
+    const isAdmin = ['ADMIN', 'SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(role);
+    if (isAdmin) {
+      return { rental, actorType: 'ADMIN' as const, storeId: null };
+    }
+
+    // Check Store Owner / Manager / Staff
+    const isStoreRole = ['STORE_OWNER', 'STORE_MANAGER', 'STAFF'].includes(role);
+    const userStoreId = user?.storeId ? BigInt(user.storeId) : null;
+
+    if (isStoreRole && userStoreId) {
+      const store = await this.rentalsRepo.findActiveStoreById(userStoreId);
+      if (!store || store.status !== 'ACTIVE') {
+        throw new ForbiddenException('Cửa hàng của bạn chưa được kích hoạt hoặc đã tạm dừng hoạt động');
+      }
+
+      if (!rental.fulfillmentStoreId) {
+        throw new BadRequestException('Hợp đồng thuê chưa được phân bổ Cửa hàng phụ trách');
+      }
+      if (BigInt(rental.fulfillmentStoreId) !== userStoreId) {
+        throw new ForbiddenException('Bạn không có quyền truy cập vào hợp đồng của Cửa hàng khác');
+      }
+
+      return { rental, actorType: 'STORE' as const, storeId: userStoreId };
+    }
+
+    // Check Customer
+    const currentCustomerProfileId = user?.customerProfileId?.toString();
+    const currentUserId = (user?.userId || user?.id || user?.sub)?.toString();
+
+    const isCustomerMatch =
+      (rental.customerId != null && rental.customerId.toString() === currentCustomerProfileId) ||
+      rental.customer?.userId?.toString() === currentUserId;
+
+    if (isCustomerMatch) {
+      return { rental, actorType: 'CUSTOMER' as const, storeId: null };
+    }
+
+    throw new ForbiddenException('Bạn không có quyền truy cập vào hợp đồng thuê này');
+  }
+
+  private async verifyRentalOwnership(rentalId: bigint, user: any) {
+    const { rental } = await this.authorizeRentalAccess(rentalId, user);
+    return rental;
+  }
+
+  async getRentalDetail(rentalIdStr: string | bigint, user: any): Promise<RentalResponseDto> {
+    const rentalId = BigInt(rentalIdStr);
+    const rental = await this.verifyRentalOwnership(rentalId, user);
+    return RentalResponseDto.fromEntity(rental);
+  }
+
+  async createRentalPaymentRequest(rentalIdStr: string | bigint, user: any, returnUrl?: string, cancelUrl?: string) {
+    const rentalId = BigInt(rentalIdStr);
+    const rental = await this.verifyRentalOwnership(rentalId, user);
+
+    if (this.billingChargesService) {
+      const initialCharge = await this.rentalsRepo.findInitialChargeByRentalId(rentalId);
+      if (initialCharge) {
+        return this.billingChargesService.createPayosPaymentRequestForCharge(
+          initialCharge.chargeId,
+          user,
+          returnUrl,
+          cancelUrl,
+        );
+      }
+    }
+
+    const amount = Number(rental.depositAmount || rental.totalRentAmount);
+    const txCode = `PAY-RNT-${rental.rentalCode}-${Date.now().toString().slice(-4)}`;
+    const paymentLinkId = `pl_${Date.now()}_${Math.floor(Math.random() * 10000)}`;
+    const checkoutUrl = `https://pay.payos.vn/web/${paymentLinkId}`;
+    const qrCode = `vietqr://pay?bin=970422&acc=1029384756&amount=${amount}&desc=${txCode}`;
+
+    const tx = await this.rentalsRepo.createRentalPaymentTransaction({
+      rentalId,
+      amount,
+      provider: 'PAYOS',
+      paymentMethod: 'QR',
+      transactionCode: txCode,
+      status: 'PENDING',
+      paymentLinkId,
+      checkoutUrl,
+      qrCode,
+    });
+
+    return {
+      paymentTransactionId: tx.paymentTransactionId.toString(),
+      rentalId: rentalId.toString(),
+      rentalCode: rental.rentalCode,
+      amount,
+      transactionCode: txCode,
+      paymentLinkId,
+      checkoutUrl,
+      qrCode,
+      status: 'PENDING',
+    };
+  }
+
+  async extendRentalContract(
+    rentalIdStr: string | bigint,
+    dto: RentalExtensionDto,
+    user: any,
+  ): Promise<any> {
+    const rentalId = BigInt(rentalIdStr);
+    const { rental, actorType, storeId } = await this.authorizeRentalAccess(rentalId, user);
+
+    if (!['PENDING_HANDOVER', 'ACTIVE', 'EXPIRED'].includes(rental.status)) {
+      throw new BadRequestException('Không thể gia hạn hợp đồng thuê đã kết thúc hoặc hủy');
+    }
+
+    if (rental.pricingReviewRequired) {
+      throw new BadRequestException('RECONCILIATION_REQUIRED: Hợp đồng có chứng từ thu chưa được đối soát');
+    }
+
+    const months = dto.additionalMonths ?? 1;
+
+    // P1: Phân nhánh chính sách billingPolicy
+    if (rental.billingPolicy === 'STORE_RENT_CUSTOMER_DEPOSIT') {
+      if (actorType === 'CUSTOMER') {
+        throw new BadRequestException(
+          'Hợp đồng thuộc chính sách Cửa hàng chi trả phí thuê (STORE_RENT_CUSTOMER_DEPOSIT). Khách hàng không phải đóng phí gia hạn thuê. Phí duy trì do Store phụ trách.',
+        );
+      }
+
+      const targetStoreId = rental.fulfillmentStoreId ? BigInt(rental.fulfillmentStoreId) : storeId;
+      if (!targetStoreId) {
+        throw new BadRequestException('Hợp đồng thuê chưa được phân bổ Cửa hàng phụ trách để tạo nghĩa vụ thanh toán');
+      }
+
+      const charge = await this.rentalsRepo.createStoreRentalExtensionObligation(
+        rentalId,
+        months,
+        targetStoreId,
+        BigInt(user.userId || user.id || user.sub),
+      );
+
+      await this.invalidateRentalCaches(rental.customer?.userId, targetStoreId);
+
+      return {
+        rentalId: rentalId.toString(),
+        rentalCode: rental.rentalCode,
+        status: rental.status,
+        billingPolicy: rental.billingPolicy,
+        payer: 'STORE',
+        storeId: targetStoreId.toString(),
+        chargeId: charge.chargeId.toString(),
+        chargeCode: charge.chargeCode,
+        totalAmount: Number(charge.totalAmount),
+        months,
+        paymentMethod: charge.paymentMethod,
+        message: 'Tạo nghĩa vụ gia hạn phí thuê cho Cửa hàng thành công.',
+      };
+    }
+
+    // LEGACY_CUSTOMER_RENT: Khách hàng chi trả qua PayOS
+    const charge = await this.rentalsRepo.createRentalExtensionCharge(
+      rentalId,
+      months,
+      BigInt(user.userId || user.id || user.sub),
+    );
+
+    await this.invalidateRentalCaches(rental.customer?.userId, rental.fulfillmentStoreId);
+
+    return {
+      rentalId: rentalId.toString(),
+      rentalCode: rental.rentalCode,
+      status: rental.status,
+      billingPolicy: rental.billingPolicy,
+      payer: 'CUSTOMER',
+      chargeId: charge.chargeId.toString(),
+      chargeCode: charge.chargeCode,
+      totalAmount: Number(charge.totalAmount),
+      months,
+      paymentMethod: charge.paymentMethod,
+      message: 'Tạo yêu cầu gia hạn thành công. Vui lòng thanh toán để cộng thời hạn thuê.',
+    };
+  }
+
+  async adjustRentalDurationAdmin(
+    rentalIdStr: string | bigint,
+    additionalDays: number,
+    reason: string,
+    adminUser: any,
+  ) {
+    const rentalId = BigInt(rentalIdStr);
+    const rental = await this.rentalsRepo.findRentalById(rentalId);
+    if (!rental) throw new NotFoundException('Không tìm thấy hợp đồng thuê');
+
+    if (!reason || reason.trim().length === 0) {
+      throw new BadRequestException('Lý do điều chỉnh thời hạn thuê là bắt buộc');
+    }
+
+    const result = await this.rentalsRepo.adjustRentalDurationAdminTx(
+      rentalId,
+      additionalDays,
+      reason,
+      adminUser,
+    );
+    await this.invalidateRentalCaches(rental.customer?.userId, rental.fulfillmentStoreId);
+    return result;
+  }
+
+  async requestRentalReturn(rentalIdStr: string | bigint, user: any): Promise<RentalResponseDto> {
+    const rentalId = BigInt(rentalIdStr);
+    const rentalForReturn = await this.verifyRentalOwnership(rentalId, user);
+
+    const updated = await this.rentalsRepo.updateRentalStatus(rentalId, 'RETURN_REQUESTED');
+    await this.invalidateRentalCaches(rentalForReturn.customer?.userId);
+    return RentalResponseDto.fromEntity(updated);
+  }
+
+  async assignFulfillmentAndDevicesAdmin(
+    rentalIdStr: string | bigint,
+    dto: { fulfillmentStoreId: string | number | bigint; buttonIds: Array<string | number | bigint>; notes?: string },
+    adminUser: any,
+  ) {
+    const rentalId = BigInt(rentalIdStr);
+    const fulfillmentStoreId = BigInt(dto.fulfillmentStoreId);
+    const buttonIds = (dto.buttonIds || []).map((id) => BigInt(id));
+
+    if (buttonIds.length === 0) {
+      throw new BadRequestException('Danh sách mã nút bấm (buttonIds) không được rỗng');
+    }
+
+    const updated = await this.rentalsRepo.assignFulfillmentAndDevicesAdminTx(
+      rentalId,
+      fulfillmentStoreId,
+      buttonIds,
+      adminUser,
+    );
+
+    await this.invalidateRentalCaches(updated?.customer?.userId, fulfillmentStoreId);
+    return RentalResponseDto.fromEntity(updated);
+  }
+
+  async activateRental(rentalId: string | number | bigint, actor?: any) {
     const rawRentalId = BigInt(rentalId);
     const rental = await this.rentalsRepo.findRentalById(rawRentalId);
     if (!rental) throw new NotFoundException('Không tìm thấy hợp đồng thuê');
 
-    if (rental.status !== 'PAID' && rental.status !== 'ACTIVE') {
-      throw new BadRequestException('Hợp đồng thuê chưa hoàn tất thanh toán (PENDING_PAYMENT), không thể kích hoạt');
+    if (rental.status !== 'PENDING_HANDOVER' && rental.status !== 'ACTIVE') {
+      throw new BadRequestException('Hợp đồng phải ở trạng thái PENDING_HANDOVER và được gán thiết bị trước khi kích hoạt');
     }
 
-    return this.rentalsRepo.updateRentalStatus(rawRentalId, 'ACTIVE');
+    await this.invalidateRentalCaches(rental.customer?.userId, rental.fulfillmentStoreId);
+
+    if (rental.status === 'ACTIVE') {
+      return RentalResponseDto.fromEntity(rental);
+    }
+
+    return this.handoverRental(rawRentalId, actor || { role: 'SYSTEM' });
+  }
+
+  async listAllRentalsAdmin(query: { page?: number; pageSize?: number; status?: string; pricingReviewRequired?: boolean }) {
+    const page = Number(query.page ?? 1);
+    const pageSize = Number(query.pageSize ?? 20);
+    if (!Number.isSafeInteger(page) || !Number.isSafeInteger(pageSize) || page < 1 || pageSize < 1 || pageSize > 100 || (page - 1) * pageSize > 1_000_000) {
+      throw new BadRequestException('Invalid pagination or offset');
+    }
+    const skip = (page - 1) * pageSize;
+
+    const { total, items } = await this.rentalsRepo.listAllRentalsAdmin({
+      skip,
+      take: pageSize,
+      status: query.status,
+      pricingReviewRequired: query.pricingReviewRequired,
+    });
+
+    return {
+      items: items.map(RentalResponseDto.fromEntity),
+      total,
+      page,
+      pageSize,
+    };
+  }
+
+  async updateRentalStatusAdmin(rentalIdStr: string | bigint, status: string): Promise<RentalResponseDto> {
+    const rentalId = BigInt(rentalIdStr);
+    const rental = await this.rentalsRepo.findRentalById(rentalId);
+    if (!rental) {
+      throw new NotFoundException('Không tìm thấy hợp đồng thuê');
+    }
+
+    const ALLOWED_ADMIN_STATUS_TRANSITIONS: Record<string, string[]> = {
+      PENDING_PAYMENT: ['CANCELLED'],
+      ACTIVE: ['TERMINATED'],
+      EXPIRED: ['TERMINATED'],
+    };
+    const allowed = ALLOWED_ADMIN_STATUS_TRANSITIONS[rental.status] || [];
+    if (!allowed.includes(status)) {
+      throw new BadRequestException(
+        `Chuyển đổi trạng thái từ ${rental.status} sang ${status} không được phép. Trạng thái PENDING_HANDOVER yêu cầu đối soát thanh toán; trạng thái ACTIVE yêu cầu quy trình bàn giao thiết bị.`
+      );
+    }
+
+    const updated = await this.rentalsRepo.updateRentalStatus(rentalId, status);
+    await this.invalidateRentalCaches(rental.customer?.userId);
+    return RentalResponseDto.fromEntity(updated);
+  }
+
+  async createReturnRequest(
+    rentalIdStr: string | bigint,
+    buttonIdStr: string | bigint,
+    user: any,
+  ) {
+    const rentalId = BigInt(rentalIdStr);
+    const buttonId = BigInt(buttonIdStr);
+
+    const rental = await this.verifyRentalOwnership(rentalId, user);
+    const buttonBelongs = rental.buttons?.some((b: any) => b.buttonId.toString() === buttonId.toString());
+    if (!buttonBelongs && rental.buttons && rental.buttons.length > 0) {
+      throw new BadRequestException('Nút bấm không thuộc hợp đồng thuê này');
+    }
+
+    const createdReturn = await this.rentalsRepo.createReturnRequestTx(rentalId, buttonId);
+    await this.invalidateRentalCaches(rental.customer?.userId);
+    return { returnId: String(createdReturn.returnId), returnCode: createdReturn.returnCode,
+      rentalId: String(rentalId), buttonId: String(buttonId), status: createdReturn.status, createdAt: createdReturn.createdAt };
+  }
+
+  async confirmReturnReceipt(
+    returnIdStr: string | bigint,
+    user: any,
+    inspectionNote?: string,
+  ) {
+    const returnId = BigInt(returnIdStr);
+    const result = await this.rentalsRepo.confirmReturnReceiptTx(returnId, user, inspectionNote);
+    if (this.cacheService) {
+      try {
+        const rentalId = result.depositRefund?.rentalId;
+        const rental = rentalId ? await this.rentalsRepo.findRentalById(rentalId) : null;
+        await invalidateRentalMutationCaches(this.cacheService, rental?.customer?.userId, [result.button?.custodyStoreId, rental?.fulfillmentStoreId]);
+      } catch { /* Post-commit best effort. */ }
+    }
+    return { returnId: String(result.returnId), status: result.status, movementLogged: result.movementLogged,
+      rentalCompleted: result.rentalCompleted,
+      button: { buttonId: String(result.button.buttonId), customerId: result.button.customerId?.toString() ?? null,
+        rentalId: result.button.rentalId?.toString() ?? null, custodyStoreId: result.button.custodyStoreId?.toString() ?? null,
+        inventoryState: result.button.inventoryState, canOrder: result.button.canOrder },
+      depositRefund: toRentalRefundDto(result.depositRefund) };
+  }
+
+  async approveDepositRefund(
+    refundIdStr: string | bigint,
+    adminUser: any,
+  ) {
+    const refundId = BigInt(refundIdStr);
+    const result = await this.rentalsRepo.approveDepositRefundTx(refundId, adminUser);
+    await this.invalidateRefundCaches(refundId);
+    return toRentalRefundOperationDto(result);
+  }
+
+  async reconcileDepositRefundPayout(
+    refundIdStr: string | bigint,
+    actor?: any,
+    manualProviderReferenceId?: string,
+  ) {
+    const refundId = BigInt(refundIdStr);
+    const refund = await this.rentalsRepo.findDepositRefundById(refundId);
+    if (!refund) throw new NotFoundException('Yêu cầu hoàn cọc không tồn tại');
+
+    if (refund.status === 'REFUNDED') {
+      return toRentalRefundOperationDto({ alreadyConfirmed: true, refund });
+    }
+
+    if (refund.status !== 'PENDING_PAYOUT') {
+      throw new BadRequestException(`Yêu cầu hoàn cọc không ở trạng thái PENDING_PAYOUT (hiện tại: ${refund.status})`);
+    }
+
+    // P0 Invariant: Khi admin cung cấp mã manualProviderReferenceId, ƯU TIÊN DÙNG MÃ ĐÓ để đối soát.
+    // Nếu admin không truyền mã mới, dùng mã đã lưu trong DB (refund.providerReferenceId).
+    const providerRef = (manualProviderReferenceId?.trim() || refund.providerReferenceId)?.trim();
+    if (!providerRef) {
+      throw new BadRequestException('Yêu cầu hoàn cọc chưa có mã tham chiếu giao dịch chi trả (providerReferenceId). Vui lòng cung cấp mã payout ID thật từ PayOS để đối soát.');
+    }
+
+    if (!this.payosPayoutService) {
+      throw new BadRequestException('Dịch vụ chi hộ PayOSPayoutService chưa sẵn sàng để đối soát');
+    }
+
+    const payoutInfo = await this.payosPayoutService.getPayout(providerRef);
+    if (!payoutInfo || payoutInfo.code !== '00') {
+      throw new BadRequestException(`Không tìm thấy hoặc không thể tra cứu giao dịch chi trả trên cổng thanh toán: ${payoutInfo?.desc || 'Lỗi không xác định'}`);
+    }
+
+    const verification = verifyDepositRefundPayoutEvidence(payoutInfo.data, {
+      ...refund,
+      providerReferenceId: providerRef,
+    });
+    if (!verification.isVerified) {
+      if (verification.reason?.includes('chưa hoàn tất')) {
+        return {
+          success: false,
+          status: refund.status,
+          message: `${verification.reason}. Tiền cọc tiếp tục được giữ an toàn ở quỹ dự phòng (refund_reserved_amount).`,
+          data: toRentalRefundDto(refund),
+        };
+      }
+      throw new BadRequestException(verification.reason);
+    }
+
+    const result = await this.rentalsRepo.confirmDepositRefundPayoutTx(refundId, verification.providerRef, actor);
+    await this.invalidateRefundCaches(refundId);
+    return toRentalRefundOperationDto(result);
+  }
+
+  private async invalidateRefundCaches(refundId: bigint) {
+    if (!this.cacheService) return;
+    try {
+      const refund = await this.rentalsRepo.findDepositRefundById(refundId);
+      await invalidateRentalMutationCaches(this.cacheService, refund?.customer?.userId);
+    } catch { /* Never turn a committed refund into an HTTP failure. */ }
+  }
+
+  async confirmDepositRefundPayout(
+    refundIdStr: string | bigint,
+    actor?: any,
+    manualProviderReferenceId?: string,
+  ) {
+    return this.reconcileDepositRefundPayout(refundIdStr, actor, manualProviderReferenceId);
+  }
+
+  async handoverRental(
+    rentalIdStr: string | bigint,
+    user: any,
+    handoverDate?: Date,
+  ) {
+    const rentalId = BigInt(rentalIdStr);
+    const result = await this.rentalsRepo.handoverRentalButtonsTx(rentalId, user, handoverDate);
+    const rental = await this.rentalsRepo.findRentalById(rentalId);
+    await this.invalidateRentalCaches(rental?.customer?.userId);
+    return result;
   }
 }

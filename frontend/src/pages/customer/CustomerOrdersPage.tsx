@@ -1,6 +1,6 @@
 // @refresh reset
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useLocation, Link } from 'react-router-dom';
+import { useLocation, useSearchParams, Link } from 'react-router-dom';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ChevronDown,
@@ -20,6 +20,7 @@ import {
   SlidersHorizontal,
   Truck,
   Camera,
+  RotateCcw,
   X,
 } from 'lucide-react';
 import { api } from '../../services/api';
@@ -70,6 +71,7 @@ export const CustomerOrdersPage: React.FC = () => {
   const { playOrderChime } = useSound();
   const { user } = useAuth();
   const location = useLocation();
+  const [searchParams, setSearchParams] = useSearchParams();
   const [orders, setOrders] = useState<Order[]>(() => {
     try {
       if (typeof window !== 'undefined') {
@@ -93,10 +95,30 @@ export const CustomerOrdersPage: React.FC = () => {
   });
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [filter, setFilter] = useState<OrderFilter>('ALL');
-  const [query, setQuery] = useState('');
-  const [currentPage, setCurrentPage] = useState(1);
-  const [expandedOrder, setExpandedOrder] = useState<string | null>(null);
+  const initialUrlFilter = (searchParams.get('status') || '').toUpperCase();
+  const [filter, setFilter] = useState<OrderFilter>(
+    (['ALL', 'ACTIVE', 'COMPLETED', 'CANCELLED'].includes(initialUrlFilter) ? initialUrlFilter : 'ALL') as OrderFilter
+  );
+  const [query, setQuery] = useState(() => searchParams.get('q') || searchParams.get('order') || '');
+  const [currentPage, setCurrentPage] = useState(() => Math.max(1, Number(searchParams.get('page')) || 1));
+  const [expandedOrder, setExpandedOrder] = useState<string | null>(() => searchParams.get('id') || searchParams.get('orderId'));
+
+  // Reorder Confirmation Modal State (Item 6.1)
+  interface ReorderLine {
+    productId: string;
+    productName: string;
+    quantity: number;
+    oldUnitPrice: number;
+    currentPrice: number;
+    availableStock: number | null;
+    inStock: boolean;
+  }
+  const [reorderOrder, setReorderOrder] = useState<Order | null>(null);
+  const [reorderLines, setReorderLines] = useState<ReorderLine[]>([]);
+  const [reorderLoading, setReorderLoading] = useState(false);
+  const [reorderSubmitting, setReorderSubmitting] = useState(false);
+  const [reorderPaymentMethod, setReorderPaymentMethod] = useState<'CASH_ON_DELIVERY' | 'PAYOS'>('CASH_ON_DELIVERY');
+  const missingDeepLinkToastRef = useRef<string | null>(null);
   const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
   const [isCancelling, setIsCancelling] = useState(false);
   const [isSwitchingCod, setIsSwitchingCod] = useState<string | null>(null);
@@ -513,7 +535,163 @@ export const CustomerOrdersPage: React.FC = () => {
   }, [currentPage, totalPages]);
 
   useEffect(() => {
-    setCurrentPage(1);
+    const params = new URLSearchParams(location.search);
+    if (params.get('payos_status') || params.get('cancel')) return;
+    const next = new URLSearchParams();
+    if (filter !== 'ALL') next.set('status', filter);
+    if (query.trim()) next.set('q', query.trim());
+    if (currentPage > 1) next.set('page', String(currentPage));
+    const currentId = params.get('id') || params.get('orderId');
+    if (currentId) next.set('id', currentId);
+    if (next.toString() !== params.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [filter, query, currentPage, setSearchParams, location.search]);
+
+  useEffect(() => {
+    const deepId = searchParams.get('id') || searchParams.get('orderId');
+    if (!deepId || isLoading) return;
+    const matched = orders.find(
+      (o) => String(o.id) === String(deepId) || String(o.orderNumber) === String(deepId)
+    );
+    if (matched) {
+      setExpandedOrder(String(matched.id));
+    } else if (missingDeepLinkToastRef.current !== deepId) {
+      missingDeepLinkToastRef.current = deepId;
+      toast.warning(`Không tìm thấy đơn hàng #${deepId} hoặc bạn không có quyền truy cập.`);
+    }
+  }, [searchParams, orders, isLoading]);
+
+  const handleOpenReorder = async (order: Order) => {
+    setReorderOrder(order);
+    setReorderLoading(true);
+    setReorderPaymentMethod(
+      String(order.paymentMethod || '').toUpperCase() === 'PAYOS' ? 'PAYOS' : 'CASH_ON_DELIVERY'
+    );
+    const baseLines: ReorderLine[] = (order.items || []).map((item) => {
+      const qty = Math.max(1, Number(item.quantity || 1));
+      const oldPrice = item.unitPrice ?? (qty > 0 ? Number(item.totalPrice || 0) / qty : 0);
+      return {
+        productId: String(item.productId || ''),
+        productName: item.productName || 'Sản phẩm',
+        quantity: qty,
+        oldUnitPrice: oldPrice,
+        currentPrice: oldPrice,
+        availableStock: null,
+        inStock: true,
+      };
+    });
+    setReorderLines(baseLines);
+
+    try {
+      const storeId = order.storeId || (order as any).store?.id;
+      let liveProducts: any[] = [];
+      if (storeId) {
+        try {
+          const res = await api.get(`/storefront/stores/${storeId}/products`);
+          liveProducts = res.data?.data ?? res.data ?? [];
+        } catch {
+          const catRes = await api.get('/products/storefront/catalog', { params: { storeId } });
+          liveProducts = catRes.data?.data ?? catRes.data ?? [];
+        }
+      }
+      if (Array.isArray(liveProducts) && liveProducts.length > 0) {
+        const byId = new Map(liveProducts.map((p: any) => [String(p.id || p.productId), p]));
+        setReorderLines(
+          baseLines.map((line) => {
+            const matched = byId.get(line.productId);
+            if (!matched) {
+              return { ...line, availableStock: 0, inStock: false };
+            }
+            const stock = Number(matched.stock ?? matched.availableStock ?? matched.inventory?.quantityOnHand ?? 99);
+            const livePrice = Number(matched.price ?? matched.basePrice ?? line.oldUnitPrice);
+            return {
+              ...line,
+              productName: matched.name || matched.productName || line.productName,
+              currentPrice: livePrice,
+              availableStock: stock,
+              inStock: stock >= line.quantity && matched.status !== 'INACTIVE',
+            };
+          })
+        );
+      }
+    } catch {
+      // Keep original order snapshot if catalog lookup unavailable
+    } finally {
+      setReorderLoading(false);
+    }
+  };
+
+  const handleConfirmReorder = async () => {
+    if (!reorderOrder) return;
+    const validLines = reorderLines.filter((l) => l.inStock && l.productId);
+    if (validLines.length === 0) {
+      toast.error('Không có sản phẩm nào còn tồn kho để đặt lại.');
+      return;
+    }
+    const storeId = reorderOrder.storeId || (reorderOrder as any).store?.id;
+    if (!storeId) {
+      toast.error('Không xác định được cửa hàng của đơn gốc.');
+      return;
+    }
+    setReorderSubmitting(true);
+    try {
+      const res = await api.post(
+        '/storefront/orders',
+        {
+          storeId: Number(storeId) || storeId,
+          items: validLines.map((l) => ({ productId: Number(l.productId) || l.productId, quantity: l.quantity })),
+          customerName: reorderOrder.customerName || user?.fullName || 'Khách hàng',
+          customerPhone: reorderOrder.customerPhone || user?.phone || '',
+          deliveryAddress: reorderOrder.deliveryAddress || '',
+          paymentMethod: reorderPaymentMethod,
+        },
+        {
+          headers: {
+            'x-idempotency-key': `reord-${reorderOrder.id}-${Date.now()}`,
+          },
+        }
+      );
+      const created = normalizeOrder(res.data?.data || res.data);
+      publishOrderEvent('ORDER_CREATED', { order: created });
+      setReorderOrder(null);
+      await loadOrders();
+      setExpandedOrder(String(created.id));
+
+      if (reorderPaymentMethod === 'PAYOS') {
+        try {
+          const payRes = await api.post('/payments/payos/create-link', { orderId: created.id });
+          const payData = payRes.data?.data || payRes.data;
+          if (payData?.qrCode || payData?.checkoutUrl) {
+            setPayosModalData({
+              orderId: created.id,
+              orderNumber: created.orderNumber,
+              amount: Number(created.totalAmount || 0),
+              qrCode: payData.qrCode,
+              checkoutUrl: payData.checkoutUrl,
+              paymentLinkId: payData.paymentLinkId,
+            });
+            return;
+          }
+        } catch {
+          toast.info(`Đơn #${created.orderNumber} đã được tạo! Hãy bấm "Thanh toán lại" để quét QR PayOS.`);
+          return;
+        }
+      }
+      toast.success(`Đã đặt lại đơn hàng #${created.orderNumber} thành công!`);
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || 'Không thể đặt lại đơn hàng lúc này.');
+    } finally {
+      setReorderSubmitting(false);
+    }
+  };
+
+  const prevFilterQueryRef = useRef({ filter, query });
+  useEffect(() => {
+    if (prevFilterQueryRef.current.filter !== filter || prevFilterQueryRef.current.query !== query) {
+      prevFilterQueryRef.current = { filter, query };
+      setCurrentPage(1);
+    }
   }, [filter, query]);
 
   useEffect(() => {
@@ -722,19 +900,34 @@ export const CustomerOrdersPage: React.FC = () => {
                                   </span>
                                 </div>
                                 {isRefundPending && (
-                                  <div className="mt-2.5 p-3 rounded-xl bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-900 flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
-                                    <div className="text-xs text-sky-900 dark:text-sky-200">
-                                      <p className="font-semibold">Nhận tiền hoàn qua chuyển khoản PayOS</p>
-                                      <p className="text-[11px] text-sky-700 dark:text-sky-300 mt-0.5">
-                                        Vui lòng liên kết tài khoản ngân hàng chính chủ để Admin duyệt lệnh chi Payout.
-                                      </p>
+                                  <div className="mt-2.5 p-3 rounded-xl bg-sky-50 dark:bg-sky-950/30 border border-sky-200 dark:border-sky-900 flex flex-col gap-2.5">
+                                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2.5">
+                                      <div className="text-xs text-sky-900 dark:text-sky-200">
+                                        <p className="font-semibold">Tiến độ hoàn tiền (REFUND_PENDING)</p>
+                                        <p className="text-[11px] text-sky-700 dark:text-sky-300 mt-0.5">
+                                          Đơn đã thanh toán trước khi hủy. Vui lòng cập nhật tài khoản ngân hàng chính chủ để hệ thống chi trả qua PayOS Payout.
+                                        </p>
+                                      </div>
+                                      <div className="flex flex-wrap items-center gap-2 shrink-0">
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            void loadOrders();
+                                          }}
+                                          className="inline-flex items-center gap-1 rounded-lg border border-sky-300 bg-white px-2.5 py-1.5 text-[11px] font-semibold text-sky-800 hover:bg-sky-50"
+                                        >
+                                          <RefreshCw className="w-3 h-3" />
+                                          Kiểm tra tiến độ
+                                        </button>
+                                        <Link
+                                          to="/customer/banking"
+                                          className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#287DA8] text-white text-xs font-semibold hover:bg-[#20668a] transition shadow-xs"
+                                        >
+                                          <span>Cập nhật tài khoản ngân hàng</span>
+                                        </Link>
+                                      </div>
                                     </div>
-                                    <Link
-                                      to="/customer/banking"
-                                      className="inline-flex items-center justify-center gap-1.5 px-3 py-1.5 rounded-lg bg-[#287DA8] text-white text-xs font-semibold hover:bg-[#20668a] transition shadow-xs shrink-0"
-                                    >
-                                      <span>Thêm STK nhận hoàn</span>
-                                    </Link>
                                   </div>
                                 )}
                                 {isRefunded && (
@@ -931,16 +1124,47 @@ export const CustomerOrdersPage: React.FC = () => {
                                   <PackageCheck className="w-4 h-4 shrink-0 text-emerald-500" />
                                   Đơn hàng đã được giao thành công.
                                 </span>
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <button
+                                    type="button"
+                                    onClick={(event) => {
+                                      event.stopPropagation();
+                                      void handleOpenReorder(order);
+                                    }}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-[#0E6BA8]/30 bg-[#0E6BA8]/5 px-3 py-1.5 text-xs font-semibold text-[#0E6BA8] transition hover:bg-[#0E6BA8]/10 cursor-pointer"
+                                  >
+                                    <RotateCcw className="w-3.5 h-3.5" />
+                                    Đặt lại đơn này
+                                  </button>
+                                  <button
+                                    type="button"
+                                    onClick={async (event) => {
+                                      event.stopPropagation();
+                                      await handleOpenCustomerPod(order);
+                                    }}
+                                    className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 transition hover:bg-sky-100 hover:border-sky-300 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300 cursor-pointer"
+                                  >
+                                    <Camera className="w-3.5 h-3.5" />
+                                    Xem ảnh bằng chứng giao hàng (POD)
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+                            {['CANCELLED', 'REJECTED'].includes(currentStatus) && (
+                              <div className="mt-4 pt-3 border-t border-slate-200/70 dark:border-zinc-700 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-xs">
+                                <span className="text-slate-500 dark:text-zinc-400">
+                                  Muốn đặt lại các mặt hàng này theo giá và tồn kho mới nhất?
+                                </span>
                                 <button
                                   type="button"
-                                  onClick={async (event) => {
+                                  onClick={(event) => {
                                     event.stopPropagation();
-                                    await handleOpenCustomerPod(order);
+                                    void handleOpenReorder(order);
                                   }}
-                                  className="inline-flex items-center gap-1.5 rounded-lg border border-sky-200 bg-sky-50 px-3 py-1.5 text-xs font-semibold text-sky-800 transition hover:bg-sky-100 hover:border-sky-300 dark:border-sky-800 dark:bg-sky-950/40 dark:text-sky-300 cursor-pointer"
+                                  className="inline-flex items-center gap-1.5 self-start sm:self-auto rounded-lg border border-[#0E6BA8]/30 bg-[#0E6BA8]/5 px-3 py-1.5 text-xs font-semibold text-[#0E6BA8] transition hover:bg-[#0E6BA8]/10 cursor-pointer"
                                 >
-                                  <Camera className="w-3.5 h-3.5" />
-                                  Xem ảnh bằng chứng giao hàng (POD)
+                                  <RotateCcw className="w-3.5 h-3.5" />
+                                  Đặt lại đơn này
                                 </button>
                               </div>
                             )}
@@ -1117,6 +1341,132 @@ export const CustomerOrdersPage: React.FC = () => {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {reorderOrder && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <div
+            onClick={() => !reorderSubmitting && setReorderOrder(null)}
+            className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+          />
+          <div className="relative z-10 w-full max-w-lg rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
+              <div>
+                <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                  Xác nhận đặt lại đơn #{reorderOrder.orderNumber}
+                </h3>
+                <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                  Kiểm tra giá bán & tồn kho mới nhất trước khi tạo đơn mới.
+                </p>
+              </div>
+              <button
+                type="button"
+                disabled={reorderSubmitting}
+                onClick={() => setReorderOrder(null)}
+                className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-zinc-800"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {reorderLoading ? (
+              <p className="py-6 text-center text-xs text-slate-500">Đang kiểm tra giá và tồn kho mới nhất...</p>
+            ) : (
+              <>
+                <div className="max-h-56 overflow-y-auto divide-y divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-800">
+                  {reorderLines.map((line, idx) => (
+                    <div key={idx} className="flex items-center justify-between gap-3 px-3.5 py-2.5 text-xs">
+                      <div className="min-w-0">
+                        <p className={`font-semibold truncate ${line.inStock ? 'text-slate-900 dark:text-white' : 'text-slate-400 line-through'}`}>
+                          {line.quantity}× {line.productName}
+                        </p>
+                        <p className="text-[11px] text-slate-500 mt-0.5">
+                          {line.currentPrice !== line.oldUnitPrice ? (
+                            <>
+                              Giá cũ: <span className="line-through">{formatPrice(line.oldUnitPrice)}</span> → Mới:{' '}
+                              <span className="font-semibold text-[#0E6BA8]">{formatPrice(line.currentPrice)}</span>
+                            </>
+                          ) : (
+                            <span>Đơn giá: {formatPrice(line.currentPrice)}</span>
+                          )}
+                        </p>
+                      </div>
+                      <div className="text-right shrink-0">
+                        {line.inStock ? (
+                          <span className="font-bold text-slate-900 dark:text-white tabular-nums">
+                            {formatPrice(line.currentPrice * line.quantity)}
+                          </span>
+                        ) : (
+                          <span className="rounded-full bg-rose-50 px-2 py-0.5 text-[10px] font-semibold text-rose-600">
+                            Hết hàng / Ngừng bán
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="space-y-2 text-xs">
+                  <label className="block font-semibold text-slate-700 dark:text-zinc-200">Phương thức thanh toán</label>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setReorderPaymentMethod('CASH_ON_DELIVERY')}
+                      className={`rounded-xl border px-3 py-2 text-left font-semibold transition ${
+                        reorderPaymentMethod === 'CASH_ON_DELIVERY'
+                          ? 'border-[#0E6BA8] bg-[#0E6BA8]/5 text-[#0E6BA8]'
+                          : 'border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      Tiền mặt (COD)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setReorderPaymentMethod('PAYOS')}
+                      className={`rounded-xl border px-3 py-2 text-left font-semibold transition ${
+                        reorderPaymentMethod === 'PAYOS'
+                          ? 'border-[#0E6BA8] bg-[#0E6BA8]/5 text-[#0E6BA8]'
+                          : 'border-slate-200 text-slate-600'
+                      }`}
+                    >
+                      Chuyển khoản PayOS
+                    </button>
+                  </div>
+                </div>
+
+                <div className="flex items-center justify-between border-t border-slate-100 dark:border-zinc-800 pt-3 text-sm font-bold text-slate-900 dark:text-white">
+                  <span>Tổng ước tính mới</span>
+                  <span className="text-[#0E6BA8] tabular-nums">
+                    {formatPrice(
+                      reorderLines
+                        .filter((l) => l.inStock)
+                        .reduce((sum, l) => sum + l.currentPrice * l.quantity, 0)
+                    )}
+                  </span>
+                </div>
+              </>
+            )}
+
+            <div className="flex justify-end gap-2 pt-1">
+              <button
+                type="button"
+                disabled={reorderSubmitting}
+                onClick={() => setReorderOrder(null)}
+                className="rounded-lg border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+              >
+                Hủy
+              </button>
+              <button
+                type="button"
+                disabled={reorderLoading || reorderSubmitting || reorderLines.every((l) => !l.inStock)}
+                onClick={() => void handleConfirmReorder()}
+                className="rounded-lg bg-[#0E6BA8] hover:bg-[#0B5586] px-4 py-2 text-xs font-semibold text-white disabled:opacity-50"
+              >
+                {reorderSubmitting ? 'Đang tạo đơn...' : 'Xác nhận đặt lại'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {payosModalData && (
         <PayOSOrderQrModal

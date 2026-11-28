@@ -1,10 +1,11 @@
 import { useProductDiscounts } from '../../hooks/useProductDiscounts';
 import { discountedPrice } from '../../services/product-discounts';
 import { DiscountPrice } from '../../components/products/DiscountPrice';
+import { subscribeCatalogChanges } from '../../services/catalog-sync';
 import React, { useEffect, useMemo, useState, useCallback } from 'react';
-import { useLocation } from 'react-router-dom';
+import { Link, useLocation } from 'react-router-dom';
 import { motion, AnimatePresence, useReducedMotion } from 'framer-motion';
-import { ArrowRight, Banknote, CheckCircle2, Minus, PackageCheck, Plus, QrCode, RefreshCw, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
+import { ArrowRight, Banknote, CheckCircle2, Lock, MapPin, Minus, PackageCheck, Plus, QrCode, RefreshCw, Search, ShoppingBag, ShoppingCart, Store, Trash2, Truck, X } from 'lucide-react';
 import { api, apiSessionMarker, isTokenExpired } from '../../services/api';
 import { getSocket } from '../../services/socket';
 import { toast } from '../../context/ToastContext';
@@ -106,6 +107,18 @@ export const ShopPage: React.FC = () => {
   });
   const [codPayAheadWithQr, setCodPayAheadWithQr] = useState(false);
   const [deliveryLocation, setDeliveryLocation] = useState<DeliveryLocation | null>(null);
+  const [savedAddresses, setSavedAddresses] = useState<any[]>([]);
+  const [selectedSavedAddressId, setSelectedSavedAddressId] = useState<string>('');
+  const [isManualAddress, setIsManualAddress] = useState<boolean>(false);
+  const [showAddressModal, setShowAddressModal] = useState<boolean>(false);
+  const [confirmAddressOpen, setConfirmAddressOpen] = useState<boolean>(false);
+  const [deliveryQuote, setDeliveryQuote] = useState<{
+    status: 'idle' | 'loading' | 'eligible' | 'out_of_range' | 'missing_coords' | 'unavailable';
+    distanceKm?: number;
+    maxDistanceKm?: number;
+    message?: string;
+  }>({ status: 'idle' });
+  const [coordMissingPrompt, setCoordMissingPrompt] = useState(false);
   const [cartBump, setCartBump] = useState(false);
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [recoveryOrder, setRecoveryOrder] = useState<PayOSRecoveryOrder | null>(null);
@@ -230,8 +243,11 @@ export const ShopPage: React.FC = () => {
       } catch {}
     }
   }, [location.search]);
-  const fetchCatalog = useCallback(() => {
-    api.get('/products/storefront/catalog', { params: { search: search.trim() || undefined } })
+  const fetchCatalog = useCallback((forceFresh = false) => {
+    api.get('/products/storefront/catalog', {
+      params: { search: search.trim() || undefined },
+      ...(forceFresh ? { headers: { 'x-no-cache': '1' } } : {}),
+    })
       .then(({ data }) => {
         const list = (data.data || []).map((p: any) => ({
           ...p,
@@ -267,24 +283,21 @@ export const ShopPage: React.FC = () => {
 
   useEffect(() => {
     const socket = getSocket();
-    const handleProductChange = (payload: any) => {
-      fetchCatalog();
+    const handleProductToast = (payload: any) => {
       const pName = payload?.product?.name || payload?.product?.productName;
       if (pName) {
         toast.info(`Cửa hàng vừa cập nhật: ${pName}!`, { title: 'Hàng mới trên kệ 🛍️', duration: 4000 });
       }
     };
-    socket.on('PRODUCT_CREATED', handleProductChange);
-    socket.on('PRODUCT_UPDATED', handleProductChange);
-    socket.on('PRODUCT_DELETED', handleProductChange);
-    socket.on('PRODUCT_STOCK_CHANGED', handleProductChange);
-    socket.on('CATALOG_UPDATED', handleProductChange);
+    const unsubscribeCatalog = subscribeCatalogChanges(socket, () => fetchCatalog(true));
+    socket.on('PRODUCT_CREATED', handleProductToast);
+    socket.on('PRODUCT_UPDATED', handleProductToast);
+    socket.on('CATALOG_UPDATED', handleProductToast);
     return () => {
-      socket.off('PRODUCT_CREATED', handleProductChange);
-      socket.off('PRODUCT_UPDATED', handleProductChange);
-      socket.off('PRODUCT_DELETED', handleProductChange);
-      socket.off('PRODUCT_STOCK_CHANGED', handleProductChange);
-      socket.off('CATALOG_UPDATED', handleProductChange);
+      unsubscribeCatalog();
+      socket.off('PRODUCT_CREATED', handleProductToast);
+      socket.off('PRODUCT_UPDATED', handleProductToast);
+      socket.off('CATALOG_UPDATED', handleProductToast);
     };
   }, [fetchCatalog]);
 
@@ -318,18 +331,52 @@ export const ShopPage: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    if (!receipt || receipt.paymentStatus === 'PAID') return;
-    const interval = setInterval(async () => {
+    if (!receipt || ['PAID', 'COMPLETED', 'SUCCESS', 'SUCCEEDED'].includes(String(receipt.paymentStatus || '').toUpperCase())) return;
+    let active = true;
+    const syncReceiptPayment = async () => {
       try {
         const res = await api.get(`/orders/${receipt.id}`);
         const data = res.data?.data || res.data;
-        if (data?.paymentStatus === 'PAID') {
+        if (active && ['PAID', 'COMPLETED', 'SUCCESS', 'SUCCEEDED'].includes(String(data?.paymentStatus || '').toUpperCase())) {
           setReceipt((prev) => (prev ? { ...prev, paymentStatus: 'PAID', status: data.orderStatus || data.status || prev.status, orderStatus: data.orderStatus || data.status || prev.orderStatus } : null));
         }
       } catch {}
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [receipt]);
+    };
+    void syncReceiptPayment();
+    const interval = setInterval(() => void syncReceiptPayment(), 4000);
+    return () => { active = false; clearInterval(interval); };
+  }, [receipt?.id, receipt?.paymentStatus]);
+
+  useEffect(() => {
+    if (!checkoutOpen || !isCustomerLoggedIn || user?.role !== 'CUSTOMER') return;
+    let active = true;
+    api.get('/customer-addresses')
+      .then((res) => {
+        const list = res.data?.data ?? res.data ?? [];
+        if (active && Array.isArray(list)) {
+          setSavedAddresses(list);
+          const defaultAddr = list.find((a: any) => a.isDefault || a.is_default);
+          if (defaultAddr && !selectedSavedAddressId && !form.deliveryAddress.trim()) {
+            const idVal = String(defaultAddr.id || defaultAddr.addressId || defaultAddr.customerAddressId);
+            setSelectedSavedAddressId(idVal);
+            const text = defaultAddr.addressDetail || defaultAddr.fullAddress || [defaultAddr.streetAddress || defaultAddr.addressLine, defaultAddr.ward, defaultAddr.district, defaultAddr.city].filter(Boolean).join(', ') || defaultAddr.address_detail || '';
+            setForm((prev) => ({
+              ...prev,
+              deliveryAddress: text || prev.deliveryAddress,
+              customerName: defaultAddr.recipientName || defaultAddr.recipient_name || prev.customerName,
+              customerPhone: defaultAddr.phone || defaultAddr.recipientPhone || prev.customerPhone,
+            }));
+            const lat = Number(defaultAddr.latitude ?? defaultAddr.lat);
+            const lng = Number(defaultAddr.longitude ?? defaultAddr.lng);
+            if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
+              setDeliveryLocation({ lat, lng });
+            }
+          }
+        }
+      })
+      .catch(() => {});
+    return () => { active = false; };
+  }, [checkoutOpen, isCustomerLoggedIn, user?.role]);
 
   const categories = useMemo(() => ['Tất cả', ...Array.from(new Set(products.map((p) => p.category).filter(Boolean)))], [products]);
   const shownProducts = useMemo(
@@ -343,6 +390,175 @@ export const ShopPage: React.FC = () => {
   const total = selectedCart.reduce((sum, line) => sum + salePrice(line.product) * line.quantity, 0);
   const savings = subtotal - total;
   const selectedStore = selectedCart[0]?.product.storeId;
+
+  useEffect(() => {
+    if (!checkoutOpen || !selectedStore) {
+      setDeliveryQuote({ status: 'idle' });
+      return;
+    }
+    const addrText = form.deliveryAddress.trim();
+    const effectiveLocation = deliveryLocation || (() => {
+      const sa = savedAddresses.find(
+        (a) => String(a.addressId || a.id || a.customerAddressId) === String(selectedSavedAddressId)
+      );
+      if (sa?.latitude != null && sa?.longitude != null) {
+        return { lat: Number(sa.latitude), lng: Number(sa.longitude) };
+      }
+      return null;
+    })();
+
+    if (!effectiveLocation && addrText.length < 6) {
+      setDeliveryQuote({ status: 'idle' });
+      return;
+    }
+
+    if (!effectiveLocation) {
+      setDeliveryQuote({
+        status: 'missing_coords',
+        message: 'Địa chỉ chưa có tọa độ GPS (bắt buộc để tính bán kính 5 km)',
+      });
+      return;
+    }
+
+    let active = true;
+    const timer = window.setTimeout(async () => {
+      if (!active) return;
+      setDeliveryQuote((prev) => ({ ...prev, status: 'loading' }));
+
+      try {
+        // 1. Resolve store coordinates
+        let storeCoords: { lat: number; lng: number } | null = null;
+        try {
+          const storeRes = await api.get('/stores', { params: { limit: 50 } });
+          const storeList = storeRes.data?.data?.items || storeRes.data?.data || [];
+          const matched = storeList.find(
+            (s: any) => String(s.storeId || s.id) === String(selectedStore)
+          );
+          if (matched?.latitude != null && matched?.longitude != null) {
+            storeCoords = { lat: Number(matched.latitude), lng: Number(matched.longitude) };
+          }
+        } catch {
+          // fallback: try finding from product object
+        }
+
+        if (!active) return;
+
+        if (!storeCoords) {
+          // Store doesn't have GPS in DB yet: allow graceful acceptance
+          setDeliveryQuote({
+            status: 'eligible',
+            distanceKm: undefined,
+            maxDistanceKm: 5,
+            message: 'Cửa hàng đang xử lý theo bán kính khu vực.',
+          });
+          return;
+        }
+
+        // 2. Calculate distance via Goong Distance Matrix (or Haversine fallback)
+        let distanceKm: number | null = null;
+        const key = import.meta.env.VITE_GOONG_API_KEY?.trim();
+        if (key) {
+          try {
+            const url = `https://rsapi.goong.io/DistanceMatrix?origins=${storeCoords.lat},${storeCoords.lng}&destinations=${effectiveLocation.lat},${effectiveLocation.lng}&vehicle=bike&api_key=${key}`;
+            const matrixRes = await fetch(url, { signal: AbortSignal.timeout(5000) });
+            if (matrixRes.ok) {
+              const matrixData = await matrixRes.json();
+              const elem = matrixData.rows?.[0]?.elements?.[0];
+              if (elem && elem.status === 'OK' && typeof elem.distance?.value === 'number') {
+                distanceKm = Math.round((elem.distance.value / 1000) * 10) / 10;
+              }
+            }
+          } catch {
+            // fallback to Haversine below
+          }
+        }
+
+        if (distanceKm === null) {
+          // Haversine Great Circle distance
+          const R = 6371;
+          const dLat = ((effectiveLocation.lat - storeCoords.lat) * Math.PI) / 180;
+          const dLon = ((effectiveLocation.lng - storeCoords.lng) * Math.PI) / 180;
+          const a =
+            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+            Math.cos((storeCoords.lat * Math.PI) / 180) *
+              Math.cos((effectiveLocation.lat * Math.PI) / 180) *
+              Math.sin(dLon / 2) *
+              Math.sin(dLon / 2);
+          distanceKm = Math.round(R * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a)) * 10) / 10;
+        }
+
+        if (!active) return;
+
+        const maxDistanceKm = 5;
+        const eligible = distanceKm <= maxDistanceKm;
+        setDeliveryQuote({
+          status: eligible ? 'eligible' : 'out_of_range',
+          distanceKm,
+          maxDistanceKm,
+          message: eligible
+            ? undefined
+            : `Khoảng cách giao hàng là ${distanceKm.toFixed(1)} km, vượt quá bán kính giao hàng 5 km của cửa hàng.`,
+        });
+      } catch {
+        if (!active) return;
+        setDeliveryQuote({ status: 'unavailable' });
+      }
+    }, 400);
+
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [checkoutOpen, selectedStore, form.deliveryAddress, deliveryLocation, selectedSavedAddressId, savedAddresses]);
+
+  const currentSelectedAddress = useMemo(() => {
+    if (isManualAddress || !selectedSavedAddressId) return null;
+    return savedAddresses.find(
+      (a) => String(a.id || a.addressId || a.customerAddressId) === String(selectedSavedAddressId)
+    ) || null;
+  }, [isManualAddress, selectedSavedAddressId, savedAddresses]);
+
+  const handleSelectSavedAddress = (addr: any) => {
+    const idVal = String(addr.id || addr.addressId || addr.customerAddressId);
+    setSelectedSavedAddressId(idVal);
+    setIsManualAddress(false);
+    const text = addr.addressDetail || addr.fullAddress || [addr.streetAddress || addr.addressLine, addr.ward, addr.district, addr.city].filter(Boolean).join(', ') || addr.address_detail || '';
+    setForm((prev) => ({
+      ...prev,
+      deliveryAddress: text || prev.deliveryAddress,
+      customerName: addr.recipientName || addr.recipient_name || prev.customerName,
+      customerPhone: addr.phone || addr.recipientPhone || prev.customerPhone,
+    }));
+    const lat = Number(addr.latitude ?? addr.lat);
+    const lng = Number(addr.longitude ?? addr.lng);
+    if (Number.isFinite(lat) && Number.isFinite(lng) && (lat !== 0 || lng !== 0)) {
+      setDeliveryLocation({ lat, lng });
+    } else {
+      setDeliveryLocation(null);
+    }
+    setCoordMissingPrompt(false);
+    setShowAddressModal(false);
+  };
+
+  const handleUseNewAddress = () => {
+    setIsManualAddress(true);
+    setSelectedSavedAddressId('');
+    setDeliveryLocation(null);
+    setForm((prev) => ({
+      ...prev,
+      deliveryAddress: '',
+    }));
+    setShowAddressModal(false);
+  };
+
+  const handleRevertToSaved = () => {
+    setIsManualAddress(false);
+    const defaultAddr = savedAddresses.find((a: any) => a.isDefault || a.is_default) || savedAddresses[0];
+    if (defaultAddr) {
+      handleSelectSavedAddress(defaultAddr);
+    }
+  };
+
   const cartGroups = useMemo(() => groupCartByStore(cart), [cart]);
   const selectedGroups = useMemo(() => groupCartByStore(selectedCart), [selectedCart]);
   // The existing API validates each store's order separately during checkout.
@@ -375,14 +591,26 @@ export const ShopPage: React.FC = () => {
     setTimeout(() => setCartBump(false), 400);
   };
 
-  const checkout = async (event: React.FormEvent) => {
-    event.preventDefault();
+  const executeCheckout = async () => {
     if (busy) return;
-    const contact = normalizeShippingContact(form);
+    const effectiveAddress =
+      form.deliveryAddress.trim() ||
+      (currentSelectedAddress
+        ? (currentSelectedAddress.addressDetail ||
+            currentSelectedAddress.fullAddress ||
+            [currentSelectedAddress.streetAddress || currentSelectedAddress.addressLine, currentSelectedAddress.ward, currentSelectedAddress.district, currentSelectedAddress.city].filter(Boolean).join(', ') ||
+            currentSelectedAddress.address_detail ||
+            '')
+        : '');
+    const normalizedForm = effectiveAddress && effectiveAddress !== form.deliveryAddress
+      ? { ...form, deliveryAddress: effectiveAddress }
+      : form;
+    const contact = normalizeShippingContact(normalizedForm);
+    const errors = getShippingContactErrors(normalizedForm);
     setContactTouched({ customerName: true, customerPhone: true, deliveryAddress: true });
-    const invalidField = (Object.keys(contactErrors) as ShippingContactField[])[0];
+    const invalidField = (Object.keys(errors) as ShippingContactField[])[0];
     if (invalidField) {
-      setNotice(contactErrors[invalidField] || 'Vui lòng kiểm tra thông tin người nhận.');
+      setNotice(errors[invalidField] || 'Vui lòng kiểm tra thông tin người nhận.');
       document.getElementById(`checkout-${invalidField}`)?.focus();
       return;
     }
@@ -545,6 +773,9 @@ export const ShopPage: React.FC = () => {
         );
       } else {
         setNotice(parsed.message);
+        if (parsed.errorCode === 'ADDRESS_COORDINATES_MISSING' || /ADDRESS_COORDINATES_MISSING|tọa độ/i.test(parsed.message || '')) {
+          setCoordMissingPrompt(true);
+        }
         if (parsed.errorCode && blockedCodes.has(parsed.errorCode) && selectedStore && typeof setRejectedStoreAlert === 'function') {
           const storeLabel = selectedCart[0]?.product?.store?.name || `Cửa hàng #${selectedStore}`;
           setRejectedStoreAlert({
@@ -558,6 +789,26 @@ export const ShopPage: React.FC = () => {
         }
       }
     } finally { setBusy(false); }
+  };
+
+  const checkout = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (busy) return;
+    if (currentSelectedAddress && !isManualAddress) {
+      const effectiveAddress =
+        form.deliveryAddress.trim() ||
+        currentSelectedAddress.addressDetail ||
+        currentSelectedAddress.fullAddress ||
+        [currentSelectedAddress.streetAddress || currentSelectedAddress.addressLine, currentSelectedAddress.ward, currentSelectedAddress.district, currentSelectedAddress.city].filter(Boolean).join(', ') ||
+        currentSelectedAddress.address_detail ||
+        '';
+      if (effectiveAddress && effectiveAddress !== form.deliveryAddress) {
+        setForm((prev) => ({ ...prev, deliveryAddress: effectiveAddress }));
+      }
+      setConfirmAddressOpen(true);
+      return;
+    }
+    await executeCheckout();
   };
 
   return (
@@ -1099,67 +1350,232 @@ export const ShopPage: React.FC = () => {
 
             <div className="grid min-h-0 gap-6 overflow-y-auto p-5 sm:p-7 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,1fr)] lg:overflow-hidden">
             <div className="grid min-w-0 content-start gap-4 sm:grid-cols-2 lg:overflow-y-auto lg:pr-2">
-              <div>
-              <label htmlFor="checkout-customerName" className="mb-1.5 block text-sm font-medium text-slate-800">Họ và tên người nhận <span className="text-rose-600">*</span></label>
-              <input
-                id="checkout-customerName"
-                name="customerName"
-                autoComplete="shipping name"
-                required
-                maxLength={100}
-                value={form.customerName}
-                onChange={(e) => setForm({ ...form, customerName: e.target.value })}
-                onBlur={() => touchContact('customerName')}
-                aria-invalid={Boolean(visibleContactError('customerName'))}
-                aria-describedby="checkout-name-hint checkout-name-error"
-                placeholder="Họ và tên người nhận"
-                className={`w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:ring-2 ${visibleContactError('customerName') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/10' : 'border-slate-200 focus:border-teal-600 focus:ring-teal-600/10'}`}
-              />
-              <p id="checkout-name-hint" className="mt-1 text-xs text-slate-500">Nhập đầy đủ họ và tên của người trực tiếp nhận hàng, có thể viết có dấu.</p>
-              {visibleContactError('customerName') && <p id="checkout-name-error" role="alert" className="mt-1 text-xs text-rose-600">{visibleContactError('customerName')}</p>}
-              </div>
-              <div>
-              <label htmlFor="checkout-customerPhone" className="mb-1.5 block text-sm font-medium text-slate-800">Số điện thoại người nhận <span className="text-rose-600">*</span></label>
-              <input
-                id="checkout-customerPhone"
-                name="customerPhone"
-                autoComplete="shipping tel-national"
-                inputMode="numeric"
-                required
-                type="tel"
-                maxLength={20}
-                value={form.customerPhone}
-                onChange={(e) => setForm({ ...form, customerPhone: e.target.value })}
-                onBlur={() => touchContact('customerPhone')}
-                aria-invalid={Boolean(visibleContactError('customerPhone'))}
-                aria-describedby="checkout-phone-hint checkout-phone-error"
-                placeholder="Số điện thoại"
-                className={`w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:ring-2 ${visibleContactError('customerPhone') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/10' : 'border-slate-200 focus:border-teal-600 focus:ring-teal-600/10'}`}
-              />
-              <p id="checkout-phone-hint" className="mt-1 text-xs text-slate-500">Dùng số di động Việt Nam gồm 10 chữ số, đang liên lạc được. Không nhập chữ hoặc ký hiệu.</p>
-              {visibleContactError('customerPhone') && <p id="checkout-phone-error" role="alert" className="mt-1 text-xs text-rose-600">{visibleContactError('customerPhone')}</p>}
-              </div>
-              <div className="min-w-0 sm:col-span-2">
-              <label htmlFor="checkout-deliveryAddress" className="mb-1.5 block text-sm font-medium text-slate-800">Địa chỉ nhận hàng <span className="text-rose-600">*</span></label>
-              <textarea
-                id="checkout-deliveryAddress"
-                name="deliveryAddress"
-                autoComplete="shipping street-address"
-                required
-                maxLength={255}
-                value={form.deliveryAddress}
-                onChange={(e) => { setForm({ ...form, deliveryAddress: e.target.value }); setDeliveryLocation(null); }}
-                onBlur={() => touchContact('deliveryAddress')}
-                aria-invalid={Boolean(visibleContactError('deliveryAddress'))}
-                aria-describedby="checkout-address-hint checkout-address-error"
-                placeholder="Địa chỉ nhận hàng"
-                rows={3}
-                className={`w-full resize-none rounded-xl border px-4 py-3 text-sm outline-none transition focus:ring-2 ${visibleContactError('deliveryAddress') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/10' : 'border-slate-200 focus:border-teal-600 focus:ring-teal-600/10'}`}
-              />
-              <DeliveryAddressMap address={form.deliveryAddress} location={deliveryLocation} onSelect={(address, point) => { setForm((previous) => ({ ...previous, deliveryAddress: address })); setDeliveryLocation(point); }} />
-              <p id="checkout-address-hint" className="mt-1 text-xs text-slate-500">Ghi rõ số nhà/đường hoặc thôn/ấp, phường/xã và tỉnh/thành phố. Thêm tòa nhà, tầng, căn hộ nếu có.</p>
-              {visibleContactError('deliveryAddress') && <p id="checkout-address-error" role="alert" className="mt-1 text-xs text-rose-600">{visibleContactError('deliveryAddress')}</p>}
-              </div>
+              {currentSelectedAddress && !isManualAddress ? (
+                /* =================== SHOPEE STYLE: SAVED / DEFAULT ADDRESS CARD =================== */
+                <div className="min-w-0 sm:col-span-2 space-y-3">
+                  <div className="rounded-2xl border border-sky-200 bg-gradient-to-b from-sky-50/70 via-sky-50/30 to-white p-4 sm:p-5 shadow-xs">
+                    <div className="flex items-center justify-between pb-3 border-b border-sky-100">
+                      <div className="flex items-center gap-2">
+                        <MapPin className="h-4 w-4 text-rose-500" />
+                        <span className="text-sm font-bold text-slate-900 tracking-tight">Địa chỉ nhận hàng</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddressModal(true)}
+                        className="text-xs font-bold text-[#0E6BA8] hover:text-[#084b75] hover:underline cursor-pointer flex items-center gap-1"
+                      >
+                        Thay đổi
+                      </button>
+                    </div>
+
+                    <div className="pt-3 flex flex-col sm:flex-row sm:items-start justify-between gap-3">
+                      <div className="space-y-1.5 flex-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-sm font-bold text-slate-900">{form.customerName}</span>
+                          <span className="text-xs font-semibold text-slate-500 tabular-nums">({form.customerPhone})</span>
+                          {currentSelectedAddress.isDefault && (
+                            <span className="rounded border border-rose-500 bg-rose-50 px-2 py-0.5 text-[10px] font-bold text-rose-600">
+                              Mặc định
+                            </span>
+                          )}
+                          {deliveryLocation ? (
+                            <span className="rounded border border-emerald-500 bg-emerald-50 px-2 py-0.5 text-[10px] font-bold text-emerald-700 inline-flex items-center gap-1">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                              Đã ghim GPS
+                            </span>
+                          ) : (
+                            <span className="rounded border border-amber-400 bg-amber-50 px-2 py-0.5 text-[10px] font-bold text-amber-700">
+                              Chưa có GPS
+                            </span>
+                          )}
+                        </div>
+                        <p className="text-xs text-slate-700 leading-relaxed font-normal">
+                          {form.deliveryAddress}
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setShowAddressModal(true)}
+                        className="self-start sm:self-center shrink-0 rounded-lg border border-[#0E6BA8] bg-white px-3 py-1.5 text-xs font-semibold text-[#0E6BA8] hover:bg-sky-50 hover:border-[#084b75] transition-colors cursor-pointer shadow-2xs"
+                      >
+                        Đổi địa chỉ
+                      </button>
+                    </div>
+
+                    <div className="mt-3 pt-2.5 border-t border-sky-100 flex items-center gap-1.5 text-[11px] text-slate-500">
+                      <Lock className="w-3.5 h-3.5 text-slate-400 shrink-0" />
+                      <span>Địa chỉ được cố định từ Sổ địa chỉ (không cho sửa tay). Để giao nơi khác, vui lòng bấm <strong>"Đổi địa chỉ"</strong>.</span>
+                    </div>
+                  </div>
+
+                  {/* Bản đồ Goong hiển thị đúng vị trí của địa chỉ mặc định */}
+                  <div className="space-y-1.5">
+                    <div className="flex items-center justify-between text-xs text-slate-600">
+                      <span className="font-semibold flex items-center gap-1 text-slate-700">
+                        <MapPin className="w-3.5 h-3.5 text-emerald-600" />
+                        Vị trí giao hàng trên bản đồ Goong:
+                      </span>
+                      {deliveryLocation && (
+                        <span className="font-mono text-[11px] text-slate-400">
+                          {deliveryLocation.lat.toFixed(6)}, {deliveryLocation.lng.toFixed(6)}
+                        </span>
+                      )}
+                    </div>
+                    <DeliveryAddressMap
+                      address={form.deliveryAddress}
+                      location={deliveryLocation}
+                      onSelect={() => {}}
+                    />
+                  </div>
+
+                  {/* Delivery Range Indicators */}
+                  {deliveryQuote.status === 'loading' && (
+                    <p className="mt-1.5 text-xs text-slate-500">Đang kiểm tra khoảng cách giao hàng (bán kính ≤ 5 km)...</p>
+                  )}
+                  {deliveryQuote.status === 'eligible' && (
+                    <div className="mt-1.5 flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800">
+                      <MapPin className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                      <span>
+                        Trong phạm vi giao hàng{deliveryQuote.distanceKm !== undefined ? ` (${deliveryQuote.distanceKm.toFixed(1)} km / ≤ ${deliveryQuote.maxDistanceKm || 5} km)` : ' (≤ 5 km)'}.
+                      </span>
+                    </div>
+                  )}
+                  {deliveryQuote.status === 'out_of_range' && (
+                    <div className="mt-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                      <p className="font-semibold">
+                        Ngoài phạm vi giao hàng{deliveryQuote.distanceKm !== undefined ? ` (${deliveryQuote.distanceKm.toFixed(1)} km > ${deliveryQuote.maxDistanceKm || 5} km)` : ' (> 5 km)'}
+                      </p>
+                      <p className="mt-0.5 text-[11px]">{deliveryQuote.message || 'Vui lòng chọn địa chỉ gần cửa hàng hơn hoặc đổi cửa hàng khác.'}</p>
+                    </div>
+                  )}
+                  {(deliveryQuote.status === 'missing_coords' || coordMissingPrompt) && (
+                    <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-1">
+                      <p className="font-semibold">Địa chỉ chưa có tọa độ GPS (bắt buộc để tính bán kính 5 km)</p>
+                      <p className="text-[11px]">Hãy bấm vào bản đồ hoặc cập nhật tọa độ trong Sổ địa chỉ.</p>
+                      {isCustomerLoggedIn && (
+                        <Link to="/customer/profile?tab=ADDRESSES" className="inline-block font-semibold text-[#0E6BA8] hover:underline">
+                          Mở Sổ địa chỉ & ghim GPS →
+                        </Link>
+                      )}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* =================== MANUAL ENTRY MODE =================== */
+                <>
+                  {isCustomerLoggedIn && savedAddresses.length > 0 && (
+                    <div className="sm:col-span-2 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 rounded-xl border border-sky-200 bg-sky-50/70 p-3">
+                      <span className="text-xs text-slate-700 font-medium">
+                        Bạn đang ở chế độ <strong>nhập địa chỉ giao hàng mới</strong>.
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleRevertToSaved}
+                        className="text-xs font-bold text-[#0E6BA8] hover:underline cursor-pointer self-start sm:self-auto"
+                      >
+                        ← Dùng lại địa chỉ mặc định ({savedAddresses.length})
+                      </button>
+                    </div>
+                  )}
+
+                  <div>
+                    <label htmlFor="checkout-customerName" className="mb-1.5 block text-sm font-medium text-slate-800">Họ và tên người nhận <span className="text-rose-600">*</span></label>
+                    <input
+                      id="checkout-customerName"
+                      name="customerName"
+                      autoComplete="shipping name"
+                      required
+                      maxLength={100}
+                      value={form.customerName}
+                      onChange={(e) => setForm({ ...form, customerName: e.target.value })}
+                      onBlur={() => touchContact('customerName')}
+                      aria-invalid={Boolean(visibleContactError('customerName'))}
+                      aria-describedby="checkout-name-hint checkout-name-error"
+                      placeholder="Họ và tên người nhận"
+                      className={`w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:ring-2 ${visibleContactError('customerName') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/10' : 'border-slate-200 focus:border-teal-600 focus:ring-teal-600/10'}`}
+                    />
+                    <p id="checkout-name-hint" className="mt-1 text-xs text-slate-500">Nhập đầy đủ họ và tên của người trực tiếp nhận hàng.</p>
+                    {visibleContactError('customerName') && <p id="checkout-name-error" role="alert" className="mt-1 text-xs text-rose-600">{visibleContactError('customerName')}</p>}
+                  </div>
+
+                  <div>
+                    <label htmlFor="checkout-customerPhone" className="mb-1.5 block text-sm font-medium text-slate-800">Số điện thoại người nhận <span className="text-rose-600">*</span></label>
+                    <input
+                      id="checkout-customerPhone"
+                      name="customerPhone"
+                      autoComplete="shipping tel-national"
+                      inputMode="numeric"
+                      required
+                      type="tel"
+                      maxLength={20}
+                      value={form.customerPhone}
+                      onChange={(e) => setForm({ ...form, customerPhone: e.target.value })}
+                      onBlur={() => touchContact('customerPhone')}
+                      aria-invalid={Boolean(visibleContactError('customerPhone'))}
+                      aria-describedby="checkout-phone-hint checkout-phone-error"
+                      placeholder="Số điện thoại"
+                      className={`w-full rounded-xl border px-4 py-3 text-sm outline-none transition focus:ring-2 ${visibleContactError('customerPhone') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/10' : 'border-slate-200 focus:border-teal-600 focus:ring-teal-600/10'}`}
+                    />
+                    <p id="checkout-phone-hint" className="mt-1 text-xs text-slate-500">Dùng số di động Việt Nam gồm 10 chữ số.</p>
+                    {visibleContactError('customerPhone') && <p id="checkout-phone-error" role="alert" className="mt-1 text-xs text-rose-600">{visibleContactError('customerPhone')}</p>}
+                  </div>
+
+                  <div className="min-w-0 sm:col-span-2">
+                    <label htmlFor="checkout-deliveryAddress" className="mb-1.5 block text-sm font-medium text-slate-800">Địa chỉ nhận hàng mới <span className="text-rose-600">*</span></label>
+                    <textarea
+                      id="checkout-deliveryAddress"
+                      name="deliveryAddress"
+                      autoComplete="shipping street-address"
+                      required
+                      maxLength={255}
+                      value={form.deliveryAddress}
+                      onChange={(e) => { setForm({ ...form, deliveryAddress: e.target.value }); setDeliveryLocation(null); setSelectedSavedAddressId(''); }}
+                      onBlur={() => touchContact('deliveryAddress')}
+                      aria-invalid={Boolean(visibleContactError('deliveryAddress'))}
+                      aria-describedby="checkout-address-hint checkout-address-error"
+                      placeholder="Nhập số nhà, tên đường, phường/xã..."
+                      rows={3}
+                      className={`w-full resize-none rounded-xl border px-4 py-3 text-sm outline-none transition focus:ring-2 ${visibleContactError('deliveryAddress') ? 'border-rose-500 focus:border-rose-500 focus:ring-rose-500/10' : 'border-slate-200 focus:border-teal-600 focus:ring-teal-600/10'}`}
+                    />
+                    <DeliveryAddressMap
+                      address={form.deliveryAddress}
+                      location={deliveryLocation}
+                      onSelect={(address, point) => {
+                        setForm((previous) => ({ ...previous, deliveryAddress: address }));
+                        setDeliveryLocation(point);
+                        setCoordMissingPrompt(false);
+                      }}
+                    />
+                    {deliveryQuote.status === 'loading' && (
+                      <p className="mt-1.5 text-xs text-slate-500">Đang kiểm tra khoảng cách giao hàng (bán kính ≤ 5 km)...</p>
+                    )}
+                    {deliveryQuote.status === 'eligible' && (
+                      <div className="mt-1.5 flex items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-1.5 text-xs font-medium text-emerald-800">
+                        <MapPin className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                        <span>
+                          Trong phạm vi giao hàng{deliveryQuote.distanceKm !== undefined ? ` (${deliveryQuote.distanceKm.toFixed(1)} km / ≤ ${deliveryQuote.maxDistanceKm || 5} km)` : ' (≤ 5 km)'}.
+                        </span>
+                      </div>
+                    )}
+                    {deliveryQuote.status === 'out_of_range' && (
+                      <div className="mt-1.5 rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                        <p className="font-semibold">
+                          Ngoài phạm vi giao hàng{deliveryQuote.distanceKm !== undefined ? ` (${deliveryQuote.distanceKm.toFixed(1)} km > ${deliveryQuote.maxDistanceKm || 5} km)` : ' (> 5 km)'}
+                        </p>
+                        <p className="mt-0.5 text-[11px]">{deliveryQuote.message || 'Vui lòng chọn địa chỉ gần cửa hàng hơn hoặc đổi cửa hàng khác.'}</p>
+                      </div>
+                    )}
+                    {(deliveryQuote.status === 'missing_coords' || coordMissingPrompt) && (
+                      <div className="mt-1.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 space-y-1">
+                        <p className="font-semibold">Địa chỉ chưa có tọa độ GPS (bắt buộc để tính bán kính 5 km)</p>
+                        <p className="text-[11px]">Hãy bấm vào bản đồ bên trên để ghim vị trí chính xác, hoặc cập nhật tọa độ trong Sổ địa chỉ.</p>
+                      </div>
+                    )}
+                    <p id="checkout-address-hint" className="mt-1 text-xs text-slate-500">Ghi rõ số nhà/đường hoặc thôn/ấp, phường/xã và tỉnh/thành phố. Thêm tòa nhà, tầng, căn hộ nếu có.</p>
+                    {visibleContactError('deliveryAddress') && <p id="checkout-address-error" role="alert" className="mt-1 text-xs text-rose-600">{visibleContactError('deliveryAddress')}</p>}
+                  </div>
+                </>
+              )}
               <p className="rounded-lg bg-sky-50 p-3 text-xs leading-relaxed text-slate-600 sm:col-span-2">Vui lòng kiểm tra chính xác họ tên, số điện thoại và địa chỉ của người nhận trước khi đặt hàng để cửa hàng liên hệ và giao đúng người.</p>
             </div>
 
@@ -1329,6 +1745,12 @@ export const ShopPage: React.FC = () => {
               <b className="text-lg text-[#287DA8]">{money(total)}</b>
             </div>
 
+            {notice && (
+              <div role="alert" className="mt-3 rounded-xl border border-rose-200 bg-rose-50 px-3.5 py-2.5 text-xs text-rose-700">
+                {notice}
+              </div>
+            )}
+
             <motion.button
               whileHover={{ scale: 1.02 }}
               whileTap={{ scale: 0.98 }}
@@ -1362,6 +1784,191 @@ export const ShopPage: React.FC = () => {
             </div>
             </div>
           </motion.form>
+
+          {/* Modal Xác nhận địa chỉ giao hàng hiện tại trước khi thanh toán */}
+          {confirmAddressOpen && currentSelectedAddress && !isManualAddress && (
+            <div className="fixed inset-0 z-[75] flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-md rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl space-y-4 motion-view-enter"
+              >
+                <div className="flex items-start justify-between gap-3 pb-3 border-b border-slate-100">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <MapPin className="w-4.5 h-4.5 text-[#0E6BA8]" />
+                      Xác nhận địa chỉ giao hàng
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Bạn xác nhận đặt hàng và thanh toán với địa chỉ nhận hàng hiện tại?
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmAddressOpen(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="rounded-xl border border-sky-200 bg-sky-50/60 p-3.5 space-y-1.5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-sm font-bold text-slate-900">{form.customerName}</span>
+                    <span className="text-xs font-semibold text-slate-600 tabular-nums">({form.customerPhone})</span>
+                    {currentSelectedAddress.isDefault && (
+                      <span className="rounded border border-rose-500 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">
+                        Mặc định
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-xs text-slate-700 leading-relaxed">
+                    {form.deliveryAddress ||
+                      currentSelectedAddress.addressDetail ||
+                      currentSelectedAddress.fullAddress ||
+                      [currentSelectedAddress.streetAddress || currentSelectedAddress.addressLine, currentSelectedAddress.ward, currentSelectedAddress.district, currentSelectedAddress.city].filter(Boolean).join(', ') ||
+                      currentSelectedAddress.address_detail}
+                  </p>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-end gap-2 pt-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setConfirmAddressOpen(false);
+                      setShowAddressModal(true);
+                    }}
+                    className="rounded-xl border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50 transition cursor-pointer"
+                  >
+                    Đổi địa chỉ
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setConfirmAddressOpen(false)}
+                    className="rounded-xl border border-slate-200 px-3.5 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50 transition cursor-pointer"
+                  >
+                    Hủy
+                  </button>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={() => {
+                      setConfirmAddressOpen(false);
+                      void executeCheckout();
+                    }}
+                    className="rounded-xl bg-[#287DA8] px-4 py-2 text-xs font-bold text-white hover:bg-[#206588] disabled:opacity-60 transition cursor-pointer"
+                  >
+                    {busy ? 'Đang xử lý...' : 'Xác nhận thanh toán'}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Modal Shopee Style: Danh sách địa chỉ của tôi */}
+          {showAddressModal && (
+            <div className="fixed inset-0 z-[70] flex items-center justify-center bg-slate-950/60 backdrop-blur-xs p-4">
+              <div
+                onClick={(e) => e.stopPropagation()}
+                className="w-full max-w-lg rounded-2xl border border-slate-200 bg-white p-5 shadow-2xl space-y-4 max-h-[85vh] flex flex-col motion-view-enter"
+              >
+                <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+                  <div>
+                    <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                      <MapPin className="w-4.5 h-4.5 text-rose-500" />
+                      Địa chỉ nhận hàng của tôi
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-0.5">Chọn địa chỉ đã lưu hoặc tạo địa chỉ giao hàng mới</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddressModal(false)}
+                    className="text-slate-400 hover:text-slate-600 p-1 rounded-lg hover:bg-slate-100 transition cursor-pointer"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+
+                <div className="space-y-2.5 overflow-y-auto flex-1 pr-1">
+                  {savedAddresses.map((addr) => {
+                    const idVal = String(addr.id || addr.addressId || addr.customerAddressId);
+                    const isSelected = idVal === selectedSavedAddressId && !isManualAddress;
+                    const text = addr.addressDetail || addr.fullAddress || [addr.streetAddress || addr.addressLine, addr.ward, addr.district, addr.city].filter(Boolean).join(', ') || addr.address_detail || '';
+                    const hasGps = Number.isFinite(Number(addr.latitude ?? addr.lat)) && Number.isFinite(Number(addr.longitude ?? addr.lng));
+                    const lat = Number(addr.latitude ?? addr.lat);
+                    const lng = Number(addr.longitude ?? addr.lng);
+
+                    return (
+                      <div
+                        key={idVal}
+                        onClick={() => handleSelectSavedAddress(addr)}
+                        className={`cursor-pointer rounded-xl border p-3.5 transition-all ${
+                          isSelected
+                            ? 'border-[#0E6BA8] bg-sky-50/70 ring-1 ring-[#0E6BA8]/30 shadow-xs'
+                            : 'border-slate-200 hover:border-slate-300 hover:bg-slate-50/50'
+                        }`}
+                      >
+                        <div className="flex items-start gap-3">
+                          <div className="mt-1 shrink-0">
+                            <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${
+                              isSelected ? 'border-[#0E6BA8] bg-[#0E6BA8]' : 'border-slate-300 bg-white'
+                            }`}>
+                              {isSelected && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
+                            </div>
+                          </div>
+                          <div className="min-w-0 flex-1 space-y-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <span className="font-bold text-slate-900 text-xs sm:text-sm">
+                                {addr.recipientName || user?.fullName}
+                              </span>
+                              <span className="text-xs text-slate-500 font-medium">
+                                ({addr.phone || user?.phone})
+                              </span>
+                              {addr.isDefault && (
+                                <span className="rounded border border-rose-500 bg-rose-50 px-1.5 py-0.5 text-[10px] font-bold text-rose-600">
+                                  Mặc định
+                                </span>
+                              )}
+                              {hasGps && (
+                                <span className="rounded border border-emerald-500 bg-emerald-50 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-700">
+                                  GPS hợp lệ
+                                </span>
+                              )}
+                            </div>
+                            <p className="text-xs text-slate-600 leading-relaxed font-normal">
+                              {text}
+                            </p>
+                            {hasGps && (
+                              <p className="text-[10.5px] font-mono text-slate-400">
+                                Tọa độ: {lat.toFixed(5)}, {lng.toFixed(5)}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="pt-3 border-t border-slate-100 flex flex-col sm:flex-row gap-2">
+                  <button
+                    type="button"
+                    onClick={handleUseNewAddress}
+                    className="flex-1 flex items-center justify-center gap-1.5 rounded-xl border border-dashed border-slate-300 py-2.5 text-xs font-semibold text-slate-700 hover:border-[#0E6BA8] hover:text-[#0E6BA8] hover:bg-sky-50 transition cursor-pointer"
+                  >
+                    <Plus className="w-3.5 h-3.5" />
+                    Giao đến địa chỉ mới (Nhập thủ công)
+                  </button>
+                  <Link
+                    to="/customer/profile?tab=ADDRESSES"
+                    onClick={() => setShowAddressModal(false)}
+                    className="shrink-0 text-center rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-xs font-medium text-slate-600 hover:bg-slate-100 transition"
+                  >
+                    Quản lý Sổ địa chỉ
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </AnimatePresence>
@@ -1386,7 +1993,7 @@ export const ShopPage: React.FC = () => {
       <StorefrontReceipt
         order={receipt}
         loggedIn={isCustomerLoggedIn}
-        paymentError={receipt.paymentMethod === 'PAYOS' && receipt.paymentStatus !== 'PAID' ? notice : undefined}
+        paymentError={receipt.paymentMethod === 'PAYOS' && receipt.paymentStatus !== 'PAID' && notice && !/thành công/i.test(notice) ? notice : undefined}
         onClose={() => setReceipt(null)}
         onPayAhead={async (orderToPay) => {
           const oId = String(orderToPay.id);
@@ -1443,9 +2050,16 @@ export const ShopPage: React.FC = () => {
       <PayOSOrderQrModal
         isOpen={Boolean(payosModalData)}
         onClose={() => {
-          if (payosModalData?.order) {
-            setReceipt(payosModalData.order);
-          }
+          setReceipt((prev) => {
+            if (
+              prev &&
+              String(prev.id) === String(payosModalData?.orderId) &&
+              ['PAID', 'COMPLETED', 'SUCCESS', 'SUCCEEDED'].includes(String(prev.paymentStatus || '').toUpperCase())
+            ) {
+              return prev;
+            }
+            return payosModalData?.order || prev;
+          });
           setPayosModalData(null);
         }}
         orderId={payosModalData.orderId}

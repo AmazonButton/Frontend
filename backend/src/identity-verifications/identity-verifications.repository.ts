@@ -28,21 +28,9 @@ export class IdentityVerificationsRepository {
     });
   }
 
-  private readonly userSelect = {
-    userId: true,
-    fullName: true,
-    email: true,
-    phone: true,
-    avatarUrl: true,
-    kycStatus: true,
-  };
-
-  async findSessionById(id: bigint): Promise<any | null> {
+  async findSessionById(id: bigint): Promise<IdentityVerificationSession | null> {
     return this.prisma.identityVerificationSession.findUnique({
       where: { id },
-      include: {
-        user: { select: this.userSelect },
-      },
     });
   }
 
@@ -71,14 +59,11 @@ export class IdentityVerificationsRepository {
     userId: bigint,
     skip: number,
     take: number,
-  ): Promise<any[]> {
+  ): Promise<IdentityVerificationSession[]> {
     return this.prisma.identityVerificationSession.findMany({
       where: {
         userId,
         deletedAt: null,
-      },
-      include: {
-        user: { select: this.userSelect },
       },
       skip,
       take,
@@ -95,13 +80,10 @@ export class IdentityVerificationsRepository {
     });
   }
 
-  async listAllSessions(skip: number, take: number): Promise<any[]> {
+  async listAllSessions(skip: number, take: number): Promise<IdentityVerificationSession[]> {
     return this.prisma.identityVerificationSession.findMany({
       where: {
         deletedAt: null,
-      },
-      include: {
-        user: { select: this.userSelect },
       },
       skip,
       take,

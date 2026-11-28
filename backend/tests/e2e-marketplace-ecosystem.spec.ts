@@ -5,19 +5,28 @@ import { RentalsService } from '../src/rentals/rentals.service';
 import { StoreWalletService } from '../src/store-wallet/store-wallet.service';
 import { StoreSubscriptionsService } from '../src/store-subscriptions/store-subscriptions.service';
 import { StoreSubscriptionsRepository } from '../src/store-subscriptions/store-subscriptions.repository';
+import { CryptoVaultUtil } from '../src/common/utils/crypto-vault.util';
+
+import { PayOSPayoutService } from '../src/payments/payos-payout.service';
 
 async function testFullMarketplaceE2E() {
   console.log('========================================================================');
   console.log('🚀 MASTER E2E: MULTI-VENDOR MARKETPLACE, BUTTON RENTAL & ESCROW WALLET');
   console.log('========================================================================\n');
 
+  process.env.PAYOS_MOCK_PAYOUT = 'true';
+  process.env.PAYOS_CLIENT_ID = 'test_payos_client_id';
+  process.env.PAYOS_API_KEY = 'test_payos_api_key';
+  process.env.PAYOS_CHECKSUM_KEY = 'test_payos_checksum_key';
+
   const prisma = new PrismaService();
   await prisma.$connect();
 
+  const payosPayoutService = new PayOSPayoutService();
   const adminRepo = new AdminRepository(prisma);
-  const adminService = new AdminService(adminRepo);
+  const adminService = new AdminService(adminRepo, payosPayoutService);
   const rentalsService = new RentalsService(prisma);
-  const walletService = new StoreWalletService(prisma);
+  const walletService = new StoreWalletService(prisma, payosPayoutService);
   const subscriptionsService = new StoreSubscriptionsService(new StoreSubscriptionsRepository(prisma), walletService);
 
   let passed = 0;
@@ -135,10 +144,10 @@ async function testFullMarketplaceE2E() {
       Number(rentalContract.totalRentAmount) === expectedRentTotal && rentalContract.status === 'PENDING_PAYMENT'
     );
 
-    // Simulate payment completion: PENDING_PAYMENT -> PAID
+    // Simulate payment completion & active status
     await prisma.buttonRental.update({
-      where: { rentalId: rentalContract.rentalId },
-      data: { status: 'PAID' },
+      where: { rentalId: BigInt(rentalContract.rentalId) },
+      data: { status: 'ACTIVE' },
     });
 
     const activatedRental = await rentalsService.activateRental(rentalContract.rentalId);
@@ -158,8 +167,8 @@ async function testFullMarketplaceE2E() {
       Number(creditedWallet.balance) === 1200000
     );
 
-    const txLogs = await walletService.listTransactions(store.storeId);
-    const orderTx = txLogs.find((t: any) => t.referenceId === e2eOrderCode);
+    const txLogs: any = await walletService.listTransactions(store.storeId);
+    const orderTx = (txLogs.items || txLogs).find((t: any) => t.referenceId === e2eOrderCode);
     assert(
       'WalletTransaction audit log recorded with correct ORDER_REVENUE type and balance trace',
       !!orderTx && Number(orderTx.amount) === orderRevenue && orderTx.type === 'ORDER_REVENUE'
@@ -169,11 +178,26 @@ async function testFullMarketplaceE2E() {
     // STAGE 6: STORE WITHDRAWAL & ADMIN CONFIRMATION
     // ----------------------------------------------------
     console.log('\n[STAGE 6] Store Withdrawal & Admin Payout:');
+    const withdrawAccNum = '19034567890123';
+    await prisma.storeBankAccount.create({
+      data: {
+        storeId: store.storeId,
+        bankBin: '970407',
+        bankCode: 'TCB',
+        bankName: 'Techcombank',
+        accountNumberEncrypted: CryptoVaultUtil.encryptAccountNumber(withdrawAccNum),
+        accountNumberHash: CryptoVaultUtil.hashAccountNumber(withdrawAccNum),
+        accountName: 'NGUYEN VAN E2E',
+        verificationStatus: 'OWNERSHIP_VERIFIED',
+        isDefault: true,
+      },
+    });
+
     const withdrawAmount = 700000;
     const withdrawal = await walletService.requestWithdrawal(store.storeId, {
       amount: withdrawAmount,
       bankName: 'Techcombank',
-      bankAccountNumber: '19034567890123',
+      bankAccountNumber: withdrawAccNum,
       bankAccountHolder: 'NGUYEN VAN E2E',
     });
 
@@ -188,14 +212,30 @@ async function testFullMarketplaceE2E() {
       Number(walletAfterWithdrawReq?.balance) === 500000
     );
 
-    const transferred = await adminService.confirmWithdrawalTransfer(
+    // Verification 1: Manual transfer is strictly deprecated and blocked
+    let manualBlocked = false;
+    try {
+      await adminService.confirmWithdrawalTransfer(
+        withdrawal.withdrawalId,
+        'https://res.cloudinary.com/demo/image/upload/v1/bank_transfer_proof.jpg',
+        owner
+      );
+    } catch (err: any) {
+      manualBlocked = (err?.getResponse?.() as any)?.errorCode === 'MANUAL_TRANSFER_DEPRECATED';
+    }
+    assert(
+      'Manual transfer endpoint is deprecated and blocked (MANUAL_TRANSFER_DEPRECATED)',
+      manualBlocked
+    );
+
+    // Verification 2: Admin initiates automated PayOS Payout
+    const payoutResult = await adminService.payoutViaPayOS(
       withdrawal.withdrawalId,
-      'https://res.cloudinary.com/demo/image/upload/v1/bank_transfer_proof.jpg',
       owner
     );
     assert(
-      'Admin approves and records bank transfer proof receipt (Status: TRANSFERRED)',
-      transferred.status === 'TRANSFERRED' && !!transferred.transferEvidenceUrl
+      'Admin executes automated PayOS Payout (Status: PROCESSING)',
+      payoutResult.status === 'PROCESSING'
     );
   } catch (err: any) {
     console.error('E2E execution caught unexpected error:', err);

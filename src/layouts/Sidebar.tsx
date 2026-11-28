@@ -18,6 +18,7 @@ import {
   Smartphone,
   Store,
   UserRound,
+  Users,
   Wrench,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
@@ -38,6 +39,7 @@ const storeLinks: NavigationItem[] = [
   { to: '/store/devices', label: 'Danh sách nút bấm', icon: Cpu },
   { to: '/store/rentals', label: 'Gói thuê nút IoT', icon: Cpu },
   { to: '/store/products', label: 'Sản phẩm & tồn kho', icon: Package },
+  { to: '/store/customers', label: 'Khách hàng', icon: Users },
   { to: '/store/analytics', label: 'Báo cáo doanh thu', icon: BarChart3 },
 ];
 
@@ -59,6 +61,7 @@ const adminLinks: NavigationItem[] = [
   { to: '/admin/dashboard?section=RBAC', label: 'Tài khoản & phân quyền', icon: UserRound },
   { to: '/admin/dashboard?section=ANALYTICS', label: 'Báo cáo & doanh thu', icon: BarChart3 },
   { to: '/admin/dashboard?section=NOTIFICATIONS', label: 'Cài đặt thông báo', icon: ShoppingBag },
+  { to: '/admin/identity', label: 'Xác minh danh tính (eKYC)', icon: ShieldCheck },
   { to: '/admin/rental-activation', label: 'Kích hoạt hợp đồng thuê', icon: Cpu },
   { to: '/admin/profile', label: 'Tài khoản', icon: UserRound },
 ];

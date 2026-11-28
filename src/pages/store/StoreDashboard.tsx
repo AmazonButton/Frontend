@@ -2,7 +2,7 @@
 import './StoreDashboard.css';
 import { deliveryMapUrl } from '../../services/delivery-location';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
-import { Link, useLocation } from 'react-router-dom';
+import { Link, useLocation, useSearchParams } from 'react-router-dom';
 import { createPortal } from 'react-dom';
 import { motion, AnimatePresence, type Variants } from 'framer-motion';
 import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
@@ -50,6 +50,8 @@ import {
   ChevronUp,
   ChevronLeft,
   ChevronRight,
+  Eye,
+  RefreshCw,
 } from 'lucide-react';
 import { StoreCatalogItem, getStoreCatalog, saveStoreCatalog } from '../../data/storeProductsData';
 
@@ -169,18 +171,57 @@ export const StoreDashboard: React.FC = () => {
     return false;
   });
   const [ordersError, setOrdersError] = useState('');
-  const [statusFilter, setStatusFilter] = useState<string>('ALL');
-  const [searchQuery, setSearchQuery] = useState<string>('');
+  const [searchParams, setSearchParams] = useSearchParams();
+  const [statusFilter, setStatusFilter] = useState<string>(() => searchParams.get('status') || 'ALL');
+  const [searchQuery, setSearchQuery] = useState<string>(() => searchParams.get('q') || searchParams.get('order') || '');
+  const [inspectedOrderId, setInspectedOrderId] = useState<string | null>(() => searchParams.get('id'));
+  const [openedStatusSnapshot, setOpenedStatusSnapshot] = useState<string | null>(null);
+  const handledDeepOrderRef = useRef<string | null>(null);
+
   useEffect(() => {
-    const orderNumber = new URLSearchParams(location.search).get('order');
-    if (orderNumber) { setSearchQuery(orderNumber); setStatusFilter('ALL'); }
-  }, [location.search]);
+    const orderNumber = searchParams.get('order');
+    if (orderNumber) {
+      setSearchQuery(orderNumber);
+      setStatusFilter('ALL');
+    }
+  }, [searchParams]);
+
   const [sortBy, setSortBy] = useState<'PRIORITY' | 'NEWEST' | 'OLDEST'>('PRIORITY');
   const [showChart, setShowChart] = useState(false);
 
   // Pagination state (15 orders per page)
   const PAGE_SIZE = 15;
-  const [currentPage, setCurrentPage] = useState<number>(1);
+  const [currentPage, setCurrentPage] = useState<number>(() => Math.max(1, Number(searchParams.get('page')) || 1));
+
+  useEffect(() => {
+    const next = new URLSearchParams();
+    if (statusFilter && statusFilter !== 'ALL') next.set('status', statusFilter);
+    if (searchQuery.trim()) next.set('q', searchQuery.trim());
+    if (currentPage > 1) next.set('page', String(currentPage));
+    if (inspectedOrderId) next.set('id', inspectedOrderId);
+    if (next.toString() !== searchParams.toString()) {
+      setSearchParams(next, { replace: true });
+    }
+  }, [statusFilter, searchQuery, currentPage, inspectedOrderId, setSearchParams, searchParams]);
+
+  const inspectedOrder = useMemo(
+    () => (inspectedOrderId ? orders.find((o) => String(o.id) === String(inspectedOrderId) || String(o.orderNumber) === String(inspectedOrderId)) || null : null),
+    [orders, inspectedOrderId]
+  );
+
+  useEffect(() => {
+    const deepId = searchParams.get('id');
+    if (!deepId || !ordersReady) return;
+    if (inspectedOrder) {
+      if (openedStatusSnapshot === null) {
+        setOpenedStatusSnapshot(String(inspectedOrder.orderStatus || inspectedOrder.status || ''));
+      }
+    } else if (handledDeepOrderRef.current !== deepId) {
+      handledDeepOrderRef.current = deepId;
+      toast.warning(`Không tìm thấy đơn hàng #${deepId} hoặc đơn thuộc cửa hàng khác.`);
+      setInspectedOrderId(null);
+    }
+  }, [searchParams, ordersReady, inspectedOrder, openedStatusSnapshot]);
   const tableTopRef = useRef<HTMLDivElement>(null);
 
   // Inventory state with exact number input & image upload
@@ -765,9 +806,14 @@ export const StoreDashboard: React.FC = () => {
     });
   }, [orders, statusFilter, searchQuery, sortBy]);
 
-  // Reset pagination to page 1 on filter or search changes
+  // Reset pagination to page 1 on filter or search changes (preserving ?page= on initial mount)
+  const prevStoreFilterRef = useRef({ statusFilter, searchQuery, sortBy });
   useEffect(() => {
-    setCurrentPage(1);
+    const prev = prevStoreFilterRef.current;
+    if (prev.statusFilter !== statusFilter || prev.searchQuery !== searchQuery || prev.sortBy !== sortBy) {
+      prevStoreFilterRef.current = { statusFilter, searchQuery, sortBy };
+      setCurrentPage(1);
+    }
   }, [statusFilter, searchQuery, sortBy]);
 
   const totalPages = Math.max(1, Math.ceil(filteredOrders.length / PAGE_SIZE));
@@ -1461,6 +1507,17 @@ export const StoreDashboard: React.FC = () => {
                               Xem ảnh POD
                             </button>
                           )}
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setInspectedOrderId(String(order.id));
+                              setOpenedStatusSnapshot(String(order.orderStatus || order.status || ''));
+                            }}
+                            className="mt-1.5 ml-2 inline-flex items-center gap-1 text-[11px] font-medium text-slate-600 dark:text-zinc-300 hover:text-[#206588] hover:underline cursor-pointer"
+                          >
+                            <Eye className="w-3 h-3" />
+                            Chi tiết
+                          </button>
                           </fieldset>
                           {pendingStatusUpdates[order.id] && <span role="status" className="mt-1 block text-xs text-zinc-600 dark:text-zinc-400">Đang xác nhận…</span>}
                         </td>
@@ -2049,6 +2106,132 @@ export const StoreDashboard: React.FC = () => {
           </div>
         </div>
       )}
+
+      {inspectedOrder && (() => {
+        const liveStatus = String(inspectedOrder.orderStatus || inspectedOrder.status || '');
+        const isStaleStatus = Boolean(openedStatusSnapshot && liveStatus && liveStatus !== openedStatusSnapshot);
+        const modalTransitions: Record<string, { next: string; label: string } | undefined> = {
+          PENDING: { next: 'CONFIRMED', label: 'Tiếp nhận đơn' },
+          CONFIRMED: { next: 'PREPARING', label: 'Bắt đầu chuẩn bị' },
+          PREPARING: { next: 'READY_FOR_DELIVERY', label: 'Sẵn sàng giao' },
+          READY_FOR_DELIVERY: { next: 'SHIPPING', label: 'Bắt đầu giao hàng' },
+          SHIPPING: { next: 'DELIVERED', label: 'Ghi nhận Đã giao ✓' },
+          OUT_FOR_DELIVERY: { next: 'DELIVERED', label: 'Ghi nhận Đã giao ✓' },
+          DELIVERED: { next: 'COMPLETED', label: 'Hoàn tất & cộng ví' },
+        };
+        const nextAction = modalTransitions[liveStatus];
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+            <div
+              onClick={() => {
+                setInspectedOrderId(null);
+                setOpenedStatusSnapshot(null);
+              }}
+              className="fixed inset-0 bg-slate-950/60 backdrop-blur-xs"
+            />
+            <div className="relative z-10 w-full max-w-lg rounded-2xl border border-slate-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 p-5 shadow-2xl space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                    Chi tiết đơn hàng #{inspectedOrder.orderNumber}
+                  </h3>
+                  <p className="text-xs text-slate-500 dark:text-zinc-400 mt-0.5">
+                    Trạng thái hiện tại: <strong className="text-slate-800 dark:text-zinc-200">{liveStatus}</strong>
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInspectedOrderId(null);
+                    setOpenedStatusSnapshot(null);
+                  }}
+                  className="rounded-lg p-1.5 text-slate-400 hover:bg-slate-100 dark:hover:bg-zinc-800"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              {/* Stale-Action Guard Banner (Item 7.1) */}
+              {isStaleStatus && (
+                <div className="rounded-xl border border-amber-300 bg-amber-50 dark:bg-amber-950/40 dark:border-amber-800 p-3 text-xs text-amber-900 dark:text-amber-200 space-y-2">
+                  <div className="flex items-start gap-2">
+                    <AlertTriangle className="w-4 h-4 shrink-0 text-amber-600 mt-0.5" />
+                    <div>
+                      <p className="font-bold">Trạng thái đơn hàng vừa thay đổi theo thời gian thực</p>
+                      <p className="mt-0.5">
+                        Đơn đã chuyển từ <strong>{openedStatusSnapshot}</strong> ➔ <strong>{liveStatus}</strong> (do khách hàng hủy hoặc đồng bộ từ thiết bị khác). Các nút thao tác cũ đã được khóa để tránh thao tác nhầm.
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setOpenedStatusSnapshot(liveStatus)}
+                    className="inline-flex items-center gap-1.5 rounded-lg bg-amber-600 hover:bg-amber-700 px-3 py-1.5 text-[11px] font-semibold text-white"
+                  >
+                    <RefreshCw className="w-3 h-3" />
+                    Cập nhật sang trạng thái mới ({liveStatus})
+                  </button>
+                </div>
+              )}
+
+              <div className="space-y-3 text-xs">
+                <div className="rounded-xl bg-slate-50 dark:bg-zinc-950/50 border border-slate-100 dark:border-zinc-800 p-3 space-y-1.5">
+                  <p className="font-semibold text-slate-800 dark:text-zinc-200">
+                    Người nhận: {inspectedOrder.customerName || 'Khách hàng'} ({inspectedOrder.customerPhone || '—'})
+                  </p>
+                  <p className="text-slate-600 dark:text-zinc-400">Địa chỉ: {inspectedOrder.deliveryAddress || '—'}</p>
+                </div>
+
+                <div className="rounded-xl border border-slate-100 dark:border-zinc-800 p-3 space-y-1.5">
+                  <p className="font-semibold text-slate-700 dark:text-zinc-300">Sản phẩm đặt mua</p>
+                  {(inspectedOrder.items || []).map((item, idx) => (
+                    <div key={idx} className="flex justify-between text-slate-600 dark:text-zinc-300">
+                      <span>{item.quantity}× {item.productName}</span>
+                      <span className="font-semibold tabular-nums">{(item.totalPrice || 0).toLocaleString('vi-VN')} ₫</span>
+                    </div>
+                  ))}
+                  <div className="flex justify-between border-t border-slate-100 dark:border-zinc-800 pt-2 font-bold text-slate-900 dark:text-white">
+                    <span>Tổng thanh toán</span>
+                    <span className="text-[#206588] tabular-nums">{(inspectedOrder.totalAmount || 0).toLocaleString('vi-VN')} ₫</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="flex justify-end gap-2 pt-2 border-t border-slate-100 dark:border-zinc-800">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setInspectedOrderId(null);
+                    setOpenedStatusSnapshot(null);
+                  }}
+                  className="rounded-lg border border-slate-200 dark:border-zinc-700 px-3.5 py-2 text-xs font-semibold text-slate-700 dark:text-zinc-300"
+                >
+                  Đóng
+                </button>
+                {nextAction && (
+                  <button
+                    type="button"
+                    disabled={isStaleStatus || Boolean(pendingStatusUpdates[inspectedOrder.id])}
+                    onClick={async () => {
+                      const targetNext = nextAction.next;
+                      await handleUpdateStatus(inspectedOrder.id, targetNext);
+                      if (targetNext === 'DELIVERED') {
+                        setInspectedOrderId(null);
+                        setOpenedStatusSnapshot(null);
+                      } else {
+                        setOpenedStatusSnapshot(targetNext);
+                      }
+                    }}
+                    className="rounded-lg bg-[#206588] hover:bg-[#194f6b] px-4 py-2 text-xs font-semibold text-white disabled:opacity-45 disabled:cursor-not-allowed"
+                  >
+                    {nextAction.label}
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
     </div>
   );

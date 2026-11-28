@@ -24,6 +24,7 @@ export class OrdersRepository {
         store: true,
         customer: { include: { user: true } },
         buttonProducts: { include: { product: true } },
+        rental: true,
       },
     });
   }
@@ -35,6 +36,7 @@ export class OrdersRepository {
         customer: true,
         store: true,
         buttonProducts: { include: { product: true } },
+        rental: true,
       },
     });
   }
@@ -70,6 +72,51 @@ export class OrdersRepository {
         });
         if (existingOrder) {
           return existingOrder.orderId;
+        }
+      }
+
+      // 0.1 In-Transaction Rental & Ordering Eligibility Check with Pessimistic Row Lock
+      const lockedButtons = await tx.$queryRawUnsafe<any[]>(
+        'SELECT * FROM iot_button WHERE button_id = $1 FOR UPDATE',
+        button.buttonId,
+      );
+      if (!lockedButtons || lockedButtons.length === 0) {
+        throw new BadRequestException('Nút bấm không tồn tại');
+      }
+      const lockedButton = lockedButtons[0];
+
+      if (lockedButton.status !== 'ACTIVE') {
+        throw new BadRequestException('Nút bấm không ở trạng thái ACTIVE');
+      }
+      if (lockedButton.can_order === false) {
+        throw new BadRequestException('Nút bấm thông minh đã hết hạn thuê. Vui lòng gia hạn gói 30.000đ/tháng để tiếp tục đặt hàng.');
+      }
+      if (lockedButton.inventory_state === 'RETURN_IN_TRANSIT') {
+        throw new BadRequestException('Nút bấm đang trong quá trình yêu cầu trả hàng, không thể đặt hàng');
+      }
+      if (['IN_PLATFORM_WAREHOUSE', 'ALLOCATED_TO_STORE'].includes(lockedButton.inventory_state)) {
+        throw new BadRequestException('Nút bấm chưa được bàn giao cho khách hàng');
+      }
+
+      if (lockedButton.rental_id) {
+        const lockedRentals = await tx.$queryRawUnsafe<any[]>(
+          'SELECT * FROM button_rentals WHERE rental_id = $1 FOR UPDATE',
+          lockedButton.rental_id,
+        );
+        if (!lockedRentals || lockedRentals.length === 0) {
+          throw new BadRequestException('Không tìm thấy thông tin hợp đồng thuê hợp lệ cho nút bấm');
+        }
+        const lockedRental = lockedRentals[0];
+
+        // STRICT INVARIANT: Chỉ cho phép đặt hàng khi hợp đồng ở trạng thái ACTIVE (đã bàn giao thực tế)!
+        // Tuyệt đối không cho phép 'PAID' hoặc 'PENDING_HANDOVER' đặt hàng trước khi bàn giao!
+        if (lockedRental.status !== 'ACTIVE') {
+          throw new BadRequestException('Hợp đồng thuê nút bấm không ở trạng thái hoạt động để đặt hàng');
+        }
+
+        // R07: Thống nhất đặc tả eligibility với Stored Procedure: effective_expires_at IS NULL OR effective_expires_at <= NOW()
+        if (!lockedRental.effective_expires_at || new Date(lockedRental.effective_expires_at) <= new Date()) {
+          throw new BadRequestException('Nút bấm thông minh đã hết hạn thuê. Vui lòng gia hạn gói 30.000đ/tháng để tiếp tục đặt hàng.');
         }
       }
 
@@ -122,14 +169,34 @@ export class OrdersRepository {
         });
       }
 
-      // 3. Verify available inventory before making any changes
-      for (const bp of button.buttonProducts) {
-        const inv = await tx.inventory.findUnique({
-          where: { productId: bp.productId },
+      // 3. NV-10: Lock inventories in sorted order with FOR UPDATE to prevent race conditions and deadlocks
+      const sortedProductIds: bigint[] = Array.from(
+        new Set(button.buttonProducts.map((bp: any) => BigInt(bp.productId))),
+      );
+      sortedProductIds.sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+
+      const inventoryMap = new Map<bigint, { quantityOnHand: number; reservedQuantity: number }>();
+      for (const pId of sortedProductIds) {
+        const lockedInv = await tx.$queryRawUnsafe<any[]>(
+          `SELECT quantity_on_hand, reserved_quantity FROM inventory WHERE product_id = $1 FOR UPDATE`,
+          pId,
+        );
+        if (!lockedInv || lockedInv.length === 0) {
+          throw new BadRequestException(`Không tìm thấy tồn kho cho sản phẩm ${pId}`);
+        }
+        inventoryMap.set(pId, {
+          quantityOnHand: Number(lockedInv[0].quantity_on_hand),
+          reservedQuantity: Number(lockedInv[0].reserved_quantity),
         });
+      }
+
+      // Verify available inventory under acquired row locks
+      for (const bp of button.buttonProducts) {
+        const inv = inventoryMap.get(BigInt(bp.productId));
         if (!inv || (inv.quantityOnHand - inv.reservedQuantity) < bp.quantity) {
           throw new BadRequestException('Không đủ tồn kho khả dụng cho sản phẩm trong nút bấm');
         }
+        inv.reservedQuantity += bp.quantity;
       }
 
       // 4. Create order directly with correct subtotal, discount, and total
@@ -221,13 +288,15 @@ export class OrdersRepository {
           },
         });
 
-        // Giữ chỗ tồn kho (Two-Phase Commit)
-        await tx.inventory.updateMany({
-          where: { productId: bp.productId },
-          data: {
-            reservedQuantity: { increment: bp.quantity },
-          },
-        });
+        // Giữ chỗ tồn kho (Two-Phase Commit, row already locked in step 3)
+        await tx.$executeRawUnsafe(
+          `UPDATE inventory
+           SET reserved_quantity = reserved_quantity + $1,
+               updated_at = NOW()
+           WHERE product_id = $2`,
+          bp.quantity,
+          bp.productId,
+        );
       }
 
       await tx.orderStatusHistory.create({
@@ -250,6 +319,9 @@ export class OrdersRepository {
         button: true,
         customer: { include: { user: true } },
         store: true,
+        assignedDriver: {
+          select: { userId: true, fullName: true, phone: true },
+        },
         statusHistories: true,
         paymentTransactions: true,
       },
@@ -264,11 +336,100 @@ export class OrdersRepository {
         button: true,
         customer: { include: { user: true } },
         store: true,
+        assignedDriver: {
+          select: { userId: true, fullName: true, phone: true },
+        },
         paymentTransactions: {
           select: { status: true, paymentMethod: true, paidAt: true },
         },
       },
       orderBy: { orderDate: 'desc' },
+    });
+  }
+
+  async findPaginatedOrders(whereClause: any, skip: number, take: number) {
+    const [orders, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where: whereClause,
+        include: {
+          items: { include: { product: true } },
+          button: {
+            select: { buttonId: true, buttonCode: true, deviceId: true, buttonName: true },
+          },
+          customer: {
+            select: {
+              customerId: true,
+              phone: true,
+              user: {
+                select: { userId: true, fullName: true, phone: true, email: true },
+              },
+            },
+          },
+          store: {
+            select: { storeId: true, name: true, code: true, phone: true, address: true },
+          },
+          assignedDriver: {
+            select: { userId: true, fullName: true, phone: true },
+          },
+          paymentTransactions: {
+            select: { status: true, paymentMethod: true, paidAt: true },
+          },
+        },
+        orderBy: { orderDate: 'desc' },
+        skip,
+        take,
+      }),
+      this.prisma.order.count({ where: whereClause }),
+    ]);
+
+    return { orders, total };
+  }
+
+  async findDeliveryQueueOrders(storeId?: bigint, skip: number = 0, take: number = 50) {
+    const whereClause: any = {
+      orderStatus: { in: ['CONFIRMED', 'READY_FOR_DELIVERY', 'PENDING'] },
+      assignedDriverId: null,
+    };
+
+    if (storeId) {
+      whereClause.storeId = storeId;
+    }
+
+    const [orders, total] = await Promise.all([
+      this.prisma.order.findMany({
+        where: whereClause,
+        include: {
+          items: { include: { product: true } },
+          store: true,
+          customer: { include: { user: true } },
+        },
+        orderBy: { orderDate: 'asc' },
+        skip,
+        take,
+      }),
+      this.prisma.order.count({ where: whereClause }),
+    ]);
+
+    return { orders, total };
+  }
+
+  async findOrderForTimeline(orderId: bigint) {
+    return this.prisma.order.findUnique({
+      where: { orderId },
+      include: {
+        button: true,
+        customer: { include: { user: true } },
+        store: true,
+        assignedDriver: {
+          select: { userId: true, fullName: true, phone: true },
+        },
+        statusHistories: {
+          orderBy: { changedAt: 'asc' },
+        },
+        paymentTransactions: {
+          orderBy: { createdAt: 'asc' },
+        },
+      },
     });
   }
 
@@ -523,39 +684,61 @@ export class OrdersRepository {
         return this.findOrderByIdTx(tx, orderId);
       }
 
+      // NV-06: Check timeout / expiry policy under row lock.
+      // If cancellation reason indicates timeout (e.g. from lifecycle worker or payment timeout),
+      // verify that the order is actually still eligible for timeout cancellation (PENDING, UNPAID, no button_id).
+      // If it was already PAID or transitioned past PENDING, skip cancellation idempotently.
+      const isTimeoutReason = Boolean(
+        reason && (
+          reason.includes('Hết hạn') ||
+          reason.toUpperCase().includes('TIMEOUT') ||
+          reason.toUpperCase().includes('EXPIRED')
+        )
+      );
+      if (isTimeoutReason) {
+        if (order.payment_status === 'PAID' || order.order_status !== 'PENDING' || order.button_id != null) {
+          return this.findOrderByIdTx(tx, orderId);
+        }
+      }
+
       if (['COMPLETED', 'DELIVERED', 'SHIPPING'].includes(order.order_status)) {
         throw new BadRequestException('Đơn hàng đã được xử lý giao hàng hoặc hoàn tất, không thể hủy');
       }
 
-      const items = await tx.orderItem.findMany({ where: { orderId } });
-      for (const item of items) {
-        await tx.$executeRawUnsafe(
-          `SELECT * FROM inventory WHERE product_id = $1 FOR UPDATE`,
-          item.productId,
-        );
-        const invRows = await tx.$queryRawUnsafe<any[]>(
-          `SELECT reserved_quantity FROM inventory WHERE product_id = $1 FOR UPDATE`,
-          item.productId,
-        );
-        const inv = invRows[0];
-        const currentReserved = inv ? Number(inv.reserved_quantity) : 0;
-        const releaseQty = Math.min(currentReserved, Number(item.quantity));
-
-        if (currentReserved < Number(item.quantity)) {
-          console.warn(
-            `[OrdersRepository.cancelOrderAtomicTx] Data discrepancy for product ${item.productId}: reserved_quantity (${currentReserved}) < item quantity (${item.quantity}). Clamping release to ${releaseQty}.`,
-          );
-        }
-
-        if (releaseQty > 0 || currentReserved > 0) {
+      // NV-08: If order was marked DELIVERY_FAILED, its reserved inventory was ALREADY released
+      // in completeDeliveryFailedTx. Re-releasing here would decrement reserved_quantity belonging to other orders!
+      const alreadyReleased = order.order_status === 'DELIVERY_FAILED';
+      if (!alreadyReleased) {
+        const items = await tx.orderItem.findMany({ where: { orderId } });
+        for (const item of items) {
           await tx.$executeRawUnsafe(
-            `UPDATE inventory
-             SET reserved_quantity = GREATEST(0, reserved_quantity - $1),
-                 updated_at = NOW()
-             WHERE product_id = $2`,
-            releaseQty,
+            `SELECT * FROM inventory WHERE product_id = $1 FOR UPDATE`,
             item.productId,
           );
+          const invRows = await tx.$queryRawUnsafe<any[]>(
+            `SELECT reserved_quantity FROM inventory WHERE product_id = $1 FOR UPDATE`,
+            item.productId,
+          );
+          const inv = invRows[0];
+          const currentReserved = inv ? Number(inv.reserved_quantity) : 0;
+          const releaseQty = Math.min(currentReserved, Number(item.quantity));
+
+          if (currentReserved < Number(item.quantity)) {
+            console.warn(
+              `[OrdersRepository.cancelOrderAtomicTx] Data discrepancy for product ${item.productId}: reserved_quantity (${currentReserved}) < item quantity (${item.quantity}). Clamping release to ${releaseQty}.`,
+            );
+          }
+
+          if (releaseQty > 0 || currentReserved > 0) {
+            await tx.$executeRawUnsafe(
+              `UPDATE inventory
+               SET reserved_quantity = GREATEST(0, reserved_quantity - $1),
+                   updated_at = NOW()
+               WHERE product_id = $2`,
+              releaseQty,
+              item.productId,
+            );
+          }
         }
       }
 
@@ -566,9 +749,14 @@ export class OrdersRepository {
         );
       }
 
+      const orderUpdateData: any = { orderStatus: targetStatus };
+      if (order.payment_status === 'PAID') {
+        orderUpdateData.paymentStatus = 'REFUND_PENDING';
+      }
+
       await tx.order.update({
         where: { orderId },
-        data: { orderStatus: targetStatus },
+        data: orderUpdateData,
       });
 
       // Lịch sử trạng thái được tự động ghi nhận bởi DB trigger trg_sync_inventory_on_order_status_change
@@ -694,33 +882,64 @@ export class OrdersRepository {
       }
 
       let isValidPodUrl = false;
+      let canonicalPodUrl = '';
+      let canonicalSubpath = '';
       try {
         const parsed = new URL(dto.podImageUrl);
-        const isCloudinaryDomain = parsed.hostname === 'cloudinary.com' || parsed.hostname.endsWith('.cloudinary.com');
+        const configuredCloudName = process.env.CLOUDINARY_CLOUD_NAME?.trim();
+        const isSecure = parsed.protocol === 'https:';
+        const isCloudinaryHost = parsed.hostname === 'res.cloudinary.com' || parsed.hostname.endsWith('.cloudinary.com');
         const uploadIdx = parsed.pathname.indexOf('/image/upload/');
-        if (isCloudinaryDomain && uploadIdx !== -1) {
-          const pathAfterUpload = parsed.pathname.slice(uploadIdx + '/image/upload/'.length);
-          const pathNoVersion = pathAfterUpload.replace(/^v\d+\//, '');
-          if (pathNoVersion.startsWith(`stores/${order.store_id}/pod/`)) {
-            isValidPodUrl = true;
+
+        if (isSecure && isCloudinaryHost && uploadIdx !== -1) {
+          const cloudNameInUrl = parsed.pathname.slice(1, uploadIdx);
+          if (!configuredCloudName || cloudNameInUrl === configuredCloudName) {
+            const rawAfterUpload = parsed.pathname.slice(uploadIdx + '/image/upload/'.length);
+            // Split segments to strip transformation options and version prefix (v12345)
+            const segments = rawAfterUpload.split('/');
+            const cleanSegments = segments.filter((seg) => !seg.includes(',') && !/^v\d+$/.test(seg));
+            canonicalSubpath = cleanSegments.join('/');
+
+            if (canonicalSubpath.startsWith(`stores/${order.store_id}/pod/`)) {
+              isValidPodUrl = true;
+              const effectiveCloud = configuredCloudName || cloudNameInUrl;
+              canonicalPodUrl = `https://res.cloudinary.com/${effectiveCloud}/image/upload/${canonicalSubpath}`;
+            }
           }
         }
       } catch (e) {
         isValidPodUrl = false;
       }
 
-      if (!isValidPodUrl) {
-        throw new BadRequestException(`Ảnh xác thực giao hàng (POD) phải là URL Cloudinary hợp lệ thuộc thư mục stores/${order.store_id}/pod/`);
+      if (!isValidPodUrl || !canonicalSubpath) {
+        throw new BadRequestException(`Ảnh xác thực giao hàng (POD) phải là URL Cloudinary HTTPS hợp lệ thuộc thư mục stores/${order.store_id}/pod/`);
       }
 
-      const existingWithPod = await tx.order.findFirst({
-        where: {
-          podImageUrl: dto.podImageUrl,
-          orderId: { not: orderId },
-        },
-      });
-      if (existingWithPod) {
+      // NV-07: Acquire transaction-level advisory lock on canonical POD subpath to serialize concurrent claims
+      await tx.$executeRawUnsafe(
+        `SELECT pg_advisory_xact_lock(hashtext('pod_claim:' || $1))`,
+        canonicalSubpath,
+      );
+
+      const duplicatePod = await tx.$queryRawUnsafe<any[]>(
+        `SELECT order_id FROM orders 
+         WHERE order_id != $1 
+           AND pod_image_url IS NOT NULL 
+           AND pod_image_url LIKE $2 
+         LIMIT 1`,
+        orderId,
+        `%${canonicalSubpath}%`,
+      );
+      if (duplicatePod && duplicatePod.length > 0) {
         throw new BadRequestException('Ảnh xác thực giao hàng (POD) này đã được sử dụng cho đơn hàng khác, không thể tái sử dụng');
+      }
+
+      // NV-09: Prevent changing payment method of orders already paid via online gateway (PAYOS/VIETQR) to COD
+      const isPaidGateway = order.payment_status === 'PAID' && ['PAYOS', 'VIETQR'].includes(order.payment_method);
+      if (isPaidGateway && dto.paymentMethod !== order.payment_method) {
+        throw new BadRequestException(
+          `Đơn hàng đã được thanh toán trực tuyến qua ${order.payment_method}, không thể thay đổi phương thức thanh toán sang ${dto.paymentMethod}`,
+        );
       }
 
       if (dto.paymentMethod === 'COD') {
@@ -749,8 +968,8 @@ export class OrdersRepository {
         data: {
           orderStatus: 'DELIVERED',
           paymentStatus: 'PAID',
-          paymentMethod: dto.paymentMethod,
-          podImageUrl: dto.podImageUrl,
+          paymentMethod: isPaidGateway ? order.payment_method : dto.paymentMethod,
+          podImageUrl: canonicalPodUrl || dto.podImageUrl,
           deliveredAt: deliveredAtDate,
         },
       });
@@ -945,4 +1164,219 @@ export class OrdersRepository {
     };
   }
 
+  /**
+   * Tạo đơn hàng Storefront trực tiếp trong Transaction an toàn với Row-Locking (Task 1.1 + Task 1.2)
+   */
+  async createStorefrontOrderTx(payload: {
+    storeId: bigint;
+    items: Array<{ productId: string | number; quantity: number }>;
+    customerName: string;
+    customerPhone: string;
+    deliveryAddress: string;
+    paymentMethod: string;
+    orderNote?: string;
+    customerUserId?: bigint;
+  }) {
+    const { storeId, items, customerName, customerPhone, deliveryAddress, paymentMethod, orderNote, customerUserId } = payload;
+
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Verify Store
+      const store = await tx.store.findUnique({
+        where: { storeId },
+        select: { storeId: true, name: true, status: true, commissionRate: true },
+      });
+      if (!store || store.status !== 'ACTIVE') {
+        throw new BadRequestException('Cửa hàng không tồn tại hoặc tạm ngưng hoạt động');
+      }
+
+      // 2. Aggregate quantities per product
+      const quantities = new Map<string, number>();
+      for (const item of items) {
+        const pId = String(item.productId || '').trim();
+        const qty = Number(item.quantity);
+        if (!pId || !Number.isInteger(qty) || qty < 1) {
+          throw new BadRequestException('Số lượng sản phẩm không hợp lệ');
+        }
+        quantities.set(pId, (quantities.get(pId) || 0) + qty);
+      }
+
+      let productIds: bigint[];
+      try {
+        productIds = Array.from(quantities.keys()).map((id) => BigInt(id));
+      } catch {
+        throw new BadRequestException('Giỏ hàng có sản phẩm không còn hợp lệ. Vui lòng tải lại danh mục và chọn lại sản phẩm.');
+      }
+
+      // 3. Acquire explicit row locks on inventory in ascending productId order (Task 1.2: anti-deadlock & concurrency safe)
+      const sortedProductIds = [...productIds].sort((a, b) => (a < b ? -1 : a > b ? 1 : 0));
+      for (const pId of sortedProductIds) {
+        const lockedRows: any[] = await tx.$queryRaw`
+          SELECT product_id, quantity_on_hand, reserved_quantity
+          FROM inventory
+          WHERE product_id = ${pId} AND store_id = ${storeId}
+          FOR UPDATE
+        `;
+        if (!lockedRows || lockedRows.length === 0) {
+          throw new BadRequestException(`Sản phẩm không có thông tin kho hàng hoặc không thuộc cửa hàng này`);
+        }
+        const invRow = lockedRows[0];
+        const onHand = Number(invRow.quantity_on_hand || 0);
+        const reserved = Number(invRow.reserved_quantity || 0);
+        const available = onHand - reserved;
+        const requiredQty = quantities.get(pId.toString())!;
+        if (available < requiredQty) {
+          const prodInfo = await tx.product.findUnique({
+            where: { productId: pId },
+            select: { productName: true },
+          });
+          const name = prodInfo?.productName || 'Sản phẩm';
+          throw new BadRequestException(
+            `Sản phẩm "${name}" không đủ số lượng trong kho (còn ${Math.max(0, available)} sản phẩm)`,
+          );
+        }
+      }
+
+      // 4. Query active products with current discounts
+      const products = await tx.product.findMany({
+        where: {
+          productId: { in: productIds },
+          storeId,
+          status: 'ACTIVE',
+        },
+        include: {
+          inventory: true,
+          discounts: {
+            where: {
+              status: 'ACTIVE',
+              startAt: { lte: new Date() },
+              endAt: { gte: new Date() },
+            },
+            orderBy: { discountId: 'desc' },
+            take: 1,
+          },
+        },
+      });
+
+      if (products.length !== productIds.length) {
+        throw new BadRequestException('Một số sản phẩm không còn kinh doanh hoặc không thuộc cửa hàng này');
+      }
+
+      // 5. Build items payload & calculate financials
+      let subtotalAmount = 0;
+      let discountAmount = 0;
+      const orderItemsData: any[] = [];
+
+      for (const product of products) {
+        const qty = quantities.get(product.productId.toString())!;
+        const unitPrice = Number(product.basePrice);
+        const discount = product.discounts?.[0];
+        let discountPercent = 0;
+        let discountAmt = 0;
+        if (discount) {
+          if (discount.discountPercent != null) {
+            discountPercent = Number(discount.discountPercent);
+            discountAmt = Math.round((unitPrice * discountPercent) / 100);
+          } else if (discount.discountAmount != null) {
+            discountAmt = Number(discount.discountAmount);
+          }
+        }
+        const finalUnitPrice = Math.max(0, unitPrice - discountAmt);
+        const itemSubtotal = finalUnitPrice * qty;
+
+        subtotalAmount += unitPrice * qty;
+        discountAmount += discountAmt * qty;
+
+        orderItemsData.push({
+          productId: product.productId,
+          productNameSnapshot: product.productName,
+          unitPriceSnapshot: unitPrice,
+          discountPercentSnapshot: discountPercent,
+          discountAmountSnapshot: discountAmt,
+          finalUnitPrice,
+          quantity: qty,
+          itemSubtotal,
+        });
+      }
+
+      const shippingFee = 0;
+      const totalAmount = Math.max(0, subtotalAmount - discountAmount + shippingFee);
+
+      // Enforce platform minimum order value (2,000 VND)
+      if (totalAmount < MIN_ORDER_TOTAL_VND) {
+        throw new BadRequestException({
+          errorCode: 'ORDER_TOTAL_BELOW_MINIMUM',
+          message: 'Giá trị đơn hàng tối thiểu là 2.000 VND',
+        });
+      }
+
+      const commissionRate = store.commissionRate ? Number(store.commissionRate) : 8.0;
+      const commissionAmount = Math.round(((totalAmount * commissionRate) / 100) * 100) / 100;
+      const netAmount = Math.max(0, totalAmount - commissionAmount);
+
+      // 6. Check customer profile if customerUserId is present
+      let customerId: bigint | null = null;
+      if (customerUserId) {
+        const profile = await tx.customerProfile.findUnique({
+          where: { userId: customerUserId },
+        });
+        if (profile) {
+          customerId = profile.customerId;
+        }
+      }
+
+      // 7. Order Code
+      const orderCode = `WEB-${Date.now()}-${Math.floor(Math.random() * 1000).toString().padStart(3, '0')}`;
+
+      // 8. Create Order in DB
+      const created = await tx.order.create({
+        data: {
+          orderCode,
+          storeId,
+          customerId,
+          buttonId: null,
+          orderStatus: 'PENDING',
+          paymentStatus: 'UNPAID',
+          paymentMethod: ['COD', 'CASH_ON_DELIVERY'].includes(paymentMethod) ? 'COD' : 'PAYOS',
+          subtotalAmount,
+          discountAmount,
+          shippingFee,
+          totalAmount,
+          commissionRate,
+          commissionAmount,
+          netAmount,
+          shippingRecipientName: customerName.trim(),
+          shippingPhone: customerPhone.trim(),
+          shippingAddress: deliveryAddress.trim(),
+          orderNote: orderNote?.trim() || 'Đơn hàng mua trực tiếp từ cửa hàng trực tuyến (Storefront Web)',
+          items: {
+            create: orderItemsData,
+          },
+        },
+        include: {
+          items: true,
+          store: { select: { storeId: true, name: true, phone: true } },
+        },
+      });
+
+      // 9. Increment reserved quantities
+      for (const item of orderItemsData) {
+        await tx.inventory.update({
+          where: { productId: item.productId },
+          data: { reservedQuantity: { increment: item.quantity } },
+        });
+      }
+
+      // 10. Record status history
+      await tx.orderStatusHistory.create({
+        data: {
+          orderId: created.orderId,
+          oldStatus: 'NONE',
+          newStatus: 'PENDING',
+          reason: 'Khách hàng đặt hàng trực tuyến qua Storefront Web',
+        },
+      });
+
+      return created;
+    });
+  }
 }

@@ -1,4 +1,4 @@
-import { Injectable, Inject, UnauthorizedException } from '@nestjs/common';
+import { Injectable, Inject, UnauthorizedException, ConflictException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -26,7 +26,32 @@ export class AuthRepository {
           include: {
             addresses: true,
             iotButtons: {
-              include: {
+              select: {
+                buttonId: true,
+                storeId: true,
+                customerId: true,
+                addressId: true,
+                deviceId: true,
+                buttonCode: true,
+                buttonName: true,
+                status: true,
+                batteryLevel: true,
+                warrantyUntil: true,
+                clickBehavior: true,
+                doubleClickWindowMs: true,
+                holdDurationMs: true,
+                singlePressAction: true,
+                doublePressAction: true,
+                longPressAction: true,
+                cancelWindowSeconds: true,
+                deployedTemplateId: true,
+                installedAt: true,
+                createdAt: true,
+                updatedAt: true,
+                rentalId: true,
+                custodyStoreId: true,
+                inventoryState: true,
+                canOrder: true,
                 buttonProducts: { include: { product: true } },
                 store: true,
               },
@@ -51,7 +76,7 @@ export class AuthRepository {
       include: {
         customerProfile: { include: { addresses: true } },
         ownedStores: true,
-        storeStaffs: { include: { role: true, store: true } },
+        storeStaffs: { where: { status: 'ACTIVE' }, include: { role: true, store: true } },
       },
     });
   }
@@ -201,25 +226,23 @@ export class AuthRepository {
     const normalizedEmail = params.email ? params.email.toLowerCase().trim() : null;
 
     return this.prisma.$transaction(async (tx) => {
-      const rows: any[] = await tx.$queryRawUnsafe(
-        `UPDATE auth_otps
-         SET consumed_at = NOW()
-         WHERE id = (
-           SELECT id FROM auth_otps
-           WHERE token_hash = $1
-             AND purpose = 'EMAIL_VERIFICATION'
-             AND ($2::text IS NULL OR LOWER(email) = LOWER($2))
-             AND consumed_at IS NULL
-             AND expires_at > CURRENT_TIMESTAMP
-             AND attempts < max_attempts
-           ORDER BY id DESC
-           LIMIT 1
-           FOR UPDATE
-         )
-         RETURNING id, user_id, email;`,
-        params.tokenHash,
-        normalizedEmail,
-      );
+      const rows: any[] = await tx.$queryRaw<any[]>`
+        UPDATE auth_otps
+        SET consumed_at = NOW()
+        WHERE id = (
+          SELECT id FROM auth_otps
+          WHERE token_hash = ${params.tokenHash}
+            AND purpose = 'EMAIL_VERIFICATION'
+            AND (${normalizedEmail}::text IS NULL OR LOWER(email) = LOWER(${normalizedEmail}))
+            AND consumed_at IS NULL
+            AND expires_at > CURRENT_TIMESTAMP
+            AND attempts < max_attempts
+          ORDER BY id DESC
+          LIMIT 1
+          FOR UPDATE
+        )
+        RETURNING id, user_id, email;
+      `;
 
       if (!rows || rows.length === 0) {
         return { success: false, reason: 'Mã xác thực không hợp lệ hoặc đã được sử dụng.' };
@@ -228,10 +251,27 @@ export class AuthRepository {
       const otp = rows[0];
       const targetUserId = BigInt(otp.user_id);
 
+      const userRows: any[] = await tx.$queryRaw<any[]>`
+        SELECT status FROM users WHERE user_id = ${targetUserId} FOR UPDATE
+      `;
+
+      if (!userRows || userRows.length === 0) {
+        return { success: false, reason: 'Tài khoản không tồn tại.' };
+      }
+
+      const existingStatus = userRows[0].status;
+      if (existingStatus !== 'PENDING_VERIFICATION' && existingStatus !== 'ACTIVE') {
+        return {
+          success: false,
+          reason: 'Tài khoản hiện đang bị vô hiệu hóa hoặc khóa, không thể tự kích hoạt qua email.',
+        };
+      }
+
       const user = await tx.user.update({
         where: { userId: targetUserId },
         data: {
           status: 'ACTIVE',
+          emailVerifiedAt: new Date(),
           emailVerificationToken: null,
           emailVerificationExpiresAt: null,
         },
@@ -247,6 +287,7 @@ export class AuthRepository {
         where: { userId },
         data: {
           status: 'ACTIVE',
+          emailVerifiedAt: new Date(),
           emailVerificationToken: null,
           emailVerificationExpiresAt: null,
         },
@@ -278,8 +319,141 @@ export class AuthRepository {
       include: {
         customerProfile: { include: { addresses: true } },
         ownedStores: true,
-        storeStaffs: { include: { role: true, store: true } },
+        storeStaffs: { where: { status: 'ACTIVE' }, include: { role: true, store: true } },
       },
+    });
+  }
+
+  async findByProviderSubject(authProvider: string, providerSubject: string) {
+    // 1. Check user_auth_identities table first
+    const identity = await this.prisma.userAuthIdentity.findUnique({
+      where: {
+        uq_user_auth_identities_provider_subject: {
+          provider: authProvider,
+          providerSubject,
+        },
+      },
+      include: {
+        user: {
+          include: {
+            customerProfile: { include: { addresses: true } },
+            ownedStores: true,
+            storeStaffs: { where: { status: 'ACTIVE' }, include: { role: true, store: true } },
+            authIdentities: true,
+          },
+        },
+      },
+    });
+    if (identity?.user) return identity.user;
+
+    // 2. Fallback to direct columns on user for backwards compatibility
+    return this.prisma.user.findFirst({
+      where: { authProvider, providerSubject },
+      include: {
+        customerProfile: { include: { addresses: true } },
+        ownedStores: true,
+        storeStaffs: { where: { status: 'ACTIVE' }, include: { role: true, store: true } },
+        authIdentities: true,
+      },
+    });
+  }
+
+  async findIdentityForUserAndProvider(userId: bigint, provider: string) {
+    return this.prisma.userAuthIdentity.findUnique({
+      where: {
+        uq_user_auth_identities_user_provider: {
+          userId,
+          provider,
+        },
+      },
+    });
+  }
+
+  async linkProviderSubject(userId: bigint, authProvider: string, providerSubject: string, clearPreLinkCredentials = false) {
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Row-lock user to serialize concurrent linking operations
+      await tx.$queryRaw`SELECT user_id FROM users WHERE user_id = ${userId} FOR UPDATE`;
+
+      // 2. Invariant: Check if providerSubject is already owned by someone else
+      const existingBySubject = await tx.userAuthIdentity.findUnique({
+        where: {
+          uq_user_auth_identities_provider_subject: {
+            provider: authProvider,
+            providerSubject,
+          },
+        },
+      });
+
+      if (existingBySubject && existingBySubject.userId !== userId) {
+        throw new ConflictException(
+          'PROVIDER_SUBJECT_MISMATCH: This external identity is already linked to another account.',
+        );
+      }
+
+      // 3. Invariant: Check if user is already bound to a different providerSubject
+      const existingByUserProvider = await tx.userAuthIdentity.findUnique({
+        where: {
+          uq_user_auth_identities_user_provider: {
+            userId,
+            provider: authProvider,
+          },
+        },
+      });
+
+      if (existingByUserProvider && existingByUserProvider.providerSubject !== providerSubject) {
+        throw new ConflictException(
+          'PROVIDER_SUBJECT_MISMATCH: User account is already linked to a different provider subject.',
+        );
+      }
+
+      // 4. Create identity if not yet created (never reassign ownership)
+      if (!existingBySubject && !existingByUserProvider) {
+        try {
+          await tx.userAuthIdentity.create({
+            data: {
+              userId,
+              provider: authProvider,
+              providerSubject,
+            },
+          });
+        } catch (dbErr: any) {
+          if (dbErr.code === 'P2002') {
+            throw new ConflictException(
+              'PROVIDER_SUBJECT_MISMATCH: Concurrent identity conflict during link.',
+            );
+          }
+          throw dbErr;
+        }
+      }
+
+      // 5. Anti-Pre-Account Takeover Defense:
+      // If clearPreLinkCredentials is true, wipe pre-link password credentials and revoke all active refresh tokens!
+      if (clearPreLinkCredentials) {
+        await tx.refreshToken.updateMany({
+          where: { userId, isRevoked: false },
+          data: { isRevoked: true },
+        });
+      }
+
+      // 6. Sync to direct user columns and return updated user object
+      const updateData: any = { authProvider, providerSubject, emailVerifiedAt: new Date() };
+      if (clearPreLinkCredentials) {
+        updateData.passwordHash = null;
+        updateData.passwordChangedAt = new Date();
+        updateData.emailVerificationToken = null;
+        updateData.emailVerificationExpiresAt = null;
+      }
+
+      return tx.user.update({
+        where: { userId },
+        data: updateData,
+        include: {
+          customerProfile: { include: { addresses: true } },
+          ownedStores: true,
+          storeStaffs: { where: { status: 'ACTIVE' }, include: { role: true, store: true } },
+          authIdentities: true,
+        },
+      });
     });
   }
 
@@ -368,7 +542,44 @@ export class AuthRepository {
     });
   }
 
+  async updatePasswordTx(userId: bigint, newPasswordHash: string, passwordChangedAt: Date) {
+    return this.prisma.$transaction(async (tx) => {
+      await tx.user.update({
+        where: { userId },
+        data: {
+          passwordHash: newPasswordHash,
+          passwordChangedAt,
+          updatedAt: new Date(),
+        },
+      });
+      await tx.refreshToken.updateMany({
+        where: { userId },
+        data: { isRevoked: true },
+      });
+    });
+  }
+
   // --- Dedicated OTP Table Methods (Atomic & Peppered) ---
+  async invalidateUnconsumedOtps(userId: bigint, purpose: string) {
+    return this.prisma.authOtp.updateMany({
+      where: {
+        userId,
+        purpose,
+        consumedAt: null,
+      },
+      data: {
+        consumedAt: new Date(),
+      },
+    });
+  }
+
+  async updatePasswordChangedAt(userId: bigint, date: Date = new Date()) {
+    return this.prisma.user.update({
+      where: { userId },
+      data: { passwordChangedAt: date },
+    });
+  }
+
   async createAuthOtp(data: {
     userId?: bigint;
     email: string;
@@ -621,6 +832,8 @@ export class AuthRepository {
       fullName?: string;
       avatarUrl?: string;
       phone?: string;
+      phoneVerifiedAt?: Date | null;
+      firebaseUid?: string | null;
     },
   ) {
     return this.prisma.user.update({
@@ -629,11 +842,13 @@ export class AuthRepository {
         ...(data.fullName !== undefined ? { fullName: data.fullName } : {}),
         ...(data.avatarUrl !== undefined ? { avatarUrl: data.avatarUrl } : {}),
         ...(data.phone !== undefined ? { phone: data.phone } : {}),
+        ...(data.phoneVerifiedAt !== undefined ? { phoneVerifiedAt: data.phoneVerifiedAt } : {}),
+        ...(data.firebaseUid !== undefined ? { firebaseUid: data.firebaseUid } : {}),
       },
       include: {
         customerProfile: { include: { addresses: true } },
         ownedStores: true,
-        storeStaffs: { include: { role: true, store: true } },
+        storeStaffs: { where: { status: 'ACTIVE' }, include: { role: true, store: true } },
       },
     });
   }
@@ -644,7 +859,7 @@ export class AuthRepository {
       include: {
         customerProfile: { include: { addresses: true } },
         ownedStores: true,
-        storeStaffs: { include: { role: true, store: true } },
+        storeStaffs: { where: { status: 'ACTIVE' }, include: { role: true, store: true } },
       },
     });
   }
@@ -655,7 +870,7 @@ export class AuthRepository {
       include: {
         customerProfile: { include: { addresses: true } },
         ownedStores: true,
-        storeStaffs: { include: { role: true, store: true } },
+        storeStaffs: { where: { status: 'ACTIVE' }, include: { role: true, store: true } },
       },
     });
   }

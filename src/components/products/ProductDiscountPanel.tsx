@@ -1,4 +1,4 @@
-﻿import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Tag, X, Plus, ArrowLeft, Loader2 } from 'lucide-react';
 import { Product } from '../../types';
@@ -8,7 +8,65 @@ import { notifyCatalogChanged } from '../../services/catalog-sync';
 import './product-discounts.css';
 const money = (value: number) => new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND', maximumFractionDigits: 0 }).format(value);
 const localDate = (value: Date) => new Date(value.getTime() - value.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-const dateLabel = (value: string) => new Date(value).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+const dayPeriod = (hour: number) => {
+  if (hour === 0) return 'Nửa đêm';
+  if (hour >= 1 && hour <= 5) return 'Đêm / Sáng sớm';
+  if (hour >= 6 && hour <= 10) return 'Sáng';
+  if (hour >= 11 && hour <= 12) return 'Trưa';
+  if (hour >= 13 && hour <= 17) return 'Chiều';
+  return 'Tối';
+};
+const dateLabel = (value: string) => {
+  const d = new Date(value);
+  if (isNaN(d.getTime())) return value;
+  const formatted = d.toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
+  return `${formatted} (${dayPeriod(d.getHours())})`;
+};
+const HOURS_24 = Array.from({ length: 24 }, (_, i) => String(i).padStart(2, '0'));
+const MINUTES_60 = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, '0'));
+function DateTime24Field({ label, value, onChange }: { label: string; value: string; onChange: (next: string) => void }) {
+  const [datePart = '', timePart = '00:00'] = (value || '').split('T');
+  const [rawH = '00', rawM = '00'] = timePart.split(':');
+  const hourPart = HOURS_24.includes(rawH) ? rawH : '00';
+  const minutePart = MINUTES_60.includes(rawM) ? rawM : '00';
+  const hNum = Number(hourPart);
+  const displayDate = datePart ? datePart.split('-').reverse().join('/') : '--/--/----';
+  return (
+    <div className="discount-datetime-field">
+      <span className="discount-datetime-label">{label}</span>
+      <div className="discount-datetime-row">
+        <input
+          required
+          type="date"
+          aria-label={`${label} - Ngày`}
+          value={datePart}
+          onChange={(e) => onChange(`${e.target.value}T${hourPart}:${minutePart}`)}
+        />
+        <select
+          aria-label={`${label} - Giờ (24h)`}
+          value={hourPart}
+          onChange={(e) => onChange(`${datePart}T${e.target.value}:${minutePart}`)}
+        >
+          {HOURS_24.map((hh) => (
+            <option key={hh} value={hh}>{hh}h ({dayPeriod(Number(hh))})</option>
+          ))}
+        </select>
+        <select
+          aria-label={`${label} - Phút`}
+          value={minutePart}
+          onChange={(e) => onChange(`${datePart}T${hourPart}:${e.target.value}`)}
+        >
+          {MINUTES_60.map((mm) => (
+            <option key={mm} value={mm}>{mm} phút</option>
+          ))}
+        </select>
+      </div>
+      <small className="discount-datetime-hint">
+        {displayDate} · <strong>{hourPart}:{minutePart}</strong> ({dayPeriod(hNum)})
+      </small>
+    </div>
+  );
+}
 const errorMessage = (error: any) => {
   const message = error?.response?.data?.message;
   return Array.isArray(message) ? message.join('. ') : message || 'Không thể lưu thay đổi. Vui lòng thử lại.';
@@ -97,7 +155,7 @@ export function ProductDiscountPanel({ product, onClose }: { product: Product; o
     }}>
       <header className="discount-header"><div><h2 id="discount-title">Giảm giá sản phẩm</h2><p>Ưu đãi trực tiếp từ cửa hàng</p></div><button ref={closeButton} type="button" disabled={busy} onClick={onClose} aria-label="Đóng"><X size={20}/></button></header>
       <div className="discount-product">{product.imageUrl ? <img src={product.imageUrl} alt=""/> : <Tag size={24}/>}<div><strong>{product.name}</strong><span>{product.sku} · Giá gốc {money(product.price)}</span></div></div>
-      <div className="discount-content">
+      <div className="discount-content overflow-y-auto" data-scrollable="true">
         {error && <div role="alert" className="discount-error">{error}</div>}
         {loading ? <p role="status" className="discount-empty"><Loader2 className="animate-spin" size={20}/> Đang tải ưu đãi…</p> : formOpen ? <form id="discount-form" onSubmit={save}>
           <button type="button" className="discount-back" disabled={busy} onClick={() => { setFormOpen(false); setError(''); }}><ArrowLeft size={15}/> Danh sách ưu đãi</button>
@@ -105,7 +163,10 @@ export function ProductDiscountPanel({ product, onClose }: { product: Product; o
           <fieldset disabled={busy}><legend>Hình thức giảm giá</legend><div className="discount-segment"><button type="button" aria-pressed={kind === 'percent'} onClick={() => setKind('percent')}>Theo phần trăm (%)</button><button type="button" aria-pressed={kind === 'amount'} onClick={() => setKind('amount')}>Theo số tiền (₫)</button></div>
           <label>Mức giảm {kind === 'percent' ? '(%)' : '(₫)'}<input required type="number" min="0.01" step="any" max={kind === 'percent' ? 100 : product.price} value={value} onChange={event => setValue(event.target.value)}/></label>
           <div className="discount-preview"><span>Khách mua với giá</span><div><strong>{money(Number.isFinite(previewPrice) ? previewPrice : product.price)}</strong><del>{money(product.price)}</del></div><small>Áp dụng tự động trong thời gian ưu đãi</small></div>
-          <div className="discount-dates"><label>Bắt đầu<input required type="datetime-local" value={start} onChange={event => setStart(event.target.value)}/></label><label>Kết thúc<input required type="datetime-local" value={end} onChange={event => setEnd(event.target.value)}/></label></div>
+          <div className="discount-dates">
+            <DateTime24Field label="Bắt đầu" value={start} onChange={setStart} />
+            <DateTime24Field label="Kết thúc" value={end} onChange={setEnd} />
+          </div>
           <p className="discount-help">Theo giờ trên thiết bị của bạn. Các ưu đãi đang bật của cùng sản phẩm cần có thời gian riêng biệt.</p>
           <label>Trạng thái<select value={status} onChange={event => setStatus(event.target.value as 'ACTIVE' | 'INACTIVE')}><option value="ACTIVE">Bật theo lịch đã chọn</option><option value="INACTIVE">Tạm tắt</option></select></label></fieldset>
         </form> : <>

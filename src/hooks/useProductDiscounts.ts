@@ -51,6 +51,7 @@ export function useProductDiscounts(productIds: string[]) {
       }
     };
     const socket = getSocket();
+    if (!socket.connected) socket.connect();
     const socketEvents = ['CATALOG_UPDATED', 'PRODUCT_UPDATED', 'connect'];
     socketEvents.forEach(event => socket.on(event, onChange));
     window.addEventListener('catalog:changed', onChange);

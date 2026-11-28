@@ -1,4 +1,6 @@
 import { ProductDiscountPanel } from '../../components/products/ProductDiscountPanel';
+import { DiscountPrice } from '../../components/products/DiscountPrice';
+import { useProductDiscounts } from '../../hooks/useProductDiscounts';
 // @refresh reset
 import { formatMetric } from '../../services/dashboard-metrics';
 import React, { useState, useEffect, useMemo, useRef } from 'react';
@@ -34,6 +36,7 @@ import {
   Trash2,
   EyeOff,
   Eye,
+  Layers,
 } from 'lucide-react';
 
 const tableContainerVariants: Variants = {
@@ -134,6 +137,8 @@ export const StoreProductsPage: React.FC = () => {
   const listingAccess = useStoreListingAccess(user);
   const isSuspended = isStoreSuspended(user);
   const [products, setProducts] = useState<Product[]>(() => { try { const raw = typeof window !== 'undefined' ? window.sessionStorage?.getItem('sob_cached_store_products') : null; if (raw) { const p = JSON.parse(raw); if (Array.isArray(p) && p.length > 0) return p; } } catch {} return []; });
+  const discountProductIds = useMemo(() => products.map((p) => String(p.id)), [products]);
+  const { discounts, now: discountNow } = useProductDiscounts(discountProductIds);
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize] = useState(20);
   const [totalItems, setTotalItems] = useState(0);
@@ -147,6 +152,23 @@ export const StoreProductsPage: React.FC = () => {
   const [loading, setLoading] = useState(() => { try { return !(typeof window !== 'undefined' && window.sessionStorage?.getItem('sob_cached_store_products')); } catch { return true; } });
   const [searchQuery, setSearchQuery] = useState('');
   const [categoryFilter, setCategoryFilter] = useState('ALL');
+
+  // Store Categories CRUD state (Item 10.1)
+  interface StoreCategoryItem {
+    categoryId: string | number;
+    categoryName: string;
+    parentCategoryId?: string | number | null;
+    status?: string;
+    children?: StoreCategoryItem[];
+  }
+  const [storeCategories, setStoreCategories] = useState<StoreCategoryItem[]>([]);
+  const [showCategoryModal, setShowCategoryModal] = useState(false);
+  const [catLoading, setCatLoading] = useState(false);
+  const [catSaving, setCatSaving] = useState(false);
+  const [catEditId, setCatEditId] = useState<string | null>(null);
+  const [catNameInput, setCatNameInput] = useState('');
+  const [catParentInput, setCatParentInput] = useState('');
+  const [catStatusInput, setCatStatusInput] = useState<'ACTIVE' | 'INACTIVE'>('ACTIVE');
 
   // New Product Modal State
   const [showAddModal, setShowAddModal] = useState(false);
@@ -191,17 +213,115 @@ export const StoreProductsPage: React.FC = () => {
   const [savingPrice, setSavingPrice] = useState(false);
 
   // Universal body scroll lock & header submerge
-  useBodyScrollLock(showAddModal || !!editingProduct || !!statusConfirmation);
+  useBodyScrollLock(showAddModal || !!editingProduct || !!statusConfirmation || showCategoryModal);
 
-  const fetchProducts = async (targetPage = currentPage) => {
+  const flattenCategories = (items: StoreCategoryItem[]): StoreCategoryItem[] => {
+    const out: StoreCategoryItem[] = [];
+    const walk = (list: StoreCategoryItem[]) => {
+      for (const item of list) {
+        out.push(item);
+        if (Array.isArray(item.children) && item.children.length > 0) {
+          walk(item.children);
+        }
+      }
+    };
+    walk(items);
+    return out;
+  };
+
+  const fetchStoreCategories = async () => {
+    const storeId = user?.storeId;
+    if (!storeId) return;
+    setCatLoading(true);
+    try {
+      const res = await api.get(`/stores/${storeId}/categories`, { params: { mode: 'tree' } });
+      const rows = res.data?.data ?? res.data ?? [];
+      if (Array.isArray(rows)) {
+        setStoreCategories(rows);
+      }
+    } catch {
+      // Keep default fallback categories if store categories API returns empty or offline
+    } finally {
+      setCatLoading(false);
+    }
+  };
+
+  const resetCategoryForm = () => {
+    setCatEditId(null);
+    setCatNameInput('');
+    setCatParentInput('');
+    setCatStatusInput('ACTIVE');
+  };
+
+  const handleSaveCategory = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const storeId = user?.storeId;
+    const trimmed = catNameInput.trim();
+    if (!storeId) {
+      toast.error('Không xác định được cửa hàng hiện tại.');
+      return;
+    }
+    if (!trimmed) {
+      toast.error('Vui lòng nhập tên danh mục.');
+      return;
+    }
+    setCatSaving(true);
+    try {
+      const payload: Record<string, any> = {
+        categoryName: trimmed,
+        status: catStatusInput,
+      };
+      if (catParentInput) {
+        payload.parentCategoryId = Number(catParentInput) || catParentInput;
+      } else if (catEditId) {
+        payload.parentCategoryId = null;
+      }
+      if (catEditId) {
+        await api.patch(`/categories/${catEditId}`, payload);
+        toast.success('Đã cập nhật danh mục.');
+      } else {
+        await api.post(`/stores/${storeId}/categories`, payload);
+        toast.success('Đã tạo danh mục mới.');
+      }
+      resetCategoryForm();
+      await fetchStoreCategories();
+    } catch (err: any) {
+      toast.error(extractProductErrorMessage(err, 'Không thể lưu danh mục.'));
+    } finally {
+      setCatSaving(false);
+    }
+  };
+
+  const handleDeleteCategory = async (cat: StoreCategoryItem) => {
+    if (!window.confirm(`Bạn có chắc muốn xóa danh mục "${cat.categoryName}"?`)) return;
+    setCatSaving(true);
+    try {
+      await api.delete(`/categories/${cat.categoryId}`);
+      toast.success(`Đã xóa danh mục "${cat.categoryName}".`);
+      if (catEditId === String(cat.categoryId)) resetCategoryForm();
+      await fetchStoreCategories();
+    } catch (err: any) {
+      toast.error(extractProductErrorMessage(err, 'Không thể xóa danh mục này (có thể đang có sản phẩm hoặc danh mục con).'));
+    } finally {
+      setCatSaving(false);
+    }
+  };
+
+  useEffect(() => {
+    if (user?.storeId) {
+      void fetchStoreCategories();
+    }
+  }, [user?.storeId]);
+
+  const fetchProducts = async (targetPage = currentPage, ignoreFilters = false) => {
     const request = ++productRequest.current;
     try {
       const params: any = {
         page: targetPage,
         pageSize,
       };
-      if (searchQuery.trim()) params.search = searchQuery.trim();
-      if (categoryFilter !== 'ALL') params.category = categoryFilter;
+      if (!ignoreFilters && searchQuery.trim()) params.search = searchQuery.trim();
+      if (!ignoreFilters && categoryFilter !== 'ALL') params.category = categoryFilter;
 
       const [res, statsRes] = await Promise.allSettled([
         api.get('/products', { params }),
@@ -418,14 +538,37 @@ export const StoreProductsPage: React.FC = () => {
       const res = await api.post('/products', payload);
 
       if (res.data.success) {
+        const createdRaw = res.data.data;
+        if (createdRaw && (createdRaw.id || createdRaw.productId)) {
+          const createdMapped: Product = {
+            ...createdRaw,
+            id: String(createdRaw.id || createdRaw.productId),
+            name: createdRaw.name || createdRaw.productName || cleanName,
+            sku: createdRaw.sku || createdRaw.productCode || cleanSku,
+            brand: createdRaw.brand || cleanBrand,
+            category: createdRaw.category?.categoryName || (typeof createdRaw.category === 'string' ? createdRaw.category : category),
+            unit: createdRaw.unit || cleanUnit,
+            price: Number(createdRaw.price ?? createdRaw.basePrice ?? numPrice),
+            stock: Number(createdRaw.stock ?? createdRaw.inventory?.quantityOnHand ?? numStock),
+            reservedStock: Number(createdRaw.reservedStock ?? createdRaw.inventory?.reservedQuantity ?? 0),
+            minStockAlert: Number(createdRaw.minStockAlert ?? 5),
+            imageUrl: createdRaw.imageUrl || createdRaw.thumbnailUrl || validImageUrl || '',
+          };
+          setProducts((prev) => {
+            const next = [createdMapped, ...prev.filter((item) => String(item.id) !== String(createdMapped.id))];
+            try { window.sessionStorage?.setItem('sob_cached_store_products', JSON.stringify(next)); } catch {}
+            return next;
+          });
+        }
         setShowAddModal(false);
         resetAddForm();
         notifyCatalogChanged();
         toast.success('Thêm sản phẩm thành công.');
         if (currentUser?.role === 'STORE_OWNER') void listingAccess.refresh();
+        setCurrentPage(1);
         setSearchQuery('');
         setCategoryFilter('ALL');
-        await fetchProducts();
+        await fetchProducts(1, true);
       } else {
         throw new Error(res.data?.message || 'Không thể tạo sản phẩm');
       }
@@ -628,7 +771,15 @@ export const StoreProductsPage: React.FC = () => {
     });
   }, [products, categoryFilter, searchQuery]);
 
-  const categories = ['ALL', 'Nước uống', 'Gas', 'Gạo', 'Sữa', 'Nhu yếu phẩm'];
+  const flatStoreCategories = useMemo(() => flattenCategories(storeCategories), [storeCategories]);
+  const selectableCategoryNames = useMemo(() => {
+    const defaults = ['Nước uống', 'Gas', 'Gạo', 'Sữa', 'Nhu yếu phẩm'];
+    const dynamicNames = flatStoreCategories
+      .filter((c) => (c.status || 'ACTIVE') === 'ACTIVE' && c.categoryName?.trim())
+      .map((c) => c.categoryName.trim());
+    return Array.from(new Set([...dynamicNames, ...defaults]));
+  }, [flatStoreCategories]);
+  const categories = useMemo(() => ['ALL', ...selectableCategoryNames], [selectableCategoryNames]);
 
   return (
     <div className="space-y-6 text-zinc-900 dark:text-zinc-100">
@@ -659,7 +810,20 @@ export const StoreProductsPage: React.FC = () => {
           </p>
         </div>
 
-        <div className="flex items-center gap-2.5">
+        <div className="flex items-center gap-2.5 flex-wrap">
+          <motion.button
+            type="button"
+            whileTap={{ scale: 0.96 }}
+            onClick={() => {
+              resetCategoryForm();
+              setShowCategoryModal(true);
+              void fetchStoreCategories();
+            }}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 hover:bg-zinc-50 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-200 text-xs font-semibold transition-all cursor-pointer"
+          >
+            <Layers className="w-3.5 h-3.5 text-[#287DA8]" />
+            <span>Quản lý danh mục</span>
+          </motion.button>
           <motion.button
             type="button"
             disabled={isSuspended || (user?.role === 'STORE_OWNER' && !listingAccess.allowed)}
@@ -1028,7 +1192,7 @@ export const StoreProductsPage: React.FC = () => {
                           </div>
                         ) : (
                           <div className="inline-flex items-center gap-1.5">
-                            <span>{prod.price.toLocaleString()} ₫</span>
+                            <DiscountPrice price={prod.price} discounts={discounts[prod.id]} now={discountNow} />
                             <button
                               type="button"
                               onClick={() => startEditingPrice(prod)}
@@ -1306,11 +1470,11 @@ export const StoreProductsPage: React.FC = () => {
                         onChange={(e) => setCategory(e.target.value)}
                         className="w-full px-3 py-1.5 rounded-md bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-[#287DA8]/20 focus:border-[#287DA8] transition-colors cursor-pointer"
                       >
-                        <option value="Nước uống">Nước uống</option>
-                        <option value="Gas">Gas</option>
-                        <option value="Gạo">Gạo</option>
-                        <option value="Sữa">Sữa</option>
-                        <option value="Nhu yếu phẩm">Nhu yếu phẩm</option>
+                        {selectableCategoryNames.map((catName) => (
+                          <option key={catName} value={catName}>
+                            {catName}
+                          </option>
+                        ))}
                       </select>
                     </div>
                     <div>
@@ -1550,11 +1714,14 @@ export const StoreProductsPage: React.FC = () => {
                         onChange={(e) => setEditCategory(e.target.value)}
                         className="w-full px-3 py-1.5 rounded-md bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-[#287DA8]/20 focus:border-[#287DA8] transition-colors cursor-pointer"
                       >
-                        <option value="Nước uống">Nước uống</option>
-                        <option value="Gas">Gas</option>
-                        <option value="Gạo">Gạo</option>
-                        <option value="Sữa">Sữa</option>
-                        <option value="Nhu yếu phẩm">Nhu yếu phẩm</option>
+                        {selectableCategoryNames.map((catName) => (
+                          <option key={catName} value={catName}>
+                            {catName}
+                          </option>
+                        ))}
+                        {editCategory && !selectableCategoryNames.includes(editCategory) && (
+                          <option value={editCategory}>{editCategory}</option>
+                        )}
                       </select>
                     </div>
                     <div>
@@ -1688,6 +1855,186 @@ export const StoreProductsPage: React.FC = () => {
                     </motion.button>
                   </div>
                 </form>
+              </motion.div>
+            </div>
+          )}
+        </AnimatePresence>,
+        document.body
+      )}
+
+      {createPortal(
+        <AnimatePresence>
+          {showCategoryModal && (
+            <div className="fixed inset-0 z-[105] flex items-center justify-center p-4 responsive-modal overflow-y-auto">
+              <motion.div
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                exit={{ opacity: 0 }}
+                onClick={() => !catSaving && setShowCategoryModal(false)}
+                className="fixed inset-0 bg-slate-950/60 backdrop-blur-sm"
+              />
+              <motion.div
+                initial={{ opacity: 0, scale: 0.96, y: 10 }}
+                animate={{ opacity: 1, scale: 1, y: 0 }}
+                exit={{ opacity: 0, scale: 0.96, y: 10 }}
+                className="relative z-10 w-full max-w-2xl rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 shadow-2xl overflow-hidden"
+              >
+                <div className="flex items-center justify-between border-b border-zinc-200 dark:border-zinc-800 px-5 py-4">
+                  <div className="flex items-center gap-2.5">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-[#287DA8]/10 text-[#287DA8]">
+                      <Layers className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <h3 className="text-sm font-bold text-zinc-900 dark:text-zinc-100">Quản lý danh mục sản phẩm</h3>
+                      <p className="text-xs text-zinc-500 dark:text-zinc-400">Cây danh mục cửa hàng dùng để phân loại và lọc sản phẩm.</p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowCategoryModal(false)}
+                    className="rounded-lg p-1.5 text-zinc-400 hover:bg-zinc-100 hover:text-zinc-700 dark:hover:bg-zinc-800 dark:hover:text-zinc-200"
+                  >
+                    <X className="h-4 w-4" />
+                  </button>
+                </div>
+
+                <div className="p-5 space-y-5 max-h-[75vh] overflow-y-auto">
+                  <form onSubmit={handleSaveCategory} className="rounded-xl border border-zinc-200 dark:border-zinc-800 bg-zinc-50/70 dark:bg-zinc-950/60 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-semibold text-zinc-700 dark:text-zinc-200">
+                        {catEditId ? 'Chỉnh sửa danh mục' : 'Thêm danh mục mới'}
+                      </span>
+                      {catEditId && (
+                        <button
+                          type="button"
+                          onClick={resetCategoryForm}
+                          className="text-xs font-medium text-[#287DA8] hover:underline"
+                        >
+                          Hủy sửa
+                        </button>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                      <div>
+                        <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">Tên danh mục *</label>
+                        <input
+                          type="text"
+                          value={catNameInput}
+                          onChange={(e) => setCatNameInput(e.target.value)}
+                          placeholder="Ví dụ: Đồ uống đóng chai"
+                          className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 focus:border-[#287DA8] focus:outline-none"
+                          required
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">Danh mục cha (tùy chọn)</label>
+                        <select
+                          value={catParentInput}
+                          onChange={(e) => setCatParentInput(e.target.value)}
+                          className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 focus:border-[#287DA8] focus:outline-none"
+                        >
+                          <option value="">— Danh mục gốc —</option>
+                          {flatStoreCategories
+                            .filter((c) => String(c.categoryId) !== catEditId)
+                            .map((c) => (
+                              <option key={c.categoryId} value={String(c.categoryId)}>
+                                {c.categoryName}
+                              </option>
+                            ))}
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-[11px] font-medium text-zinc-600 dark:text-zinc-400 mb-1">Trạng thái</label>
+                        <select
+                          value={catStatusInput}
+                          onChange={(e) => setCatStatusInput(e.target.value as 'ACTIVE' | 'INACTIVE')}
+                          className="w-full rounded-lg border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 px-3 py-1.5 text-xs text-zinc-900 dark:text-zinc-100 focus:border-[#287DA8] focus:outline-none"
+                        >
+                          <option value="ACTIVE">Đang dùng (ACTIVE)</option>
+                          <option value="INACTIVE">Tạm ẩn (INACTIVE)</option>
+                        </select>
+                      </div>
+                    </div>
+                    <div className="flex justify-end">
+                      <button
+                        type="submit"
+                        disabled={catSaving}
+                        className="inline-flex items-center gap-1.5 rounded-lg bg-[#287DA8] hover:bg-[#206588] px-3.5 py-1.5 text-xs font-semibold text-white disabled:opacity-50"
+                      >
+                        <Save className="h-3.5 w-3.5" />
+                        <span>{catSaving ? 'Đang lưu...' : catEditId ? 'Cập nhật danh mục' : 'Tạo danh mục'}</span>
+                      </button>
+                    </div>
+                  </form>
+
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between">
+                      <h4 className="text-xs font-semibold text-zinc-700 dark:text-zinc-300">
+                        Danh mục hiện tại ({flatStoreCategories.length})
+                      </h4>
+                      <button
+                        type="button"
+                        onClick={() => void fetchStoreCategories()}
+                        disabled={catLoading}
+                        className="text-[11px] font-medium text-[#287DA8] hover:underline disabled:opacity-50"
+                      >
+                        {catLoading ? 'Đang tải...' : 'Làm mới'}
+                      </button>
+                    </div>
+
+                    {catLoading && flatStoreCategories.length === 0 ? (
+                      <p className="py-6 text-center text-xs text-zinc-500">Đang tải danh mục cửa hàng...</p>
+                    ) : flatStoreCategories.length === 0 ? (
+                      <div className="rounded-xl border border-dashed border-zinc-200 dark:border-zinc-800 p-6 text-center text-xs text-zinc-500">
+                        Cửa hàng chưa tạo danh mục riêng. Hệ thống đang hiển thị các danh mục mặc định (Nước uống, Gas, Gạo, Sữa, Nhu yếu phẩm).
+                      </div>
+                    ) : (
+                      <div className="divide-y divide-zinc-100 dark:divide-zinc-800 rounded-xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-950/40">
+                        {flatStoreCategories.map((cat) => {
+                          const parent = flatStoreCategories.find((p) => String(p.categoryId) === String(cat.parentCategoryId));
+                          const isInactive = cat.status === 'INACTIVE';
+                          return (
+                            <div key={cat.categoryId} className="flex items-center justify-between gap-3 px-4 py-2.5 text-xs">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  <span className="font-semibold text-zinc-900 dark:text-zinc-100 truncate">
+                                    {parent ? `${parent.categoryName} › ` : ''}{cat.categoryName}
+                                  </span>
+                                  <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${isInactive ? 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400' : 'bg-emerald-50 text-emerald-700 dark:bg-emerald-500/15 dark:text-emerald-300'}`}>
+                                    {isInactive ? 'Tạm ẩn' : 'Hoạt động'}
+                                  </span>
+                                </div>
+                                <p className="text-[11px] text-zinc-400 mt-0.5">Mã #{cat.categoryId}</p>
+                              </div>
+                              <div className="flex items-center gap-1.5 shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setCatEditId(String(cat.categoryId));
+                                    setCatNameInput(cat.categoryName);
+                                    setCatParentInput(cat.parentCategoryId ? String(cat.parentCategoryId) : '');
+                                    setCatStatusInput(isInactive ? 'INACTIVE' : 'ACTIVE');
+                                  }}
+                                  className="rounded-lg border border-zinc-200 dark:border-zinc-700 px-2.5 py-1 text-[11px] font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 inline-flex items-center gap-1"
+                                >
+                                  <Pencil className="h-3 w-3" /> Sửa
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={catSaving}
+                                  onClick={() => void handleDeleteCategory(cat)}
+                                  className="rounded-lg border border-rose-200 dark:border-rose-900/50 bg-rose-50/60 dark:bg-rose-950/30 px-2.5 py-1 text-[11px] font-medium text-rose-600 dark:text-rose-400 hover:bg-rose-100/70 inline-flex items-center gap-1 disabled:opacity-50"
+                                >
+                                  <Trash2 className="h-3 w-3" /> Xóa
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                </div>
               </motion.div>
             </div>
           )}

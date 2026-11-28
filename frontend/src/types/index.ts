@@ -191,6 +191,9 @@ export interface Device {
   expiresAt?: string | null;
   configuration?: DeviceConfiguration | null;
   customer?: CustomerProfile | null;
+  canOrder?: boolean;
+  canOrderReason?: string | null;
+  customerChildLock?: boolean;
   createdAt?: string;
   updatedAt?: string;
 }

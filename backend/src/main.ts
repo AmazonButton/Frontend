@@ -9,10 +9,17 @@ import express from 'express';
 import rateLimit from 'express-rate-limit';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import { AllExceptionsFilter } from './common/filters/http-exception.filter';
+import { AppController } from './app.controller';
 
 async function bootstrap() {
   // Boot-time env validation: crash early if critical secrets are missing
-  const requiredEnvVars = ['JWT_SECRET', 'OTP_PEPPER'];
+  const requiredEnvVars = [
+    'JWT_SECRET',
+    'OTP_PEPPER',
+    'BANK_ACCOUNT_ENCRYPTION_KEY',
+    'BANK_ACCOUNT_HASH_SALT',
+    ...(process.env.NODE_ENV === 'production' ? ['GOOGLE_CLIENT_ID'] : []),
+  ];
   for (const envVar of requiredEnvVars) {
     if (!process.env[envVar]) {
       console.error(`❌ FATAL: Missing required environment variable: ${envVar}`);
@@ -22,19 +29,43 @@ async function bootstrap() {
 
   const app = await NestFactory.create(AppModule, { rawBody: true });
 
+  // Configure trust proxy for secure req.ip resolution behind reverse proxies (configurable via TRUST_PROXY env)
+  const trustProxyEnv = process.env.TRUST_PROXY;
+  if (trustProxyEnv) {
+    if (trustProxyEnv === 'true') {
+      console.warn('⚠️ WARNING: TRUST_PROXY=true trusts all proxy hops. Use an explicit hop count (e.g. 1) or trusted CIDRs in production.');
+      (app.getHttpAdapter().getInstance() as any).set('trust proxy', true);
+    } else {
+      const parsed = isNaN(Number(trustProxyEnv)) ? trustProxyEnv : Number(trustProxyEnv);
+      (app.getHttpAdapter().getInstance() as any).set('trust proxy', parsed);
+    }
+  } else if (process.env.NODE_ENV === 'production') {
+    (app.getHttpAdapter().getInstance() as any).set('trust proxy', 1);
+  }
+
   // Enable shutdown hooks for graceful termination
   app.enableShutdownHooks();
 
   // Express body size limit with rawBody retention for webhooks
+  // Webhooks (Didit eKYC dossiers with AML/OCR) can reach ~50kb; standard routes keep strict 10kb limit (RULE-14)
   app.use(
+    '/api/v1/webhooks',
     express.json({
-      limit: '50mb',
+      limit: '1mb',
       verify: (req: any, _res, buf) => {
         req.rawBody = buf;
       },
     }),
   );
-  app.use(express.urlencoded({ limit: '50mb', extended: true }));
+  app.use(
+    express.json({
+      limit: '10kb',
+      verify: (req: any, _res, buf) => {
+        req.rawBody = buf;
+      },
+    }),
+  );
+  app.use(express.urlencoded({ limit: '10kb', extended: true }));
 
   // Global exception filter for uniform error envelopes & security error masking
   app.useGlobalFilters(new AllExceptionsFilter());
@@ -53,6 +84,37 @@ async function bootstrap() {
       },
     }),
   );
+
+  const isTestEnv = process.env.NODE_ENV === 'test';
+
+  // Tiered Rate Limiters: Defend sensitive authentication & order simulation endpoints against brute-force & spam
+  const authLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute window
+    max: isTestEnv ? 1000 : 15, // 15 requests / min / IP across auth mutations
+    standardHeaders: true,
+    legacyHeaders: false,
+    skip: (req) => req.method === 'GET', // Exempt read-only endpoints like GET /auth/me from brute-force throttling
+    message: {
+      success: false,
+      message: 'Quá nhiều yêu cầu xác thực từ IP của bạn. Vui lòng thử lại sau 1 phút.',
+      errorCode: 'AUTH_RATE_LIMIT_EXCEEDED',
+    },
+  });
+
+  const orderSimLimiter = rateLimit({
+    windowMs: 60 * 1000, // 1 minute window
+    max: isTestEnv ? 1000 : 15, // 15 requests / min / IP
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      success: false,
+      message: 'Quá nhiều yêu cầu mô phỏng bấm nút từ IP của bạn. Vui lòng thử lại sau 1 phút.',
+      errorCode: 'ORDER_SIM_RATE_LIMIT_EXCEEDED',
+    },
+  });
+
+  app.use('/api/v1/auth', authLimiter);
+  app.use('/api/v1/orders/simulate-button-press', orderSimLimiter);
 
   // Enable global validation pipeline — activates all class-validator DTOs
   app.useGlobalPipes(
@@ -84,11 +146,13 @@ async function bootstrap() {
     origin: corsOrigins,
     credentials: true,
     methods: 'GET,HEAD,PUT,PATCH,POST,DELETE,OPTIONS',
-    allowedHeaders: 'Content-Type, Accept, Authorization, x-device-id, x-timestamp, x-nonce, x-signature, idempotency-key, x-idempotency-key',
+    allowedHeaders:
+      'Content-Type, Accept, Authorization, x-device-id, x-timestamp, x-nonce, x-signature, x-idempotency-key, idempotency-key, X-Idempotency-Key, Idempotency-Key, x-request-id',
+    exposedHeaders: 'X-Idempotency-Status, X-Request-Id',
   });
 
   app.setGlobalPrefix('api/v1', {
-    exclude: ['health', 'healthz', 'readyz', 'api/v1/health'],
+    exclude: ['health', 'healthz', 'readyz', 'api/v1/health', 'outbound-ip'],
   });
 
   // Setup Swagger Documentation (wrapped in try/catch to gracefully handle environments without emitDecoratorMetadata like tsx/esbuild)
@@ -137,6 +201,33 @@ async function bootstrap() {
 
   const port = process.env.PORT || 5000;
   await app.listen(port, '0.0.0.0');
+
+  // Explicit OS Signal handlers for Graceful Shutdown and connection draining
+  let isShuttingDown = false;
+  const gracefulShutdown = async (signal: string) => {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    AppController.isDraining = true;
+    console.log(`\n📢 Received ${signal}. Starting graceful shutdown and draining connections...`);
+
+    const timeout = setTimeout(() => {
+      console.error('⚠️ Could not close connections in time (15s timeout), forcefully shutting down.');
+      process.exit(1);
+    }, 15000);
+    timeout.unref();
+
+    try {
+      await app.close();
+      console.log('✅ NestJS server, Database, and Queue instances closed cleanly.');
+      process.exit(0);
+    } catch (err) {
+      console.error('❌ Error during graceful shutdown:', err);
+      process.exit(1);
+    }
+  };
+
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
   console.log(`=======================================================`);
   console.log(`🚀 SMART ORDER BUTTON — NESTJS CLOUD & REALTIME CORE`);

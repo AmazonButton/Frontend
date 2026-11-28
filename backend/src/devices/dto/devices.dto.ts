@@ -11,6 +11,7 @@ import {
   ArrayMinSize,
   ArrayMaxSize,
   IsNotEmpty,
+  IsDateString,
 } from 'class-validator';
 import { Type } from 'class-transformer';
 
@@ -167,9 +168,13 @@ export class CustomerUpdateConfigDto {
 }
 
 export class AllocateStoreDto {
+  @IsOptional()
   @IsString()
-  @IsNotEmpty()
-  storeId: string;
+  storeId?: string;
+
+  @IsOptional()
+  @IsString()
+  targetStoreId?: string;
 
   @IsArray()
   @IsString({ each: true })
@@ -218,53 +223,41 @@ export class UpdateDeviceDto {
 
   @IsOptional()
   @IsString()
-  name?: string;
-
-  @IsOptional()
-  @IsString()
   customName?: string;
 
   @IsOptional()
   @IsString()
+  @IsIn(['ACTIVE', 'INACTIVE', 'MAINTENANCE', 'RETIRED'], {
+    message: 'Trạng thái phải là một trong: ACTIVE, INACTIVE, MAINTENANCE, RETIRED',
+  })
   status?: string;
 
   @IsOptional()
-  storeId?: string | number;
-
-  @IsOptional()
-  customerId?: string | number;
-
-  @IsOptional()
-  productId?: string | number | null;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  quantity?: number;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
-  defaultQuantity?: number;
-
-  @IsOptional()
-  @IsString()
-  location?: string;
-
-  @IsOptional()
-  @IsString()
-  description?: string;
-
-  @IsOptional()
-  @Type(() => Number)
-  @IsNumber()
+  @IsInt({ message: 'batteryLevel phải là số nguyên' })
+  @Min(0, { message: 'batteryLevel tối thiểu là 0' })
+  @Max(100, { message: 'batteryLevel tối đa là 100' })
   batteryLevel?: number;
 
   @IsOptional()
-  expiresAt?: string | Date | null;
+  @IsDateString({}, { message: 'warrantyUntil phải là chuỗi ngày hợp lệ (ISO 8601)' })
+  warrantyUntil?: string;
 
   @IsOptional()
-  warrantyUntil?: string | Date | null;
+  @IsString({ message: 'location phải là chuỗi ký tự' })
+  location?: string;
+
+  @IsOptional()
+  @IsString({ message: 'description phải là chuỗi ký tự' })
+  description?: string;
+
+  @IsOptional()
+  productId?: string | number;
+
+  @IsOptional()
+  @IsNumber({}, { message: 'quantity phải là số' })
+  @Min(1, { message: 'quantity tối thiểu là 1' })
+  @Max(100, { message: 'quantity tối đa là 100' })
+  quantity?: number;
 }
 
 export class PairDeviceDto {
@@ -314,6 +307,9 @@ export class UpdateConfigDto {
 
   @IsOptional()
   @IsString()
+  @IsIn(['ACTIVE', 'INACTIVE', 'MAINTENANCE', 'RETIRED'], {
+    message: 'Trạng thái phải là một trong: ACTIVE, INACTIVE, MAINTENANCE, RETIRED',
+  })
   status?: string;
 }
 

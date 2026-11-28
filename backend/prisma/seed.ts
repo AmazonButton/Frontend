@@ -4,6 +4,9 @@ import bcrypt from 'bcryptjs';
 const prisma = new PrismaClient();
 
 async function main() {
+  if (process.env.NODE_ENV === 'production') {
+    throw new Error('❌ Seeding is strictly prohibited in PRODUCTION environment!');
+  }
   console.log('🌱 Seeding Multi-Store IoT Button Platform (BRD V2.1) data...');
   const passwordHash = await bcrypt.hash('Password123!', 12);
 
@@ -265,6 +268,43 @@ async function main() {
       },
     });
 
+  console.log('📋 Creating Device Templates (Water & Gas)...');
+  await prisma.deviceTemplate.upsert({
+    where: { code: 'TMPL-WATER-20L' },
+    update: { storeId: store1.storeId, defaultProductId: prodWater.productId },
+    create: {
+      code: 'TMPL-WATER-20L',
+      name: 'Mẫu Nút Bấm Đặt Nước La Vie 19L',
+      description: 'Mẫu nút bấm một chạm cho bình nước khoáng La Vie 19L',
+      category: 'Nước uống',
+      storeId: store1.storeId,
+      defaultProductId: prodWater.productId,
+      singlePressAction: 'CREATE_ORDER',
+      doublePressAction: 'CANCEL_ORDER',
+      longPressAction: 'WIFI_CONFIGURATION',
+      defaultQuantity: 1,
+      cancelWindowSeconds: 60,
+    },
+  });
+
+  await prisma.deviceTemplate.upsert({
+    where: { code: 'TMPL-GAS-12KG' },
+    update: { storeId: store1.storeId, defaultProductId: prodGas.productId },
+    create: {
+      code: 'TMPL-GAS-12KG',
+      name: 'Mẫu Nút Bấm Đặt Gas Petrolimex 12kg',
+      description: 'Mẫu nút bấm một chạm cho bình Gas Petrolimex 12kg',
+      category: 'Khí đốt & Gas',
+      storeId: store1.storeId,
+      defaultProductId: prodGas.productId,
+      singlePressAction: 'CREATE_ORDER',
+      doublePressAction: 'CANCEL_ORDER',
+      longPressAction: 'WIFI_CONFIGURATION',
+      defaultQuantity: 1,
+      cancelWindowSeconds: 60,
+    },
+  });
+
   console.log('🔘 Creating IoT Buttons (Fixed Store & Multi-Product Configuration)...');
   // Button 1: BTN-8829-WTR (used in automated test suite)
   const button1 = await prisma.ioTButton.upsert({
@@ -275,6 +315,7 @@ async function main() {
       addressId: customerAddress.addressId,
       buttonName: 'Nút Nước Lavie Bếp',
       status: 'ACTIVE',
+      inventoryState: 'IN_CUSTOMER_CUSTODY',
     },
     create: {
       storeId: store1.storeId,
@@ -284,6 +325,7 @@ async function main() {
       buttonCode: 'BTN-8829-WTR',
       buttonName: 'Nút Nước Lavie Bếp',
       status: 'ACTIVE',
+      inventoryState: 'IN_CUSTOMER_CUSTODY',
       hmacSecret: 'sec_btn8829_f79c428784e5e14ddf0cb866fc07ca7f5c68a5a295b27ede',
       installedAt: new Date(),
     },
@@ -309,6 +351,7 @@ async function main() {
       addressId: customerAddress.addressId,
       buttonName: 'Nút Đổi Bình Gas Nhà Bếp',
       status: 'ACTIVE',
+      inventoryState: 'IN_CUSTOMER_CUSTODY',
     },
     create: {
       storeId: store1.storeId,
@@ -318,6 +361,7 @@ async function main() {
       buttonCode: 'BTN-7711-GAS',
       buttonName: 'Nút Đổi Bình Gas Nhà Bếp',
       status: 'ACTIVE',
+      inventoryState: 'IN_CUSTOMER_CUSTODY',
       hmacSecret: 'sec_btn7711_e82b7c93847291a82f30b91c8472a19b',
       installedAt: new Date(),
     },
@@ -367,10 +411,7 @@ async function main() {
   console.log('\n======================================================');
   console.log('✅ DATABASE SEED COMPLETED SUCCESSFULLY!');
   console.log('======================================================');
-  console.log('🔑 Credentials:');
-  console.log('   - Super Admin: admin@smartorder.local / Password123!');
-  console.log('   - Store Owner: store@smartorder.local / Password123!');
-  console.log('   - Customer:    customer@smartorder.local / Password123!');
+  console.log('🔒 Test fixtures populated with encrypted credentials (passwords not logged).');
   console.log('🔘 IoT Test Buttons:');
   console.log('   - BTN-8829-WTR (Store 1: La Vie 19L x 2)');
   console.log('   - BTN-7711-GAS (Store 1: Gas Petrolimex 12kg x 1)');

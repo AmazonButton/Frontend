@@ -14,6 +14,7 @@ import {
 export const VerifyEmailPage: React.FC = () => {
   const [searchParams] = useSearchParams();
   const tokenFromUrl = searchParams.get('token') || '';
+  const emailFromUrl = searchParams.get('email') || '';
 
   const [token, setToken] = useState(tokenFromUrl);
   const [loading, setLoading] = useState(false);
@@ -21,7 +22,10 @@ export const VerifyEmailPage: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
 
   // Resend state
-  const [resendEmail, setResendEmail] = useState('');
+  const [resendEmail, setResendEmail] = useState(() => {
+    if (emailFromUrl) return emailFromUrl;
+    try { return sessionStorage.getItem('sob_pending_verify_email') || ''; } catch { return ''; }
+  });
   const [resendLoading, setResendLoading] = useState(false);
   const [resendSuccessMsg, setResendSuccessMsg] = useState<string | null>(null);
   const [resendCooldown, setResendCooldown] = useState(0);
@@ -54,6 +58,7 @@ export const VerifyEmailPage: React.FC = () => {
     try {
       const res = await api.post('/auth/verify-email', { token: trimmed });
       if (res.data.success) {
+        try { sessionStorage.removeItem('sob_pending_verify_email'); } catch {}
         setVerified(true);
       }
     } catch (err: any) {

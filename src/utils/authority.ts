@@ -62,6 +62,23 @@ export function getRoleHomePath(role?: string | null): string {
   return '/';
 }
 
+export function resolvePostLoginRedirect(
+  role?: string | null,
+  fromLocation?: { pathname?: string; search?: string; hash?: string } | null,
+): string {
+  const fallback = getRoleHomePath(role);
+  const pathname = fromLocation?.pathname || '';
+  if (!pathname || !pathname.startsWith('/')) return fallback;
+  const authPaths = ['/login', '/register', '/phone-auth', '/forgot-password', '/reset-password', '/verify-email', '/403'];
+  if (authPaths.some((p) => pathname === p || pathname.startsWith(`${p}/`))) return fallback;
+  if (pathname.startsWith('/admin') && !isAdminRole(role)) return fallback;
+  if (pathname.startsWith('/system-staff') && !isSystemStaffRole(role)) return fallback;
+  if (pathname.startsWith('/store') && !isStoreOwnerRole(role)) return fallback;
+  if (pathname.startsWith('/driver') && !(isStoreOwnerRole(role) || role === 'SUPER_ADMIN' || role === 'SYSTEM_ADMIN')) return fallback;
+  if (pathname.startsWith('/customer') && role !== 'CUSTOMER') return fallback;
+  return `${pathname}${fromLocation?.search || ''}${fromLocation?.hash || ''}`;
+}
+
 export function getDefaultCapabilities(role?: string | null): RoleCapabilities {
   const isSuper = role === 'SUPER_ADMIN';
   const isAdmin = isAdminRole(role);

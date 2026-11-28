@@ -8,6 +8,7 @@ export interface CloudinarySignatureResponse {
   apiKey: string;
   cloudName: string;
   folder: string;
+  allowedFormats?: string;
 }
 
 export interface UploadResult {
@@ -90,22 +91,6 @@ export class MediaService {
       return { valid: true, mime: 'image/gif', ext: 'gif' };
     }
 
-    // BMP: 42 4D ("BM")
-    if (buffer.length >= 2 && buffer[0] === 0x42 && buffer[1] === 0x4d) {
-      return { valid: true, mime: 'image/bmp', ext: 'bmp' };
-    }
-
-    // SVG (Vector images)
-    const headerStr = buffer.slice(0, 256).toString('utf8').trim().toLowerCase();
-    if (headerStr.startsWith('<svg') || (headerStr.startsWith('<?xml') && headerStr.includes('<svg'))) {
-      return { valid: true, mime: 'image/svg+xml', ext: 'svg' };
-    }
-
-    // AVIF: ....ftypavif
-    if (buffer.length >= 12 && buffer.slice(4, 12).toString('ascii').startsWith('ftypavif')) {
-      return { valid: true, mime: 'image/avif', ext: 'avif' };
-    }
-
     return { valid: false, mime: '', ext: '' };
   }
 
@@ -126,7 +111,9 @@ export class MediaService {
     }
 
     const timestamp = Math.round(new Date().getTime() / 1000);
+    const allowedFormats = 'jpg,png,webp,jpeg';
     const paramsToSign = {
+      allowed_formats: allowedFormats,
       folder,
       timestamp,
     };
@@ -139,6 +126,7 @@ export class MediaService {
       apiKey,
       cloudName,
       folder,
+      allowedFormats,
     };
   }
 

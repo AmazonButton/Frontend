@@ -11,7 +11,6 @@ export interface OrderResponseDto {
   customerId: string;
   buttonId?: string | null;
   buttonCode?: string | null;
-  status: string;
   orderStatus: string;
   paymentStatus: string;
   paymentMethod: string;
@@ -22,11 +21,12 @@ export interface OrderResponseDto {
   commissionRate?: number;
   commissionAmount?: number;
   netAmount?: number;
-  /** Snapshot contact fields supplied when the order was placed. */
-  customerName?: string;
-  customerPhone?: string;
   shippingAddress?: string | null;
   deliveryAddress?: string | null;
+  shippingRecipientName?: string | null;
+  shippingPhone?: string | null;
+  customerPhone?: string | null;
+  recipientPhone?: string | null;
   shippingLatitude?: number | null;
   shippingLongitude?: number | null;
   assignedDriverId?: string | null;
@@ -36,13 +36,13 @@ export interface OrderResponseDto {
   failureNote?: string | null;
   evidenceImageUrl?: string | null;
   notes?: string | null;
-  paidAt?: Date | string | null;
   createdAt: Date | string;
   updatedAt: Date | string;
   customer?: {
     customerId: string;
     fullName?: string;
     phoneNumber?: string;
+    phone?: string;
     email?: string;
   };
   button?: {
@@ -57,6 +57,11 @@ export interface OrderResponseDto {
     code?: string;
     phone?: string;
     address?: string;
+  };
+  driver?: {
+    driverId: string;
+    fullName?: string;
+    phone?: string;
   };
   items?: Array<{
     orderItemId: string;
@@ -85,10 +90,6 @@ export function toOrderResponseDto(raw: any): OrderResponseDto {
 
   const orderId = raw.orderId ? raw.orderId.toString() : raw.id ? raw.id.toString() : '';
   const orderCode = raw.orderCode || raw.orderNumber || '';
-  const confirmedPayment = raw.paymentTransactions?.find((transaction: any) =>
-    ['PAID', 'SUCCESS', 'COMPLETED'].includes(String(transaction.status || '').toUpperCase()),
-  );
-  const paymentStatus = confirmedPayment ? 'PAID' : (raw.paymentStatus || raw.payment_status || 'UNPAID');
 
   const dto: OrderResponseDto = {
     id: orderId,
@@ -97,12 +98,11 @@ export function toOrderResponseDto(raw: any): OrderResponseDto {
     orderCode: orderCode,
     storeId: raw.storeId ? raw.storeId.toString() : '',
     customerId: raw.customerId ? raw.customerId.toString() : '',
-    buttonId: raw.buttonId ? raw.buttonId.toString() : null,
+    buttonId: raw.buttonId ? raw.buttonId.toString() : (raw.button_id ? raw.button_id.toString() : null),
     buttonCode: raw.buttonCode || raw.button?.buttonCode || null,
-    status: raw.orderStatus || raw.status || 'PENDING',
-    orderStatus: raw.orderStatus || raw.status || 'PENDING',
-    paymentStatus,
-    paymentMethod: raw.paymentMethod || raw.payment_method || confirmedPayment?.paymentMethod || 'COD',
+    orderStatus: raw.orderStatus || 'PENDING',
+    paymentStatus: raw.paymentStatus || 'UNPAID',
+    paymentMethod: raw.paymentMethod || 'COD',
     totalAmount: raw.totalAmount != null ? Number(raw.totalAmount) : 0,
     subtotalAmount: raw.subtotalAmount != null ? Number(raw.subtotalAmount) : (raw.totalAmount != null ? Number(raw.totalAmount) : 0),
     shippingFee: raw.shippingFee != null ? Number(raw.shippingFee) : 0,
@@ -110,13 +110,12 @@ export function toOrderResponseDto(raw: any): OrderResponseDto {
     commissionRate: raw.commissionRate != null ? Number(raw.commissionRate) : undefined,
     commissionAmount: raw.commissionAmount != null ? Number(raw.commissionAmount) : undefined,
     netAmount: raw.netAmount != null ? Number(raw.netAmount) : undefined,
-    // Storefront/direct orders keep the recipient contact as an order snapshot,
-    // not necessarily in a linked customer profile.  Expose the whitelisted
-    // snapshot so store staff can contact the recipient from the order list.
-    customerName: raw.shippingRecipientName || raw.customer?.user?.fullName || raw.customer?.fullName || raw.customerName || undefined,
-    customerPhone: raw.shippingPhone || raw.customer?.user?.phone || raw.customer?.phoneNumber || raw.customerPhone || undefined,
     shippingAddress: raw.shippingAddress || raw.deliveryAddress || null,
     deliveryAddress: raw.deliveryAddress || raw.shippingAddress || null,
+    shippingRecipientName: raw.shippingRecipientName || raw.shipping_recipient_name || raw.customer?.fullName || raw.customer?.user?.fullName || null,
+    shippingPhone: raw.shippingPhone || raw.shipping_phone || null,
+    customerPhone: raw.customer?.phone || raw.customer?.user?.phone || raw.shippingPhone || raw.shipping_phone || raw.customerPhone || null,
+    recipientPhone: raw.shippingPhone || raw.shipping_phone || raw.customer?.phone || raw.customer?.user?.phone || null,
     shippingLatitude: raw.shippingLatitude != null ? Number(raw.shippingLatitude) : (raw.shipping_latitude != null ? Number(raw.shipping_latitude) : null),
     shippingLongitude: raw.shippingLongitude != null ? Number(raw.shippingLongitude) : (raw.shipping_longitude != null ? Number(raw.shipping_longitude) : null),
     assignedDriverId: raw.assignedDriverId ? raw.assignedDriverId.toString() : (raw.assigned_driver_id ? raw.assigned_driver_id.toString() : null),
@@ -128,16 +127,25 @@ export function toOrderResponseDto(raw: any): OrderResponseDto {
     notes: raw.notes || raw.orderNote || null,
     createdAt: raw.createdAt,
     updatedAt: raw.updatedAt,
-    paidAt: confirmedPayment?.paidAt || raw.paidAt || null,
   };
 
   // Safe Customer mapping - NEVER leak raw User entity fields (passwordHash, authId, hmacSecret, etc.)
+  const resolvedPhone = raw.customer?.user?.phone || raw.customer?.phone || raw.customer?.phoneNumber || raw.shippingPhone || raw.shipping_phone || raw.customerPhone || null;
+
   if (raw.customer) {
     dto.customer = {
       customerId: raw.customer.customerId ? raw.customer.customerId.toString() : raw.customerId?.toString(),
       fullName: raw.customer.user?.fullName || raw.customer.fullName || raw.customerName,
-      phoneNumber: raw.customer.user?.phone || raw.customer.phoneNumber || raw.customerPhone,
+      phoneNumber: resolvedPhone || undefined,
+      phone: resolvedPhone || undefined,
       email: raw.customer.user?.email || raw.customer.email,
+    };
+  } else if (resolvedPhone || raw.customerName || raw.shippingRecipientName || raw.shipping_recipient_name) {
+    dto.customer = {
+      customerId: raw.customerId ? raw.customerId.toString() : '',
+      fullName: raw.shippingRecipientName || raw.shipping_recipient_name || raw.customerName,
+      phoneNumber: resolvedPhone || undefined,
+      phone: resolvedPhone || undefined,
     };
   }
 
@@ -149,6 +157,16 @@ export function toOrderResponseDto(raw: any): OrderResponseDto {
       code: raw.store.code,
       phone: raw.store.phone,
       address: raw.store.address,
+    };
+  }
+
+  // Safe Driver mapping
+  const driverObj = raw.assignedDriver || raw.driver;
+  if (driverObj) {
+    dto.driver = {
+      driverId: driverObj.userId ? driverObj.userId.toString() : (driverObj.id ? driverObj.id.toString() : (raw.assignedDriverId ? raw.assignedDriverId.toString() : '')),
+      fullName: driverObj.fullName || driverObj.name || '',
+      phone: driverObj.phone || driverObj.phoneNumber || '',
     };
   }
 
@@ -168,7 +186,6 @@ export function toOrderResponseDto(raw: any): OrderResponseDto {
       const orderItemId = item.orderItemId ? item.orderItemId.toString() : item.id ? item.id.toString() : '';
       const productId = item.productId ? item.productId.toString() : '';
       return {
-        id: orderItemId || productId,
         orderItemId,
         productId,
         productName: item.productNameSnapshot || item.productName || item.product?.productName || item.product?.name || '',

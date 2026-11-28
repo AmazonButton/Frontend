@@ -10,7 +10,16 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super({
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: process.env.JWT_SECRET || 'sob_jwt_secret_dev_2026',
+      secretOrKey: (() => {
+        const secret = process.env.JWT_SECRET;
+        if (!secret) {
+          if (process.env.NODE_ENV === 'test') {
+            return 'ci_test_jwt_secret_key_minimum_32_characters_long_for_security!';
+          }
+          throw new Error('FATAL: JWT_SECRET environment variable is required and must not be empty');
+        }
+        return secret;
+      })(),
       passReqToCallback: true,
     });
   }
@@ -55,8 +64,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
 
       if (user.passwordChangedAt && payload.iat) {
         const passwordChangedSec = Math.floor(new Date(user.passwordChangedAt).getTime() / 1000);
-        if (payload.iat < passwordChangedSec) {
-          throw new UnauthorizedException('Mật khẩu đã được thay đổi. Vui lòng đăng nhập lại.');
+        if (payload.iat <= passwordChangedSec) {
+          throw new UnauthorizedException('Phiên đăng nhập đã bị thu hồi hoặc mật khẩu đã đổi. Vui lòng đăng nhập lại.');
         }
       }
 
@@ -64,30 +73,59 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
       let storeId = payload.storeId || null;
       let customerProfileId = user.customerProfile?.customerId?.toString() || payload.customerProfileId || null;
 
-      const superAdminEmails = (process.env.SUPER_ADMIN_EMAILS || 'admin@smartorder.local,admin@gmail.com')
+      const superAdminEmails = (process.env.SUPER_ADMIN_EMAILS || 'admin@smartorder.local')
         .split(',')
         .map((e) => e.trim().toLowerCase());
-
-      const isSuperAdmin =
-        user.username === 'admin' ||
+      const isExplicitSuperAdmin =
         superAdminEmails.includes((user.email || '').toLowerCase()) ||
-        payload.role === 'SUPER_ADMIN' ||
-        payload.role === 'SYSTEM_ADMIN' ||
-        user.storeStaffs?.some(
-          (s: any) =>
-            s.role?.roleCode === 'SUPER_ADMIN' ||
-            s.role?.roleCode === 'SYSTEM_ADMIN' ||
-            s.role?.roleCode === 'ADMIN',
-        );
+        user.username === 'admin';
+      const activePlatformStaff = user.storeStaffs?.find(
+        (s: any) =>
+          s.status === 'ACTIVE' &&
+          (s.role?.roleCode === 'SUPER_ADMIN' || s.role?.roleCode === 'SYSTEM_ADMIN' || s.role?.roleCode === 'ADMIN'),
+      );
 
-      if (isSuperAdmin) {
+      if (isExplicitSuperAdmin) {
         role = 'SUPER_ADMIN';
+      } else if (activePlatformStaff) {
+        role = activePlatformStaff.role?.roleCode || payload.role || 'SYSTEM_ADMIN';
       } else if (user.ownedStores && user.ownedStores.length > 0) {
         storeId = user.ownedStores[0].storeId.toString();
         role = 'STORE_OWNER';
       } else if (user.storeStaffs && user.storeStaffs.length > 0) {
-        storeId = user.storeStaffs[0].storeId.toString();
-        role = user.storeStaffs[0].role?.roleCode || 'STORE_STAFF';
+        // P1 Fix: Involuntary Role Override Prevention
+        // If user logged in as a CUSTOMER without explicitly requesting staff store scope, maintain CUSTOMER role!
+        if (payload.role === 'CUSTOMER' && !payload.storeId) {
+          role = 'CUSTOMER';
+          storeId = null;
+        } else {
+          // If payload had a storeId, ensure it matches an active membership
+          const activeMembership = payload.storeId
+            ? user.storeStaffs.find(
+                (s: any) => s.storeId.toString() === payload.storeId.toString() && s.status === 'ACTIVE',
+              )
+            : user.storeStaffs.find((s: any) => s.status === 'ACTIVE');
+
+          if (activeMembership) {
+            storeId = activeMembership.storeId.toString();
+            role = activeMembership.role?.roleCode || payload.role || 'STORE_STAFF';
+          } else {
+            // Stale authority revocation: Staff member has records in DB, but NONE are ACTIVE (e.g. TERMINATED/INACTIVE)
+            storeId = null;
+            role = 'CUSTOMER';
+          }
+        }
+      } else {
+        // P2 Fix (auth/jwt-strategy-payload-role-fallback):
+        // Khi user không còn membership trong DB, hạ role về CUSTOMER.
+        // Chỉ cho phép fallback từ token payload khi chạy dưới môi trường test độc lập (NODE_ENV === 'test').
+        if (process.env.NODE_ENV === 'test') {
+          role = payload.role || 'CUSTOMER';
+          storeId = payload.storeId || null;
+        } else {
+          role = 'CUSTOMER';
+          storeId = null;
+        }
       }
 
       return {

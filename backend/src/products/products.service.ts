@@ -3,6 +3,10 @@ import { StoreSubscriptionsService } from '../store-subscriptions/store-subscrip
 import { Injectable, BadRequestException, NotFoundException, ForbiddenException, Inject, Logger, Optional } from '@nestjs/common';
 import { ProductsRepository, ProductImageInput } from './products.repository';
 import { EventsGateway } from '../websocket/events.gateway';
+import { PriceHistoryResponseDto } from './dto/price-history-response.dto';
+import { InventoryResponseDto } from './dto/inventory-response.dto';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { DashboardCacheService } from '../common/cache/dashboard-cache.service';
 
 @Injectable()
 export class ProductsService {
@@ -12,7 +16,25 @@ export class ProductsService {
     @Inject(StoreSubscriptionsService) private readonly subscriptionsService: StoreSubscriptionsService,
     @Inject(MediaService) private readonly mediaService: MediaService,
     @Optional() @Inject(EventsGateway) private readonly eventsGateway?: EventsGateway,
+    @Optional() private readonly cacheService?: DashboardCacheService,
   ) {}
+
+  private async invalidateProductCaches(storeId?: string | number | bigint) {
+    if (!this.cacheService || typeof this.cacheService.invalidatePrefix !== 'function') return;
+    try {
+      const promises: Promise<void>[] = [
+        this.cacheService.invalidatePrefix('admin:dashboard:'),
+        this.cacheService.invalidatePrefix('admin:operations'),
+      ];
+      if (storeId) {
+        promises.push(this.cacheService.invalidatePrefix(`dash:store:${storeId.toString()}:`));
+        promises.push(this.cacheService.invalidatePrefix(`staff:dashboard:store:${storeId.toString()}:`));
+      }
+      await Promise.all(promises);
+    } catch (error) {
+      this.logger.warn(`Failed to invalidate product cache: ${error instanceof Error ? error.message : 'unknown error'}`);
+    }
+  }
 
   private extractPublicIdFromUrl(url?: string): string | undefined {
     if (!url || typeof url !== 'string') return undefined;
@@ -94,20 +116,25 @@ export class ProductsService {
     };
   }
 
-  async list(storeId?: string | number | bigint, pagination?: { page?: number; pageSize?: number }) {
+  async list(
+    storeId?: string | number | bigint,
+    options?: { page?: number; pageSize?: number; search?: string; category?: string },
+  ) {
     const targetStoreId = storeId ? BigInt(storeId) : undefined;
-    const { items, total, page, pageSize } = await this.productsRepo.findMany(targetStoreId, pagination);
+    const { items, total, page, pageSize } = await this.productsRepo.findMany(targetStoreId, options);
     const data = items.map((p: any) => this.formatProduct(p));
+    const totalPages = Math.ceil(total / (pageSize || 20));
     return {
       data,
-      pagination: pagination?.pageSize
-        ? {
-            page: page || 1,
-            pageSize: pageSize || total,
-            total,
-            totalPages: Math.ceil(total / (pageSize || 1)),
-          }
-        : undefined,
+      pagination: {
+        page: page || 1,
+        pageSize: pageSize || 20,
+        totalItems: total,
+        total,
+        totalPages,
+        hasNextPage: (page || 1) < totalPages,
+        hasPrevPage: (page || 1) > 1,
+      },
     };
   }
 
@@ -122,17 +149,27 @@ export class ProductsService {
     }
 
     // Tenant Isolation (Fail-Closed):
-    // STORE_OWNER va STAFF_INVENTORY chi duoc xem san pham cua cua hang minh.
+    // Store-scoped roles chi duoc xem san pham cua cua hang minh.
     // Thieu storeId -> 403 Forbidden.
     // Khac storeId -> 403 Forbidden.
-    // CUSTOMER va SYSTEM_ADMIN / SUPER_ADMIN duoc phep xem toan bo catalog cong khai.
-    const isStoreScopedRole = user && (user.role === 'STORE_OWNER' || user.role === 'STAFF_INVENTORY');
+    const storeScopedRoles = ['STORE_OWNER', 'STORE_MANAGER', 'STAFF_INVENTORY', 'STAFF_ORDERS', 'STAFF_ORDER', 'STAFF_DELIVERY', 'STORE_STAFF'];
+    const isStoreScopedRole = user && storeScopedRoles.includes(user.role);
     if (isStoreScopedRole) {
       if (!user.storeId) {
         throw new ForbiddenException('Tai khoan quan ly hoac nhan vien chua duoc lien ket voi bat ky cua hang nao');
       }
       if (product.storeId && product.storeId.toString() !== user.storeId.toString()) {
         throw new ForbiddenException('Ban khong co quyen truy cap san pham cua cua hang khac');
+      }
+    }
+
+    // Inactive product isolation: Customers & guests can only view ACTIVE products
+    const isPlatformAdmin = user && (user.role === 'SUPER_ADMIN' || user.role === 'SYSTEM_ADMIN' || user.role === 'ADMIN');
+    const isOwnStoreStaff = isStoreScopedRole && product.storeId && user.storeId && product.storeId.toString() === user.storeId.toString();
+
+    if (!isPlatformAdmin && !isOwnStoreStaff) {
+      if (product.status !== 'ACTIVE') {
+        throw new NotFoundException('San pham khong ton tai');
       }
     }
 
@@ -171,6 +208,13 @@ export class ProductsService {
       throw new BadRequestException('Tên sản phẩm và giá gốc không được để trống');
     }
 
+    if (categoryId) {
+      const cat = await this.productsRepo.findCategoryById(BigInt(categoryId), targetStoreId);
+      if (!cat) {
+        throw new BadRequestException('Danh mục không tồn tại hoặc không thuộc cửa hàng này');
+      }
+    }
+
     const imageInputs = this.parseImageInputs(body);
 
     const created = await this.productsRepo.create({
@@ -199,6 +243,7 @@ export class ProductsService {
       product: formatted,
       storeId: targetStoreId.toString(),
     });
+    await this.invalidateProductCaches(targetStoreId);
     return formatted;
   }
 
@@ -225,28 +270,29 @@ export class ProductsService {
     const finalProductName = productName || name;
     const finalPrice = basePrice !== undefined ? parseFloat(basePrice.toString()) : price !== undefined ? parseFloat(price.toString()) : undefined;
 
-    // Track price change history if price is being updated
-    if (finalPrice !== undefined && Number(existing.basePrice) !== finalPrice) {
-      try {
-        await this.productsRepo.recordPriceHistory({
-          productId: targetProductId,
+    // Prepare price change history if price is being updated
+    const hasPriceChange = finalPrice !== undefined && Number(existing.basePrice) !== finalPrice;
+    const priceHistory = hasPriceChange
+      ? {
           oldPrice: Number(existing.basePrice),
           newPrice: finalPrice,
           changedByUserId: user?.userId ? BigInt(user.userId) : undefined,
-        });
-      } catch (err: any) {
-        this.logger.warn(`Failed to record price history for product ${targetProductId}: ${err.message}`);
+        }
+      : undefined;
+
+    // P2 Invariant Fix (products/update-status-bypasses-subscription-and-max-products):
+    // Bắt buộc trạng thái chỉ được là ACTIVE hoặc INACTIVE.
+    // Khi kích hoạt sản phẩm (status = ACTIVE) từ trạng thái khác, bắt buộc kiểm tra subscription & quota maxProducts!
+    if (status !== undefined) {
+      if (!['ACTIVE', 'INACTIVE'].includes(status)) {
+        throw new BadRequestException('Trạng thái sản phẩm chỉ có thể là ACTIVE hoặc INACTIVE');
+      }
+      if (status === 'ACTIVE' && existing.status !== 'ACTIVE') {
+        await this.subscriptionsService.validateStoreCanListProducts(existing.storeId);
       }
     }
 
-    if (body.stock !== undefined && !isNaN(Number(body.stock))) {
-      try {
-        await this.productsRepo.updateInventoryStock(targetProductId, existing.storeId, Number(body.stock));
-      } catch (stockErr: any) {
-        this.logger.warn(`Failed to update stock for product ${targetProductId}: ${stockErr.message}`);
-      }
-    }
-
+    const stock = body.stock !== undefined && !isNaN(Number(body.stock)) ? Number(body.stock) : undefined;
     const imageInputs = this.parseImageInputs(body);
 
     // 1. Capture existing images before update for Cloudinary asset lifecycle
@@ -254,18 +300,29 @@ export class ProductsService {
       ? await this.productsRepo.findProductImages(targetProductId)
       : [];
 
-    // 2. Perform DB update
-    const updated = await this.productsRepo.update(
-      targetProductId,
-      {
+    if (body.categoryId) {
+      const cat = await this.productsRepo.findCategoryById(BigInt(body.categoryId), existing.storeId);
+      if (!cat) {
+        throw new BadRequestException('Danh mục không tồn tại hoặc không thuộc cửa hàng này');
+      }
+    }
+
+    // 2. Perform Atomic DB update (Product, Inventory, Price History, and Images in single transaction)
+    const updated = await this.productsRepo.updateProductAtomicTx({
+      productId: targetProductId,
+      storeId: existing.storeId,
+      data: {
         ...(finalProductName ? { productName: finalProductName } : {}),
         ...(brand ? { brand } : {}),
         ...(finalPrice !== undefined ? { basePrice: finalPrice } : {}),
         ...(status ? { status } : {}),
         ...(description !== undefined ? { description } : {}),
+        ...(body.categoryId ? { categoryId: BigInt(body.categoryId) } : {}),
       },
-      imageInputs,
-    );
+      images: imageInputs,
+      priceHistory,
+      stock,
+    });
 
     // 3. Cloudinary Asset Lifecycle: Destroy removed store assets if reference count is 0
     if (imageInputs !== undefined && oldImages.length > 0) {
@@ -307,6 +364,7 @@ export class ProductsService {
       product: formatted,
       storeId: existing.storeId.toString(),
     });
+    await this.invalidateProductCaches(existing.storeId);
     return formatted;
   }
 
@@ -360,6 +418,7 @@ export class ProductsService {
       availableStock: stock,
     });
 
+    await this.invalidateProductCaches(existing.storeId);
     return res;
   }
 
@@ -409,4 +468,97 @@ export class ProductsService {
       };
     });
   }
+
+  async remove(id: string | number | bigint, user?: any) {
+    const targetProductId = BigInt(id);
+    const hasActive = await this.productsRepo.hasActiveOrders(targetProductId);
+    if (hasActive) {
+      throw new BadRequestException({
+        success: false,
+        code: 'PRODUCT_HAS_ACTIVE_ORDERS',
+        message: 'Không thể ngừng kinh doanh hoặc xóa sản phẩm đang có đơn hàng xử lý.',
+      });
+    }
+    return this.update(id, { status: 'INACTIVE' }, user);
+  }
+
+  async getPriceHistory(productIdStr: string, query?: PaginationQueryDto, user?: any) {
+    const productId = BigInt(productIdStr);
+    const existing = await this.productsRepo.findStoreIdOnly(productId);
+    if (!existing) {
+      throw new NotFoundException('Sản phẩm không tồn tại');
+    }
+    if (user && !['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user.role)) {
+      if (!user.storeId || BigInt(user.storeId) !== existing.storeId) {
+        throw new ForbiddenException({
+          success: false,
+          code: 'ACCESS_DENIED',
+          message: 'Bạn không có quyền xem lịch sử giá của cửa hàng khác.',
+        });
+      }
+    }
+    const result = await this.productsRepo.findPriceHistory(productId, {
+      page: query?.page ? Number(query.page) : 1,
+      pageSize: query?.pageSize ? Number(query.pageSize) : 20,
+    });
+    return {
+      items: result.items.map((h) => PriceHistoryResponseDto.fromEntity(h)),
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+    };
+  }
+
+  async getStoreInventory(storeIdStr: string, query?: PaginationQueryDto, user?: any) {
+    const storeId = BigInt(storeIdStr);
+    if (user && !['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user.role)) {
+      if (!user.storeId || BigInt(user.storeId) !== storeId) {
+        throw new ForbiddenException({
+          success: false,
+          code: 'ACCESS_DENIED',
+          message: 'Bạn không có quyền xem kho hàng của cửa hàng khác.',
+        });
+      }
+    }
+
+    const result = await this.productsRepo.findStoreInventory(storeId, {
+      page: query?.page ? Number(query.page) : 1,
+      pageSize: query?.pageSize ? Number(query.pageSize) : 20,
+      lowStockOnly: false,
+    });
+
+    return {
+      items: result.items.map((i) => InventoryResponseDto.fromEntity(i)),
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+    };
+  }
+
+  async getStoreLowStockInventory(storeIdStr: string, query?: PaginationQueryDto, user?: any) {
+    const storeId = BigInt(storeIdStr);
+    if (user && !['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user.role)) {
+      if (!user.storeId || BigInt(user.storeId) !== storeId) {
+        throw new ForbiddenException({
+          success: false,
+          code: 'ACCESS_DENIED',
+          message: 'Bạn không có quyền xem cảnh báo tồn kho của cửa hàng khác.',
+        });
+      }
+    }
+
+    const result = await this.productsRepo.findStoreInventory(storeId, {
+      page: query?.page ? Number(query.page) : 1,
+      pageSize: query?.pageSize ? Number(query.pageSize) : 20,
+      lowStockOnly: true,
+    });
+
+    return {
+      items: result.items.map((i) => InventoryResponseDto.fromEntity(i)),
+      total: result.total,
+      page: result.page,
+      pageSize: result.pageSize,
+    };
+  }
 }
+

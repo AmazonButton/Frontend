@@ -31,7 +31,9 @@ import {
   Plus,
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
+import { QRCodeSVG } from 'qrcode.react';
 import { useAuth } from '../../context/AuthContext';
+import { api } from '../../services/api';
 import { toast } from '../../context/ToastContext';
 import {
   rentalsService,
@@ -65,12 +67,27 @@ export const CustomerRentalsPage: React.FC = () => {
   const [recipientName, setRecipientName] = useState(user?.fullName || '');
   const [recipientPhone, setRecipientPhone] = useState(user?.phone || '');
   const [note, setNote] = useState('');
-  const [paymentMethod, setPaymentMethod] = useState<'PAYOS' | 'COD'>('PAYOS');
+  const [paymentMethod, setPaymentMethod] = useState<'PAYOS' | 'COD' | 'CASH_STORE'>('PAYOS');
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Payment confirmation modal for pending contracts
   const [payingContract, setPayingContract] = useState<CustomerRentalContract | null>(null);
   const [isProcessingPayment, setIsProcessingPayment] = useState(false);
+
+  // 8.1 Cash Voucher & Store selection states
+  const [storesList, setStoresList] = useState<any[]>([]);
+  const [collectingStoreId, setCollectingStoreId] = useState('');
+  const [cashVoucherTarget, setCashVoucherTarget] = useState<CustomerRentalContract | null>(null);
+  const [cashVoucherData, setCashVoucherData] = useState<any | null>(null);
+  const [issuingVoucher, setIssuingVoucher] = useState(false);
+
+  // 8.4 Rental Detail & Extension states
+  const [detailContract, setDetailContract] = useState<any | null>(null);
+  const [loadingDetail, setLoadingDetail] = useState(false);
+  const [extendingContract, setExtendingContract] = useState<CustomerRentalContract | null>(null);
+  const [extensionMonths, setExtensionMonths] = useState<number>(3);
+  const [submittingExtension, setSubmittingExtension] = useState(false);
+  const [extensionResult, setExtensionResult] = useState<any | null>(null);
 
   // Cancel contract before handover modal state
   const [cancellingContract, setCancellingContract] = useState<CustomerRentalContract | null>(null);
@@ -105,6 +122,14 @@ export const CustomerRentalsPage: React.FC = () => {
 
   useEffect(() => {
     fetchData();
+    api.get('/stores').then((res) => {
+      const list = Array.isArray(res.data?.data) ? res.data.data : [];
+      const active = list.filter((s: any) => s.status === 'ACTIVE');
+      setStoresList(active);
+      if (active[0] && !collectingStoreId) {
+        setCollectingStoreId(String(active[0].storeId || active[0].id));
+      }
+    }).catch(() => {});
 
     const unsub = subscribeRentalChannelEvents({
       onRentalPackageCreated: (_data) => {
@@ -229,6 +254,9 @@ export const CustomerRentalsPage: React.FC = () => {
 
       if (createdContract && paymentMethod === 'PAYOS') {
         setPayingContract(createdContract);
+      } else if (createdContract && paymentMethod === 'CASH_STORE') {
+        setCashVoucherTarget(createdContract);
+        setCashVoucherData(null);
       }
     } catch (err: any) {
       toast.error(err.response?.data?.message || err.message || 'Không thể tạo hợp đồng thuê nút.');
@@ -311,6 +339,72 @@ export const CustomerRentalsPage: React.FC = () => {
       toast.error(err?.response?.data?.message || err?.message || 'Không thể gửi yêu cầu trả nút lúc này.');
     } finally {
       setReturningId(null);
+    }
+  };
+
+  // 8.1 Issue Cash Voucher QR at chosen Store
+  const handleIssueCashVoucher = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!cashVoucherTarget || !collectingStoreId) {
+      toast.error('Vui lòng chọn cửa hàng bạn muốn đến nộp tiền mặt.');
+      return;
+    }
+    const rentalId = String(cashVoucherTarget.rentalId || cashVoucherTarget.id);
+    setIssuingVoucher(true);
+    try {
+      let chargeId = (cashVoucherTarget as any).chargeId || (cashVoucherTarget as any).initialChargeId || (cashVoucherTarget as any).payments?.[0]?.chargeId;
+      if (!chargeId) {
+        const payReq = await api.post(`/rentals/${encodeURIComponent(rentalId)}/payment-requests`, {}, {
+          headers: { 'Idempotency-Key': typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function' ? crypto.randomUUID() : `pr-${Date.now()}` },
+        }).catch(() => null);
+        chargeId = payReq?.data?.data?.chargeId || payReq?.data?.chargeId;
+      }
+      if (!chargeId) {
+        const detail = await rentalsService.getRentalDetail(rentalId).catch(() => null);
+        chargeId = detail?.chargeId || detail?.initialChargeId || detail?.payments?.[0]?.chargeId;
+      }
+      const res = await rentalsService.issueCashVoucher(rentalId, {
+        chargeId: String(chargeId || rentalId),
+        collectingStoreId: String(collectingStoreId),
+      });
+      setCashVoucherData(res);
+      toast.success('Đã tạo phiếu nộp tiền mặt (QR Cash Voucher)!');
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Không thể tạo phiếu nộp tiền mặt tại cửa hàng.');
+    } finally {
+      setIssuingVoucher(false);
+    }
+  };
+
+  // 8.4 Open Rental Detail & Extension Modal
+  const handleOpenRentalDetail = async (contract: CustomerRentalContract) => {
+    const rentalId = String(contract.rentalId || contract.id);
+    setDetailContract(contract);
+    setLoadingDetail(true);
+    try {
+      const fresh = await rentalsService.getRentalDetail(rentalId);
+      setDetailContract(fresh);
+    } catch {
+      // keep summary contract
+    } finally {
+      setLoadingDetail(false);
+    }
+  };
+
+  const handleConfirmExtension = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!extendingContract) return;
+    const rentalId = String(extendingContract.rentalId || extendingContract.id);
+    setSubmittingExtension(true);
+    try {
+      const res = await rentalsService.extendRental(rentalId, extensionMonths);
+      setExtensionResult(res);
+      toast.success(res?.message || `Đã tạo yêu cầu gia hạn thêm ${extensionMonths} tháng!`);
+      await fetchData();
+    } catch (err: any) {
+      toast.error(err?.response?.data?.message || err?.message || 'Không thể tạo yêu cầu gia hạn hợp đồng.');
+    } finally {
+      setSubmittingExtension(false);
     }
   };
 
@@ -814,15 +908,52 @@ export const CustomerRentalsPage: React.FC = () => {
                       {/* Action buttons */}
                       <div className="flex flex-wrap items-center gap-2 pt-2 border-t border-slate-100 dark:border-zinc-800/80">
                         {isPending && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => setPayingContract(contract)}
+                              className="flex-1 min-w-[140px] py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                            >
+                              <CreditCard className="w-3.5 h-3.5" />
+                              <span>Thanh Toán QR ({Number(contract.totalRentAmount || 0).toLocaleString('vi-VN')} ₫)</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setCashVoucherTarget(contract);
+                                setCashVoucherData(null);
+                              }}
+                              className="py-2 px-3 rounded-xl border border-emerald-200 bg-emerald-50 hover:bg-emerald-100 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300 font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                            >
+                              <QrCode className="w-3.5 h-3.5" />
+                              <span>Nộp tiền mặt tại quầy</span>
+                            </button>
+                          </>
+                        )}
+
+                        {['ACTIVE', 'EXPIRED', 'PENDING_HANDOVER'].includes(String(contract.status || '').toUpperCase()) && (
                           <button
                             type="button"
-                            onClick={() => setPayingContract(contract)}
-                            className="flex-1 min-w-[160px] py-2 px-3 rounded-xl bg-amber-500 hover:bg-amber-600 text-white font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer shadow-xs"
+                            onClick={() => {
+                              setExtendingContract(contract);
+                              setExtensionMonths(3);
+                              setExtensionResult(null);
+                            }}
+                            className="py-2 px-3 rounded-xl border border-[#0E6BA8]/30 bg-sky-50 hover:bg-sky-100 text-[#0E6BA8] dark:border-sky-800 dark:bg-sky-950/30 dark:text-sky-300 font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
                           >
-                            <CreditCard className="w-3.5 h-3.5" />
-                            <span>Thanh Toán Ngay ({Number(contract.totalRentAmount || 0).toLocaleString('vi-VN')} ₫)</span>
+                            <Calendar className="w-3.5 h-3.5" />
+                            <span>Gia hạn thuê</span>
                           </button>
                         )}
+
+                        <button
+                          type="button"
+                          onClick={() => void handleOpenRentalDetail(contract)}
+                          className="py-2 px-3 rounded-xl border border-slate-200 hover:bg-slate-50 text-slate-700 dark:border-zinc-700 dark:text-zinc-200 dark:hover:bg-zinc-800 font-semibold text-xs transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                        >
+                          <Layers className="w-3.5 h-3.5" />
+                          <span>Chi tiết nút & hạn</span>
+                        </button>
 
                         {canCancelBeforeHandover && (
                           <button
@@ -1018,7 +1149,7 @@ export const CustomerRentalsPage: React.FC = () => {
                   <p className="text-[11px] font-bold uppercase tracking-wider text-slate-400 dark:text-zinc-500 font-mono">
                     HÌNH THỨC THANH TOÁN:
                   </p>
-                  <div className="grid grid-cols-2 gap-2.5">
+                  <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
                     <button
                       type="button"
                       onClick={() => setPaymentMethod('PAYOS')}
@@ -1032,6 +1163,22 @@ export const CustomerRentalsPage: React.FC = () => {
                       <div>
                         <span className="block text-xs font-bold">Chuyển khoản QR</span>
                         <span className="block text-[10px] text-slate-400">VietQR / PayOS tự động</span>
+                      </div>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => setPaymentMethod('CASH_STORE')}
+                      className={`p-3 rounded-2xl border text-left flex items-start gap-2.5 transition-all cursor-pointer ${
+                        paymentMethod === 'CASH_STORE'
+                          ? 'border-emerald-600 bg-emerald-500/10 text-slate-900 dark:text-white font-semibold'
+                          : 'border-slate-200 dark:border-zinc-800 text-slate-600 dark:text-zinc-400'
+                      }`}
+                    >
+                      <QrCode className="w-4 h-4 text-emerald-600 shrink-0 mt-0.5" />
+                      <div>
+                        <span className="block text-xs font-bold">Tiền mặt tại quầy</span>
+                        <span className="block text-[10px] text-slate-400">Xuất QR Cash Voucher</span>
                       </div>
                     </button>
 
@@ -1173,6 +1320,20 @@ export const CustomerRentalsPage: React.FC = () => {
 
                 <button
                   type="button"
+                  onClick={() => {
+                    const target = payingContract;
+                    setPayingContract(null);
+                    setCashVoucherTarget(target);
+                    setCashVoucherData(null);
+                  }}
+                  className="w-full py-2.5 px-4 rounded-2xl border border-[#0E6BA8]/30 bg-sky-50 hover:bg-sky-100 text-[#0E6BA8] font-semibold text-xs flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <QrCode className="w-4 h-4" />
+                  <span>Đổi sang Nộp tiền mặt tại Cửa hàng (QR Cash Voucher)</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={() => setPayingContract(null)}
                   className="w-full py-2.5 text-xs text-slate-500 hover:text-slate-700 dark:text-zinc-400 dark:hover:text-zinc-200 cursor-pointer"
                 >
@@ -1262,6 +1423,220 @@ export const CustomerRentalsPage: React.FC = () => {
           </div>
         )}
       </AnimatePresence>
+
+      {/* ========================================================================= */}
+      {/* 8.1 MODAL: PHIẾU NỘP TIỀN MẶT TẠI CỬA HÀNG (CASH VOUCHER QR)               */}
+      {/* ========================================================================= */}
+      {cashVoucherTarget && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-2xl space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <QrCode className="w-4 h-4 text-emerald-600" />
+                <span>Phiếu nộp tiền mặt (Cash Voucher)</span>
+              </h3>
+              <button type="button" onClick={() => setCashVoucherTarget(null)} className="w-7 h-7 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-500">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {!cashVoucherData ? (
+              <form onSubmit={handleIssueCashVoucher} className="space-y-4 text-xs">
+                <p className="text-slate-600 dark:text-zinc-300 leading-relaxed">
+                  Chọn cửa hàng bạn muốn đến nộp tiền mặt cho hợp đồng <strong>#{cashVoucherTarget.rentalCode}</strong>. Hệ thống sẽ tạo mã QR 1 lần để thu ngân cửa hàng quét và kích hoạt hợp đồng.
+                </p>
+                <label className="block font-semibold text-slate-700 dark:text-zinc-300">
+                  Cửa hàng thu hộ (collectingStoreId):
+                  <select
+                    required
+                    value={collectingStoreId}
+                    onChange={(e) => setCollectingStoreId(e.target.value)}
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 px-3 py-2.5 text-xs"
+                  >
+                    <option value="">-- Chọn cửa hàng --</option>
+                    {storesList.map((s) => (
+                      <option key={String(s.storeId || s.id)} value={String(s.storeId || s.id)}>
+                        {s.name} — {s.address || ''}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button type="button" onClick={() => setCashVoucherTarget(null)} className="px-4 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 text-xs font-semibold">
+                    Đóng
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={issuingVoucher || !collectingStoreId}
+                    className="px-4 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white text-xs font-semibold flex items-center gap-1.5"
+                  >
+                    {issuingVoucher && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    <span>Tạo mã QR Cash Voucher</span>
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="space-y-4 text-center text-xs">
+                <div className="mx-auto inline-flex p-3 rounded-2xl bg-white border border-slate-200 shadow-xs">
+                  <QRCodeSVG
+                    value={JSON.stringify({
+                      rentalId: cashVoucherData.rentalId,
+                      chargeId: cashVoucherData.chargeId,
+                      voucherToken: cashVoucherData.voucherToken,
+                    })}
+                    size={168}
+                  />
+                </div>
+                <div className="rounded-xl bg-slate-50 dark:bg-zinc-800/70 p-3 text-left space-y-1.5">
+                  <p>Số tiền cần nộp: <strong className="text-emerald-600">{Number(cashVoucherData.amount || 0).toLocaleString('vi-VN')} ₫</strong></p>
+                  <p>Mã hợp đồng: <strong>#{cashVoucherData.rentalId}</strong> · Charge: <strong>#{cashVoucherData.chargeId}</strong></p>
+                  <p>Cửa hàng thu hộ: <strong>{storesList.find((s) => String(s.storeId || s.id) === String(cashVoucherData.collectingStoreId))?.name || `Store #${cashVoucherData.collectingStoreId}`}</strong></p>
+                  <p>Hết hạn lúc: <strong>{cashVoucherData.expiresAt ? new Date(cashVoucherData.expiresAt).toLocaleString('vi-VN') : '—'}</strong></p>
+                  <div className="pt-1">
+                    <span className="text-[10px] text-slate-400 block">Mã Token (đưa thu ngân nhập nếu không quét QR):</span>
+                    <code className="block break-all rounded bg-white dark:bg-zinc-900 p-1.5 text-[10px] font-mono border border-slate-200 dark:border-zinc-700 mt-0.5">
+                      {cashVoucherData.voucherToken}
+                    </code>
+                  </div>
+                </div>
+                <div className="flex flex-wrap justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => { void fetchData(); setCashVoucherTarget(null); }}
+                    className="w-full py-2.5 rounded-xl bg-[#0E6BA8] text-white font-semibold text-xs"
+                  >
+                    Đã hiểu & Làm mới trạng thái hợp đồng
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 8.4 MODAL: CHI TIẾT NÚT TRONG HỢP ĐỒNG & CÔNG THỨC HẠN SỬ DỤNG            */}
+      {/* ========================================================================= */}
+      {detailContract && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-sm">
+          <div className="w-full max-w-lg max-h-[88vh] overflow-y-auto rounded-3xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-2xl space-y-4 text-xs">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white">
+                Chi tiết hợp đồng #{detailContract.rentalCode || detailContract.rentalId}
+              </h3>
+              <button type="button" onClick={() => setDetailContract(null)} className="w-7 h-7 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-500">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            {loadingDetail ? (
+              <p className="py-6 text-center text-slate-500">Đang tải chi tiết nút từ máy chủ...</p>
+            ) : (
+              <div className="space-y-3">
+                <div className="rounded-xl bg-slate-50 dark:bg-zinc-800/60 p-3.5 space-y-1.5">
+                  <p>Trạng thái: <strong>{detailContract.status}</strong></p>
+                  <p>Thời hạn hiệu lực (đã cộng kỳ dùng thử nếu có): <strong>{detailContract.effectiveExpiresAt ? new Date(detailContract.effectiveExpiresAt).toLocaleString('vi-VN') : (detailContract.endDate ? new Date(detailContract.endDate).toLocaleDateString('vi-VN') : 'Chưa kích hoạt')}</strong></p>
+                  <p>Tiền cọc giữ: <strong>{Number(detailContract.depositAmount || 0).toLocaleString('vi-VN')} ₫</strong></p>
+                </div>
+                <div className="space-y-1.5">
+                  <p className="font-semibold text-slate-700 dark:text-zinc-200">Danh sách nút bấm gắn trong hợp đồng ({detailContract.buttons?.length || 0}):</p>
+                  {Array.isArray(detailContract.buttons) && detailContract.buttons.length > 0 ? (
+                    <div className="divide-y divide-slate-100 dark:divide-zinc-800 rounded-xl border border-slate-200 dark:border-zinc-800">
+                      {detailContract.buttons.map((b: any) => (
+                        <div key={b.buttonId || b.buttonCode} className="p-2.5 flex items-center justify-between">
+                          <div>
+                            <span className="font-mono font-bold text-slate-900 dark:text-white">{b.deviceId || b.buttonCode || `#${b.buttonId}`}</span>
+                            <span className="ml-2 text-slate-500">{b.name || 'Smart Button'}</span>
+                          </div>
+                          <span className="px-2 py-0.5 rounded bg-slate-100 dark:bg-zinc-800 text-[10px] font-semibold">
+                            {b.inventoryState || b.status}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-slate-500">Chưa bàn giao mã nút cụ thể cho hợp đồng này.</p>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ========================================================================= */}
+      {/* 8.4 MODAL: GIA HẠN HỢP ĐỒNG THUÊ NÚT (POST /rentals/:id/extensions)       */}
+      {/* ========================================================================= */}
+      {extendingContract && (
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-3 sm:p-4 bg-slate-950/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-3xl border border-slate-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-2xl space-y-4 text-xs">
+            <div className="flex items-center justify-between border-b border-slate-100 dark:border-zinc-800 pb-3">
+              <h3 className="text-sm font-bold text-slate-900 dark:text-white flex items-center gap-2">
+                <Calendar className="w-4 h-4 text-[#0E6BA8]" />
+                <span>Gia hạn hợp đồng #{extendingContract.rentalCode}</span>
+              </h3>
+              <button type="button" onClick={() => setExtendingContract(null)} className="w-7 h-7 rounded-full bg-slate-100 dark:bg-zinc-800 flex items-center justify-center text-slate-500">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {!extensionResult ? (
+              <form onSubmit={handleConfirmExtension} className="space-y-4">
+                <label className="block font-semibold text-slate-700 dark:text-zinc-300">
+                  Số tháng gia hạn thêm (1 – 24 tháng):
+                  <input
+                    type="number"
+                    min={1}
+                    max={24}
+                    required
+                    value={extensionMonths}
+                    onChange={(e) => setExtensionMonths(Math.min(24, Math.max(1, Number(e.target.value) || 1)))}
+                    className="mt-1.5 w-full rounded-xl border border-slate-200 dark:border-zinc-700 bg-slate-50 dark:bg-zinc-800 px-3 py-2 text-xs"
+                  />
+                </label>
+                <div className="rounded-xl bg-slate-50 dark:bg-zinc-800/60 p-3 space-y-1">
+                  <p>Hạn cũ: <strong>{extendingContract.endDate ? new Date(extendingContract.endDate).toLocaleDateString('vi-VN') : '—'}</strong></p>
+                  <p>Hạn dự kiến mới: <strong className="text-emerald-600">{(() => {
+                    const base = extendingContract.endDate ? new Date(extendingContract.endDate) : new Date();
+                    const d = new Date(base.getTime());
+                    d.setMonth(d.getMonth() + extensionMonths);
+                    return d.toLocaleDateString('vi-VN');
+                  })()}</strong></p>
+                  <p>Phí dự kiến: <strong className="text-[#0E6BA8]">{(Number(extendingContract.package?.monthlyPrice || 0) * extensionMonths).toLocaleString('vi-VN')} ₫</strong></p>
+                </div>
+                <div className="flex justify-end gap-2">
+                  <button type="button" disabled={submittingExtension} onClick={() => setExtendingContract(null)} className="px-4 py-2 rounded-xl border border-slate-200 dark:border-zinc-700 font-semibold">
+                    Hủy
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={submittingExtension}
+                    className="px-4 py-2 rounded-xl bg-[#0E6BA8] hover:bg-[#0B5586] disabled:opacity-50 text-white font-semibold flex items-center gap-1.5"
+                  >
+                    {submittingExtension && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    <span>Tạo yêu cầu gia hạn</span>
+                  </button>
+                </div>
+              </form>
+            ) : (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/30 p-3.5 space-y-1 text-emerald-900 dark:text-emerald-200">
+                  <p className="font-bold">Đã tạo yêu cầu gia hạn {extensionResult.months} tháng!</p>
+                  <p>Mã yêu cầu thu phí: <strong>{extensionResult.chargeCode || `#${extensionResult.chargeId}`}</strong></p>
+                  <p>Tổng phí gia hạn: <strong>{Number(extensionResult.totalAmount || 0).toLocaleString('vi-VN')} ₫</strong></p>
+                  {extensionResult.message && <p className="text-[11px]">{extensionResult.message}</p>}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setExtendingContract(null)}
+                  className="w-full py-2.5 rounded-xl bg-[#0E6BA8] text-white font-semibold"
+                >
+                  Đóng & Cập nhật danh sách
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

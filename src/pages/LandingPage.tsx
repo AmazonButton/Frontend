@@ -195,9 +195,9 @@ export const LandingPage: React.FC = () => {
   const brandScrollRef = useRef<HTMLDivElement>(null);
   const catalogRequest = useRef(0);
 
-  const fetchStorefrontProducts = () => {
+  const fetchStorefrontProducts = (forceFresh = false) => {
     const request = ++catalogRequest.current;
-    api.get('/products/storefront/catalog')
+    api.get('/products/storefront/catalog', forceFresh ? { headers: { 'x-no-cache': '1' } } : undefined)
       .then(({ data }) => {
         if (request !== catalogRequest.current) return;
         const list = (data.data || []).map((p: any) => ({
@@ -228,7 +228,7 @@ export const LandingPage: React.FC = () => {
 
     const socket = getSocket();
     const handleProductChange = () => {
-      fetchStorefrontProducts();
+      fetchStorefrontProducts(true);
     };
 
     return subscribeCatalogChanges(socket, handleProductChange);

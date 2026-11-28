@@ -47,6 +47,9 @@ interface FinanceTransport {
 }
 
 export function financeError(error: any, fallback = 'Chưa thể hoàn tất thao tác. Vui lòng thử lại.') {
+  if (error?.response?.status === 409 || error?.response?.data?.errorCode === 'CONFLICT' || error?.response?.data?.code === 'CONFLICT') {
+    return error?.response?.data?.message || 'Không thể xóa tài khoản ngân hàng đang vướng yêu cầu rút tiền, hoàn cọc hoặc nghĩa vụ hoàn tiền chưa tất toán (HTTP 409 Conflict).';
+  }
   const message = error?.response?.data?.message || error?.message;
   if (Array.isArray(message)) return message.filter(item => typeof item === 'string').join('. ') || fallback;
   return typeof message === 'string' && message.trim() ? message : fallback;

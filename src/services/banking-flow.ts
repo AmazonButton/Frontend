@@ -210,8 +210,15 @@ export function createBankingFlow(transport: BankingTransport) {
       return account;
     },
     async removeCustomerAccount(accountId: string) {
-      const result = data<{ success: boolean; message?: string }>(await transport.delete(`/customers/me/bank-accounts/${bankingId(accountId)}`));
-      if (result?.success !== true) throw new Error('Chưa xác nhận được kết quả xóa. Hãy tải lại danh sách để kiểm tra.');
+      try {
+        const result = data<{ success: boolean; message?: string }>(await transport.delete(`/customers/me/bank-accounts/${bankingId(accountId)}`));
+        if (result?.success !== true) throw new Error('Chưa xác nhận được kết quả xóa. Hãy tải lại danh sách để kiểm tra.');
+      } catch (err: any) {
+        if (err?.response?.status === 409 || err?.response?.data?.errorCode === 'CONFLICT' || err?.response?.data?.code === 'CONFLICT') {
+          throw new Error(err?.response?.data?.message || 'Không thể xóa tài khoản ngân hàng đang vướng yêu cầu rút tiền, hoàn cọc hoặc nghĩa vụ hoàn tiền chưa tất toán (HTTP 409 Conflict).');
+        }
+        throw err;
+      }
     },
     async initiateCustomerVerification(accountId: string) {
       const session = data<CustomerBankSession>(await transport.post(`/customers/me/bank-accounts/${bankingId(accountId)}/initiate-verification`, {}));

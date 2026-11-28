@@ -3,6 +3,7 @@ import {
   Post,
   Get,
   Patch,
+  Put,
   Body,
   Query,
   UseGuards,
@@ -12,6 +13,7 @@ import {
 } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
+import { LogoutJwtGuard } from './guards/logout-jwt.guard';
 import { AuthRateLimitGuard } from './guards/auth-rate-limit.guard';
 import {
   RegisterDto,
@@ -28,6 +30,7 @@ import { VerifyFirebasePhoneDto } from './dto/verify-firebase-phone.dto';
 import { RegisterByPhoneDto } from './dto/register-by-phone.dto';
 import { LoginByPhoneDto } from './dto/login-by-phone.dto';
 import { FirebasePhoneService } from './firebase-phone.service';
+import { ChangePasswordDto } from './dto/change-password.dto';
 
 @Controller('auth')
 export class AuthController {
@@ -46,10 +49,7 @@ export class AuthController {
   @HttpCode(200)
   @Post('google-login')
   googleLogin(@Body() body: GoogleLoginDto, @Request() req: any) {
-    const ip =
-      req.headers['x-forwarded-for']?.toString()?.split(',')[0]?.trim() ||
-      req.ip ||
-      req.connection?.remoteAddress;
+    const ip = req.ip || req.socket?.remoteAddress;
     const userAgent = req.headers['user-agent']?.toString();
     return this.authService.googleLogin(body, ip, userAgent);
   }
@@ -58,10 +58,7 @@ export class AuthController {
   @HttpCode(200)
   @Post('google')
   google(@Body() body: GoogleLoginDto, @Request() req: any) {
-    const ip =
-      req.headers['x-forwarded-for']?.toString()?.split(',')[0]?.trim() ||
-      req.ip ||
-      req.connection?.remoteAddress;
+    const ip = req.ip || req.socket?.remoteAddress;
     const userAgent = req.headers['user-agent']?.toString();
     return this.authService.googleLogin(body, ip, userAgent);
   }
@@ -70,10 +67,7 @@ export class AuthController {
   @HttpCode(200)
   @Post('login')
   login(@Body() body: LoginDto, @Request() req: any) {
-    const ip =
-      req.headers['x-forwarded-for']?.toString()?.split(',')[0]?.trim() ||
-      req.ip ||
-      req.connection?.remoteAddress;
+    const ip = req.ip || req.socket?.remoteAddress;
     const userAgent = req.headers['user-agent']?.toString();
     return this.authService.login(body, ip, userAgent);
   }
@@ -81,21 +75,18 @@ export class AuthController {
   @HttpCode(200)
   @Post('refresh')
   refresh(@Body() body: RefreshTokenDto, @Request() req: any) {
-    const ip =
-      req.headers['x-forwarded-for']?.toString()?.split(',')[0]?.trim() ||
-      req.ip ||
-      req.connection?.remoteAddress;
+    const ip = req.ip || req.socket?.remoteAddress;
     const userAgent = req.headers['user-agent']?.toString();
     return this.authService.refresh(body.refreshToken, ip, userAgent);
   }
 
+  @UseGuards(AuthRateLimitGuard, LogoutJwtGuard)
   @HttpCode(200)
   @Post('logout')
   async logout(@Request() req: any, @Body() body: { refreshToken?: string; fcmToken?: string }) {
     const authHeader = req.headers['authorization']?.toString();
     const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : undefined;
-    const userId = req.user?.id || req.user?.userId;
-    return this.authService.logout(userId, body?.refreshToken, accessToken, body?.fcmToken);
+    return this.authService.logout(req.user, body?.refreshToken, accessToken, body?.fcmToken);
   }
 
   @UseGuards(JwtAuthGuard)
@@ -116,6 +107,23 @@ export class AuthController {
   updateProfile(@Request() req: any, @Body() body: UpdateProfileDto) {
     const rawUserId = req.user?.id || req.user?.userId;
     return this.authService.updateProfile(rawUserId, body);
+  }
+
+  @UseGuards(JwtAuthGuard)
+  @Put('profile')
+  updateProfilePut(@Request() req: any, @Body() body: UpdateProfileDto) {
+    const rawUserId = req.user?.id || req.user?.userId;
+    return this.authService.updateProfile(rawUserId, body);
+  }
+
+  @UseGuards(JwtAuthGuard, AuthRateLimitGuard)
+  @HttpCode(200)
+  @Post('change-password')
+  changePassword(@Request() req: any, @Body() body: ChangePasswordDto) {
+    const rawUserId = req.user?.id || req.user?.userId;
+    const authHeader = req.headers['authorization']?.toString();
+    const accessToken = authHeader?.startsWith('Bearer ') ? authHeader.substring(7).trim() : undefined;
+    return this.authService.changePassword(rawUserId, body, accessToken);
   }
 
   @UseGuards(AuthRateLimitGuard)
@@ -188,7 +196,7 @@ export class AuthController {
   @HttpCode(200)
   @Post('login-by-phone')
   loginByPhone(@Body() dto: LoginByPhoneDto, @Request() req: any) {
-    const ip = req.headers['x-forwarded-for'] || req.socket?.remoteAddress;
+    const ip = req.ip || req.socket?.remoteAddress;
     const userAgent = req.headers['user-agent'];
     return this.authService.loginByPhone(dto, ip, userAgent);
   }

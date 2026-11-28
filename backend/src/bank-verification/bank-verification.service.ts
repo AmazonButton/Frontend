@@ -2,12 +2,14 @@ import {
   Injectable,
   Logger,
   Inject,
+  Optional,
   BadRequestException,
   ForbiddenException,
   NotFoundException,
-  OnModuleInit,
   HttpException,
+  OnModuleInit,
 } from '@nestjs/common';
+import * as crypto from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { BankVerificationRepository } from './bank-verification.repository';
 import {
@@ -19,16 +21,27 @@ import { CreateVerificationRequestDto } from './dto/create-verification-request.
 import { BankVerificationWebhookDto } from './dto/bank-verification-webhook.dto';
 import { VIETNAM_BANKS } from './constants/vietnam-banks.constant';
 import { CryptoVaultUtil } from '../common/utils/crypto-vault.util';
+import { PayOSPayoutService } from '../payments/payos-payout.service';
+import {
+  verifyPayosPayoutEvidence,
+  verifyPayosPayoutRejectionEvidence,
+  PayosPayoutExpectedCriteria,
+} from '../payments/payos-payout-verifier';
+import { signPaymentRequest, parsePayosDateTime } from '../payments/payos.helper';
 
 @Injectable()
 export class BankVerificationService implements OnModuleInit {
   private readonly logger = new Logger(BankVerificationService.name);
+  private readonly storeCheckoutUrls = new Map<string, string>();
 
   constructor(
     private readonly prisma: PrismaService,
     private readonly repository: BankVerificationRepository,
     @Inject(BANK_VERIFICATION_PROVIDER_TOKEN)
     private readonly provider: BankVerificationProvider,
+    @Optional()
+    @Inject(PayOSPayoutService)
+    private readonly payosPayoutService?: PayOSPayoutService,
   ) {}
 
   onModuleInit() {
@@ -64,6 +77,12 @@ export class BankVerificationService implements OnModuleInit {
           'FATAL: REDIS_URL or REDIS_HOST must be configured in production for distributed rate limiting',
         );
       }
+
+      if (!process.env.VIETQR_CLIENT_ID?.trim() || !process.env.VIETQR_API_KEY?.trim()) {
+        this.logger.warn(
+          '[onModuleInit] VIETQR_CLIENT_ID hoặc VIETQR_API_KEY chưa được cấu hình. Tính năng tra cứu tên chủ tài khoản ngân hàng (VietQR lookup) sẽ trả về HTTP 503 khi được gọi.',
+        );
+      }
     }
   }
 
@@ -77,38 +96,19 @@ export class BankVerificationService implements OnModuleInit {
   /**
    * Tra cứu tên chủ tài khoản ngân hàng (Lookup Account Name)
    */
-  async lookupBankAccount(dto: LookupBankAccountDto, userId?: bigint) {
+  async lookupBankAccount(dto: LookupBankAccountDto) {
     const bank = VIETNAM_BANKS.find((b) => b.bin === dto.bankBin);
     if (!bank) {
       throw new BadRequestException('Mã BIN ngân hàng không hợp lệ hoặc không được hỗ trợ');
     }
 
     const cleanAcc = dto.accountNumber.trim();
-    if (!/^[0-9a-zA-Z]{5,30}$/.test(cleanAcc)) {
-      throw new BadRequestException('Số tài khoản ngân hàng không hợp lệ');
-    }
-
-    let fallbackName: string | undefined;
-    if (userId) {
-      try {
-        const user = await this.prisma.user.findUnique({
-          where: { userId },
-          select: { fullName: true },
-        });
-        if (user?.fullName) {
-          fallbackName = user.fullName
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .replace(/đ/g, 'd')
-            .replace(/Đ/g, 'D')
-            .toUpperCase()
-            .trim();
-        }
-      } catch {}
+    if (!/^[0-9]{6,19}$/.test(cleanAcc)) {
+      throw new BadRequestException('Số tài khoản ngân hàng không hợp lệ (chỉ chứa chữ số, 6–19 ký tự)');
     }
 
     try {
-      const result = await this.provider.lookupAccount(dto.bankBin, cleanAcc, fallbackName);
+      const result = await this.provider.lookupAccount(dto.bankBin, cleanAcc);
       return {
         bankBin: dto.bankBin,
         bankName: result.bankName || bank.shortName,
@@ -120,9 +120,7 @@ export class BankVerificationService implements OnModuleInit {
       if (error instanceof HttpException) {
         throw error;
       }
-      throw new BadRequestException(
-        'Không thể xác minh tài khoản ngân hàng lúc này',
-      );
+      throw new BadRequestException('Không thể xác minh tài khoản ngân hàng lúc này');
     }
   }
 
@@ -150,8 +148,24 @@ export class BankVerificationService implements OnModuleInit {
     }
 
     // 3. Luôn gọi lookup từ provider để lấy accountName chính chủ, lấy bankName và bankCode từ danh sách server
-    const lookup = await this.provider.lookupAccount(dto.bankBin, cleanAcc);
-    const accountName = lookup.accountName;
+    let accountName: string;
+    try {
+      const lookup = await this.provider.lookupAccount(dto.bankBin, cleanAcc);
+      accountName = lookup.accountName;
+    } catch (lookupErr: any) {
+      // Point 3 Fix: Only fall back on ACCOUNT_NAME_UNRESOLVED (e.g. VietQR free-tier stopped).
+      // ALL other lookup errors (BANK_ACCOUNT_NOT_FOUND, INVALID_REQUEST_PARAMETERS, BANK_SYSTEM_BUSY, etc.)
+      // MUST be strictly rethrown! Client-provided dto.accountName is forbidden from bypassing legitimate lookup errors.
+      const errorCode = lookupErr?.response?.errorCode || lookupErr?.message;
+      if (errorCode === 'ACCOUNT_NAME_UNRESOLVED') {
+        this.logger.warn('[createVerificationRequest] VietQR code 47: account name unresolvable, falling through to 2.000đ penny verification path.');
+        accountName = dto.accountName?.trim()
+          ? dto.accountName.trim().toUpperCase()
+          : 'CHƯA_XÁC_THỰC';
+      } else {
+        throw lookupErr;
+      }
+    }
     const bankCode = bank.code;
     const bankName = bank.shortName || bank.name;
 
@@ -175,13 +189,96 @@ export class BankVerificationService implements OnModuleInit {
     const expiresAt = new Date(Date.now() + expiryMinutes * 60 * 1000);
     const referenceCode = CryptoVaultUtil.generateReferenceCode('VERIFY_');
 
+    // 5.1 Khởi tạo cổng thanh toán PayOS Payment Request nếu có cấu hình (Option 1)
+    const clientId = process.env.PAYOS_CLIENT_ID?.trim();
+    const apiKey = process.env.PAYOS_API_KEY?.trim();
+    const checksumKey = process.env.PAYOS_CHECKSUM_KEY?.trim();
+
+    let payosOrderCode: number | null = null;
+    let payosCheckoutUrl: string | null = null;
+    let payosQrCode: string | null = null;
+
+    if (clientId && apiKey && checksumKey) {
+      try {
+        const orderCodeNum = Math.floor(Date.now() / 1000) * 1000 + Math.floor(Math.random() * 1000);
+        const frontendOrigin = process.env.FRONTEND_URL || 'https://buttontdash.vercel.app';
+        const returnUrl = process.env.PAYOS_STORE_BANK_RETURN_URL || `${frontendOrigin}/store/finance?status=success`;
+        const cancelUrl = process.env.PAYOS_STORE_BANK_CANCEL_URL || `${frontendOrigin}/store/finance?status=cancelled`;
+        // Issue 7 Fix: PayOS non-integrated bank channel description limit is 9 chars.
+        // Store referenceCode (VERIFY_XXXX) is 11+ chars which exceeds the limit.
+        // Session identification now relies on stored DB IDs (orderCode/paymentLinkId), NOT description parsing (Issue 3 fix).
+        // Use compact description: 'S' + last 8 chars of referenceCode for <= 9 chars.
+        const description = `S${referenceCode.slice(-8)}`.slice(0, 9);
+
+        const signature = signPaymentRequest(
+          {
+            amount: expectedAmount,
+            cancelUrl,
+            description,
+            orderCode: orderCodeNum,
+            returnUrl,
+          },
+          checksumKey,
+        );
+
+        const abortController = new AbortController();
+        const timeoutHandle = setTimeout(() => abortController.abort(), 6000);
+
+        const response = await fetch('https://api-merchant.payos.vn/v2/payment-requests', {
+          method: 'POST',
+          headers: {
+            'x-client-id': clientId,
+            'x-api-key': apiKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            orderCode: orderCodeNum,
+            amount: expectedAmount,
+            description,
+            cancelUrl,
+            returnUrl,
+            signature,
+          }),
+          signal: abortController.signal,
+        });
+        clearTimeout(timeoutHandle);
+
+        const resData: any = await response.json();
+        if (resData?.code === '00' && resData?.data) {
+          payosOrderCode = orderCodeNum;
+          payosCheckoutUrl = resData.data.checkoutUrl || null;
+          payosQrCode = resData.data.qrCode || null;
+          if (payosCheckoutUrl) {
+            this.storeCheckoutUrls.set(referenceCode, payosCheckoutUrl);
+          }
+          this.logger.log(`Created PayOS payment request for Store verification ${referenceCode}, orderCode: ${payosOrderCode}`);
+        }
+      } catch (payosErr: any) {
+        this.logger.warn(`Could not create PayOS payment request for store verification: ${payosErr.message}`);
+      }
+    }
+
     // 6. Tạo giao dịch xác minh
     const transaction = await this.repository.createVerificationTransaction({
       bankAccountId: bankAccount.id,
       referenceCode,
       expectedAmount,
       expiresAt,
+      providerTransactionId: payosOrderCode ? payosOrderCode.toString() : undefined,
     });
+
+    if (payosCheckoutUrl) {
+      this.storeCheckoutUrls.set(transaction.id.toString(), payosCheckoutUrl);
+      this.storeCheckoutUrls.set(referenceCode, payosCheckoutUrl);
+    }
+
+    // Platform receiving bank info (destination for the penny deposit)
+    const recipientBankBin = process.env.PLATFORM_BANK_BIN || '970422';
+    const recipientBankName = process.env.PLATFORM_BANK_NAME || 'MBBank';
+    const recipientAccountNumber = process.env.PLATFORM_BANK_ACCOUNT_NUMBER || '0339898989';
+    const recipientAccountHolder = process.env.PLATFORM_BANK_ACCOUNT_HOLDER || 'CONG TY CP SMART ORDER';
+
+    const defaultQrUrl = `https://img.vietqr.io/image/${recipientBankBin}-${recipientAccountNumber}-compact2.png?amount=${expectedAmount}&addInfo=${encodeURIComponent(referenceCode)}&accountName=${encodeURIComponent(recipientAccountHolder)}`;
 
     return {
       verificationId: transaction.id.toString(),
@@ -192,7 +289,13 @@ export class BankVerificationService implements OnModuleInit {
       amount: expectedAmount,
       referenceCode,
       expiresAt: expiresAt.toISOString(),
-      instructions: `Vui lòng chuyển chính xác ${expectedAmount.toLocaleString()} VND với nội dung "${referenceCode}" để xác minh chính chủ. Số tiền sẽ được hoàn trả tự động sau khi xác minh thành công.`,
+      recipientBankBin,
+      recipientBankName,
+      recipientAccountNumber,
+      recipientAccountHolder,
+      qrCodeUrl: defaultQrUrl,
+      checkoutUrl: payosCheckoutUrl || undefined,
+      instructions: `Vui lòng chuyển chính xác ${expectedAmount.toLocaleString()} VND đến số tài khoản ${recipientAccountNumber} (${recipientBankName}) với nội dung "${referenceCode}" để xác minh chính chủ. Số tiền sẽ được hoàn trả tự động sau khi xác minh thành công.`,
     };
   }
 
@@ -324,63 +427,124 @@ export class BankVerificationService implements OnModuleInit {
   async handleVerificationWebhook(dto: BankVerificationWebhookDto) {
     let referenceCode = dto.referenceCode;
     let amount = dto.amount;
-    let providerTransactionId = dto.providerTransactionId;
+    let providerTransactionId = dto.data?.reference || dto.providerTransactionId;
     let description = dto.description || '';
-
-    // Handle PayOS nested webhook payload structure
-    if (dto.data) {
-      amount = amount || dto.data.amount;
-      description = description || dto.data.description || '';
-      providerTransactionId = providerTransactionId || dto.data.reference;
-    }
-
-    // Trích xuất referenceCode từ description nếu chưa có
-    if (!referenceCode && description) {
-      const match = description.match(/VERIFY_[A-Z0-9]{4,10}/i);
-      if (match) {
-        referenceCode = match[0].toUpperCase();
-      }
-    }
-
-    if (!referenceCode) {
-      this.logger.warn('Webhook ignored: missing reference code in transaction [operation: webhook]');
-      return {
-        success: false,
-        message: 'Nội dung giao dịch không chứa mã xác minh hợp lệ',
-      };
-    }
+    let destinationAccountNumber: string | undefined;
+    let destinationBankBin: string | undefined;
+    let senderAccountNumber: string | undefined;
+    let senderBankBin: string | undefined;
 
     // Fail-closed nếu thiếu providerTransactionId
     if (!providerTransactionId) {
       throw new BadRequestException('Missing provider transaction ID');
     }
 
+    // Handle PayOS nested webhook payload structure (Signed-Data Precedence)
+    if (dto.data) {
+      // P1 Fix: Reject tampered payloads where unsigned top-level fields conflict with signed data
+      if (dto.amount !== undefined && dto.data.amount !== undefined && Number(dto.amount) !== Number(dto.data.amount)) {
+        throw new BadRequestException('Dữ liệu webhook không nhất quán: top-level amount khác với signed data.amount');
+      }
+      if (dto.providerTransactionId && dto.data.reference && dto.providerTransactionId !== dto.data.reference) {
+        throw new BadRequestException('Dữ liệu webhook không nhất quán: top-level providerTransactionId khác với signed data.reference');
+      }
+
+      // Signed inner fields strictly take precedence over unsigned top-level fields
+      amount = dto.data.amount;
+      description = dto.data.description || '';
+      providerTransactionId = dto.data.reference;
+
+      // Fail-closed nếu thiếu providerTransactionId
+      if (!providerTransactionId) {
+        throw new BadRequestException('Missing provider transaction ID');
+      }
+
+      // Item A Fix: In PayOS signed data mode, resolve referenceCode STRICTLY from signed data fields.
+      let resolvedRef: string | null = null;
+      if (dto.data.orderCode) {
+        resolvedRef = await this.repository.findReferenceCodeByOrderCode(dto.data.orderCode);
+      }
+      if (!resolvedRef && description) {
+        const match = description.match(/VERIFY_[A-Z0-9]{4,10}/i);
+        if (match) {
+          resolvedRef = match[0].toUpperCase();
+        }
+      }
+      if (!resolvedRef && dto.data.paymentLinkId) {
+        resolvedRef = await this.repository.findReferenceCodeByOrderCode(dto.data.paymentLinkId);
+      }
+
+      // If unsigned top-level referenceCode was also provided, it must not contradict signed resolution
+      if (dto.referenceCode && resolvedRef && dto.referenceCode.toUpperCase() !== resolvedRef.toUpperCase()) {
+        throw new BadRequestException('Dữ liệu webhook không nhất quán: top-level referenceCode không khớp với signed session');
+      }
+
+      if (!resolvedRef) {
+        this.logger.warn(`[handleVerificationWebhook] Không thể giải quyết phiên xác minh từ dữ liệu chữ ký PayOS hợp lệ (orderCode: ${dto.data.orderCode}, desc: ${description})`);
+        return {
+          success: false,
+          message: 'Không tìm thấy phiên xác minh từ dữ liệu chữ ký PayOS hợp lệ',
+        };
+      }
+      referenceCode = resolvedRef;
+
+      // Sender and destination information STRICTLY from signed data fields, NO unauthenticated top-level envelope fallback
+      destinationAccountNumber =
+        dto.data.destinationAccountNumber ||
+        dto.data.accountNumber ||
+        dto.data.virtualAccountNumber;
+
+      destinationBankBin =
+        dto.data.destinationBankBin ||
+        dto.data.bin;
+
+      senderAccountNumber =
+        dto.data.counterAccountNumber ||
+        dto.data.senderAccountNumber;
+
+      senderBankBin =
+        dto.data.counterAccountBankId ||
+        dto.data.counterBankBin ||
+        dto.data.senderBankBin;
+
+      if (!destinationBankBin && process.env.PLATFORM_BANK_BIN) {
+        destinationBankBin = process.env.PLATFORM_BANK_BIN.trim();
+      }
+      if (!destinationAccountNumber && process.env.PLATFORM_BANK_ACCOUNT_NUMBER) {
+        destinationAccountNumber = process.env.PLATFORM_BANK_ACCOUNT_NUMBER.trim();
+      }
+    } else {
+      // Direct raw-body signed webhook where the entire top-level body is authenticated
+      if (!referenceCode && description) {
+        const match = description.match(/VERIFY_[A-Z0-9]{4,10}/i);
+        if (match) {
+          referenceCode = match[0].toUpperCase();
+        }
+      }
+
+      if (!referenceCode && providerTransactionId) {
+        const dbRef = await this.repository.findReferenceCodeByOrderCode(providerTransactionId);
+        if (dbRef) {
+          referenceCode = dbRef;
+          this.logger.log(`[handleVerificationWebhook] Resolved referenceCode=${referenceCode} from DB via providerTransactionId=${providerTransactionId}`);
+        }
+      }
+
+      if (!referenceCode) {
+        this.logger.warn('Webhook ignored: missing reference code in transaction [operation: webhook]');
+        return {
+          success: false,
+          message: 'Nội dung giao dịch không chứa mã xác minh hợp lệ',
+        };
+      }
+
+      destinationAccountNumber = dto.destinationAccountNumber;
+      destinationBankBin = dto.destinationBankBin;
+      senderAccountNumber = dto.senderAccountNumber || dto.counterAccountNumber;
+      senderBankBin = dto.senderBankBin || dto.counterBankBin;
+    }
+
     const receivedAmount = Number(amount || 0);
-
-    // Trích xuất thông tin tài khoản và BIN gửi / nhận để kiểm tra chéo
-    const destinationAccountNumber =
-      dto.destinationAccountNumber ||
-      dto.data?.destinationAccountNumber ||
-      dto.data?.accountNumber ||
-      dto.data?.virtualAccountNumber;
-
-    const destinationBankBin =
-      dto.destinationBankBin ||
-      dto.data?.destinationBankBin ||
-      dto.data?.bin;
-
-    const senderAccountNumber =
-      dto.senderAccountNumber ||
-      dto.counterAccountNumber ||
-      dto.data?.counterAccountNumber ||
-      dto.data?.senderAccountNumber;
-
-    const senderBankBin =
-      dto.senderBankBin ||
-      dto.counterBankBin ||
-      dto.data?.counterAccountBankId ||
-      dto.data?.counterBankBin ||
-      dto.data?.senderBankBin;
 
     // Thực thi transaction nguyên tử với SELECT ... FOR UPDATE
     const txResult = await this.repository.executeAtomicWebhookVerificationTx({
@@ -391,6 +555,7 @@ export class BankVerificationService implements OnModuleInit {
       senderBankBin,
       destinationAccountNumber,
       destinationBankBin,
+      orderCode: dto.data?.orderCode,
     });
 
     if (!txResult.success) {
@@ -424,20 +589,24 @@ export class BankVerificationService implements OnModuleInit {
     }
 
     if (txResult.alreadyProcessed) {
+      if (txResult.needsRefund && txResult.refundReference) {
+        await this.triggerAutomatedRefund(
+          txResult.transaction.id,
+          txResult.refundReference,
+        );
+      }
       return {
         success: true,
         message: 'Giao dịch đã được xác minh trước đó (Idempotent)',
       };
     }
 
-    // Hoàn tiền tự động ngay sau khi VERIFIED, lấy đúng số tiền từ transaction
-    if (txResult.bankAccount) {
-      const refundAmount = Number(
-        (txResult.transaction as any)?.expected_amount ||
-        (txResult.transaction as any)?.expectedAmount ||
-        2000,
+    // Hoàn tiền tự động ngay sau khi VERIFIED, hoặc khi retry mà nghĩa vụ chưa hoàn tất
+    if (txResult.needsRefund && txResult.refundReference) {
+      await this.triggerAutomatedRefund(
+        txResult.transaction.id,
+        txResult.refundReference,
       );
-      await this.triggerAutomatedRefund(txResult.transaction.id, txResult.bankAccount, refundAmount);
     }
 
     return {
@@ -447,55 +616,430 @@ export class BankVerificationService implements OnModuleInit {
   }
 
   /**
-   * Kích hoạt lệnh hoàn tiền tự động theo số tiền đã xác minh
+   * Kích hoạt lệnh hoàn tiền tự động từ snapshot của StoreBankRefundObligation đã claim.
+   * TUYỆT ĐỐI không lấy expected amount của phiên hay tài khoản Store đăng ký;
+   * BẮT BUỘC dispatch theo đúng refundAmount thực nhận và targetBankBin / targetAccountEncrypted của người gửi đã lưu trong obligation!
    */
-  async triggerAutomatedRefund(transactionId: bigint, bankAccount: any, refundAmount?: number) {
-    const amountToRefund = refundAmount || Number(process.env.BANK_VERIFICATION_AMOUNT_VND || 2000);
+  async triggerAutomatedRefund(
+    transactionId: bigint,
+    refundReference?: string,
+    bankAccountFallback?: any,
+    refundAmountFallback?: number,
+  ) {
+    const refundRef = refundReference || `REF_ST_${transactionId}`;
+
+    // Item D Fix: Store refund dual-path dispatch coordination.
+    // Webhook inline dispatch MUST participate in the obligation lease protocol to prevent
+    // competing dispatch ownership or conflicting state mutations with the scheduled worker.
+    const obligation = await this.prisma.storeBankRefundObligation.findFirst({
+      where: { refundReference: refundRef },
+      include: { receipt: true },
+    });
+
+    if (!obligation) {
+      this.logger.warn(`Không tìm thấy obligation hoàn tiền cho mã ref ${refundRef}`);
+      return;
+    }
+
+    // Point B Fix: Chỉ tự động chi hoàn khi obligation ở trạng thái PENDING_REFUND
+    // Nếu là PENDING_MANUAL_REFUND (ví dụ thiếu sender, sender masked, hoặc sai thông tin), TUYỆT ĐỐI không auto-dispatch!
+    if (obligation.refundStatus !== 'PENDING_REFUND') {
+      this.logger.log(`Obligation #${obligation.id} (${refundRef}) có status=${obligation.refundStatus}, không tự động chi.`);
+      return;
+    }
+
+    // Lấy thông tin đích hoàn tiền từ snapshot của obligation (người gửi thực tế)
+    const targetEncrypted = obligation.targetAccountEncrypted || obligation.receipt?.senderAccountNumberEncrypted;
+    const targetBin = obligation.targetBankBin || obligation.receipt?.senderBankBin;
+
+    if (!targetEncrypted || !targetBin) {
+      this.logger.warn(`Obligation #${obligation.id} (${refundRef}) thiếu thông tin tài khoản đích của người gửi, không thể tự động chi.`);
+      return;
+    }
+
+    const leaseToken = crypto.randomUUID();
+    const claimed = await this.repository.claimRefundObligationForDispatch(
+      obligation.id,
+      leaseToken,
+      60000,
+    );
+    if (!claimed) {
+      this.logger.log(`Obligation #${obligation.id} (${refundRef}) đã được worker claim hoặc đang xử lý`);
+      return;
+    }
+
+    const amountToRefund = Number(obligation.refundAmount);
+    let plainAccountNumber = '';
+    try {
+      plainAccountNumber = CryptoVaultUtil.decryptAccountNumber(targetEncrypted).trim();
+    } catch (e: any) {
+      await this.repository.recordObligationTerminalFailure(
+        obligation.id,
+        leaseToken,
+        null,
+        'Lỗi giải mã số tài khoản nhận tiền hoàn',
+      );
+      return;
+    }
+
+    if (!plainAccountNumber) {
+      await this.repository.recordObligationTerminalFailure(
+        obligation.id,
+        leaseToken,
+        null,
+        'Số tài khoản nhận tiền sau giải mã bị rỗng',
+      );
+      return;
+    }
+
     try {
       await this.repository.updateTransactionRefundStatus({
         transactionId,
         status: 'REFUND_PENDING',
-        refundStatus: 'PENDING',
+        refundStatus: 'PROCESSING',
       });
-
-      const plainAccountNumber = CryptoVaultUtil.decryptAccountNumber(
-        bankAccount.account_number_encrypted,
-      );
 
       const refundResult = await this.provider.createRefund({
-        bankBin: bankAccount.bank_bin,
+        bankBin: targetBin,
         accountNumber: plainAccountNumber,
-        accountName: bankAccount.account_name,
         amount: amountToRefund,
-        referenceId: `REFUND_${transactionId}`,
-        description: `Hoan tien xac minh tai khoan ${amountToRefund} VND`,
+        referenceId: refundRef,
+        description: `Hoan tien xac minh tai khoan ${amountToRefund} VND`.slice(0, 50),
       });
 
-      if (refundResult.status === 'SUCCESS') {
+      if (['SUCCESS', 'PENDING', 'PENDING_RECONCILIATION'].includes(refundResult.status)) {
         await this.repository.updateTransactionRefundStatus({
           transactionId,
-          status: 'REFUNDED',
-          refundStatus: 'SUCCESS',
+          status: 'REFUND_PENDING',
+          refundStatus: 'PROCESSING',
           refundTransactionId: refundResult.refundTransactionId,
-          refundedAt: new Date(),
         });
-        this.logger.log(`Hoàn tiền ${amountToRefund} VND thành công cho verificationId #${transactionId}`);
+        await this.repository.markObligationDispatchedByReference(
+          refundRef,
+          refundResult.refundTransactionId,
+        );
+        this.logger.log(`Lệnh hoàn tiền ${amountToRefund} VND đã gửi cho verificationId #${transactionId}, trạng thái PROCESSING/PENDING_RECONCILIATION`);
       } else {
+        await this.repository.recordObligationTerminalFailure(
+          obligation.id,
+          leaseToken,
+          null,
+          (refundResult as any).reason || refundResult.rawResponse?.desc || 'Hoàn tiền không thành công',
+        );
         await this.repository.updateTransactionRefundStatus({
           transactionId,
           status: 'REFUND_PENDING',
           refundStatus: 'FAILED',
         });
-        this.logger.error(`Hoan tien khong thanh cong [verificationId: #${transactionId}] [operation: createRefund]`);
+        this.logger.error(`Hoàn tiền không thành công [verificationId: #${transactionId}]`);
       }
     } catch (error: any) {
-      this.logger.error(`Hoan tien that bai [verificationId: #${transactionId}] [operation: createRefund]`);
+      this.logger.error(`Hoàn tiền thất bại [verificationId: #${transactionId}]: ${error?.message}`);
+      await this.repository.recordObligationReconciliationPending(
+        obligation.id,
+        leaseToken,
+        null,
+        error?.message || 'Error during inline dispatch',
+      );
       await this.repository.updateTransactionRefundStatus({
         transactionId,
         status: 'REFUND_PENDING',
         refundStatus: 'FAILED',
       });
     }
+  }
+
+  /**
+   * Worker xử lý các nghĩa vụ hoàn tiền xác minh Store đang chờ (Outbox Processor)
+   */
+  async processStoreRefundWorkerBatch(limit = 10): Promise<{ processed: number; succeeded: number; failed: number }> {
+    const obligations = await this.repository.findPendingStoreRefundObligations(limit);
+    let processed = 0;
+    let succeeded = 0;
+    let failed = 0;
+
+    for (const obligation of obligations) {
+      processed++;
+      const leaseToken = crypto.randomUUID();
+      const claimed = await this.repository.claimRefundObligationForDispatch(obligation.id, leaseToken, 60000);
+      if (!claimed) continue;
+
+      try {
+        let plainAcc = '';
+        if (obligation.target_account_encrypted) {
+          plainAcc = CryptoVaultUtil.decryptAccountNumber(obligation.target_account_encrypted).trim();
+        }
+
+        if (!plainAcc || !obligation.target_bank_bin) {
+          await this.repository.recordObligationTerminalFailure(
+            obligation.id,
+            leaseToken,
+            null,
+            'Thiếu số tài khoản hoặc BIN nhận tiền',
+          );
+          failed++;
+          continue;
+        }
+
+        // Invariant: Nếu obligation đã có attempt trước hoặc có payout_id/reference cũ,
+        // BẮT BUỘC tra cứu trước trên PayOS, không được tạo mới để chống chi kép (Double Payout)
+        if (Number(obligation.attempt_count) > 0 || obligation.provider_payout_id) {
+          let existingPayout: any = null;
+          let concretePayoutId = obligation.provider_payout_id ? String(obligation.provider_payout_id).trim() : null;
+          let lookupFailed = false;
+
+          if (this.payosPayoutService) {
+            try {
+              if (concretePayoutId) {
+                const pRes = await this.payosPayoutService.getPayout(concretePayoutId);
+                if (pRes?.data) existingPayout = pRes.data;
+              } else if (obligation.refund_reference) {
+                const listRes = await this.payosPayoutService.getPayouts({ referenceId: obligation.refund_reference });
+                const rawList = listRes?.data?.payouts || listRes?.data || [];
+                const matched = Array.isArray(rawList)
+                  ? rawList.filter((p: any) => p?.referenceId === obligation.refund_reference || p?.id === obligation.refund_reference)
+                  : [];
+                if (matched.length === 1 && matched[0]?.id) {
+                  concretePayoutId = String(matched[0].id).trim();
+                  const pRes = await this.payosPayoutService.getPayout(concretePayoutId);
+                  if (pRes?.data) existingPayout = pRes.data;
+                }
+              }
+            } catch (e: any) {
+              lookupFailed = true;
+              this.logger.warn(`Lỗi tra cứu attempt trước cho obligation #${obligation.id}: ${e.message}`);
+            }
+          }
+
+          if (existingPayout) {
+            const targetAccountHash =
+              obligation.target_account_hash ||
+              CryptoVaultUtil.computeDeterministicAccountHash(plainAcc);
+            const criteria: PayosPayoutExpectedCriteria = {
+              amount: Number(obligation.refund_amount),
+              payoutReference: obligation.refund_reference,
+              targetBankBin: obligation.target_bank_bin,
+              targetAccountHash,
+              expectedPayoutId: concretePayoutId || undefined,
+            };
+
+            const successVerif = verifyPayosPayoutEvidence(existingPayout, criteria);
+            if (successVerif.isVerified) {
+              await this.repository.finalizeObligationSuccessTx(obligation.id, leaseToken, successVerif.providerPayoutId);
+              succeeded++;
+              continue;
+            }
+
+            const rejectionVerif = verifyPayosPayoutRejectionEvidence(existingPayout, criteria);
+            if (rejectionVerif.isVerified) {
+              await this.repository.recordObligationTerminalFailure(
+                obligation.id,
+                leaseToken,
+                rejectionVerif.providerPayoutId,
+                rejectionVerif.reason || 'PayOS xác nhận chi hoàn tiền thất bại',
+              );
+              failed++;
+              continue;
+            }
+
+            // Đang xử lý hoặc chưa rõ kết quả -> Chuyển chờ đối soát kèm backoff
+            await this.repository.recordObligationReconciliationPending(
+              obligation.id,
+              leaseToken,
+              concretePayoutId,
+              'Cổng đang xử lý lệnh hoàn tiền (PROCESSING)',
+              60000,
+            );
+            failed++;
+            continue;
+          }
+
+          // NV-04: Prior attempt exists but payout lookup is inconclusive or failed.
+          // NEVER fall through to createRefund() to prevent duplicate payouts.
+          await this.repository.recordObligationReconciliationPending(
+            obligation.id,
+            leaseToken,
+            concretePayoutId,
+            lookupFailed ? 'PRIOR_ATTEMPT_LOOKUP_FAILED' : 'PRIOR_ATTEMPT_UNRESOLVED',
+            60000,
+          );
+          failed++;
+          continue;
+        }
+
+        const refundResult = await this.provider.createRefund({
+          bankBin: obligation.target_bank_bin,
+          accountNumber: plainAcc,
+          amount: Number(obligation.refund_amount),
+          referenceId: obligation.refund_reference,
+          description: `Hoan tien xac minh ${obligation.id}`.slice(0, 50),
+        });
+
+        // Bất kể code=00 hay nhận lệnh thành công, KHÔNG ghi nhận REFUNDED ngay
+        // Ghi nhận PENDING_RECONCILIATION để reconciler kiểm tra terminal evidence ngay lập tức
+        await this.repository.recordObligationReconciliationPending(
+          obligation.id,
+          leaseToken,
+          refundResult.refundTransactionId || null,
+          'PENDING_TERMINAL_RECONCILIATION',
+          0,
+        );
+        succeeded++;
+      } catch (err: any) {
+        this.logger.error(`Lỗi xử lý store refund obligation #${obligation.id}: ${err.message}`);
+        await this.repository.recordObligationReconciliationPending(
+          obligation.id,
+          leaseToken,
+          null,
+          err.message || 'Lỗi gửi lệnh hoàn tiền',
+        );
+        failed++;
+      }
+    }
+
+    return { processed, succeeded, failed };
+  }
+
+  /**
+   * Worker đối soát các nghĩa vụ hoàn tiền xác minh Store đang dở dang (Reconciler)
+   */
+  async reconcilePendingStoreRefunds(limit = 10): Promise<{ reconciled: number }> {
+    if (!this.payosPayoutService) return { reconciled: 0 };
+    const obligations = await this.repository.findPendingStoreReconciliations(limit);
+    let reconciled = 0;
+
+    for (const obligation of obligations) {
+      try {
+        let detailData: any = null;
+        let concretePayoutId = obligation.provider_payout_id ? String(obligation.provider_payout_id).trim() : null;
+
+        const scheduleBackoff = async (delayMs: number = 60000) => {
+          await this.prisma.$executeRaw`
+            UPDATE store_bank_refund_obligations
+            SET next_reconcile_at = NOW() + (${delayMs}::int * interval '1 millisecond'),
+                updated_at = NOW()
+            WHERE id = ${obligation.id}
+          `.catch(() => {});
+        };
+
+        if (concretePayoutId) {
+          try {
+            const detailRes = await this.payosPayoutService.getPayout(concretePayoutId);
+            if (detailRes?.data) detailData = detailRes.data;
+          } catch (e: any) {
+            await scheduleBackoff(60000);
+            continue;
+          }
+        } else if (obligation.refund_reference) {
+          try {
+            const listRes = await this.payosPayoutService.getPayouts({ referenceId: obligation.refund_reference });
+            const rawList = listRes?.data?.payouts || listRes?.data || [];
+            const matched = Array.isArray(rawList)
+              ? rawList.filter((p: any) => p?.referenceId === obligation.refund_reference || p?.id === obligation.refund_reference)
+              : [];
+            if (matched.length === 1 && matched[0]?.id) {
+              concretePayoutId = String(matched[0].id).trim();
+              const detailRes = await this.payosPayoutService.getPayout(concretePayoutId);
+              if (detailRes?.data) detailData = detailRes.data;
+            } else {
+              await scheduleBackoff(60000);
+              continue;
+            }
+          } catch (e: any) {
+            await scheduleBackoff(60000);
+            continue;
+          }
+        }
+
+        if (!detailData) {
+          await scheduleBackoff(60000);
+          continue;
+        }
+
+        let plainAcc = '';
+        if (obligation.target_account_encrypted) {
+          try {
+            plainAcc = CryptoVaultUtil.decryptAccountNumber(obligation.target_account_encrypted).trim();
+          } catch {}
+        }
+
+        const targetAccountHash =
+          obligation.target_account_hash ||
+          (plainAcc ? CryptoVaultUtil.computeDeterministicAccountHash(plainAcc) : null);
+
+        const criteria: PayosPayoutExpectedCriteria = {
+          amount: Number(obligation.refund_amount),
+          payoutReference: obligation.refund_reference,
+          targetBankBin: obligation.target_bank_bin,
+          targetAccountHash,
+          expectedPayoutId: concretePayoutId || undefined,
+        };
+
+        const successVerif = verifyPayosPayoutEvidence(detailData, criteria);
+        if (successVerif.isVerified) {
+          await this.prisma.$transaction(async (tx) => {
+            await tx.$executeRaw`
+              UPDATE store_bank_refund_obligations
+              SET refund_status = 'REFUNDED',
+                  provider_payout_id = ${successVerif.providerPayoutId},
+                  refunded_at = NOW(),
+                  updated_at = NOW()
+              WHERE id = ${obligation.id}
+            `;
+            await tx.$executeRaw`
+              UPDATE bank_account_verification_transactions
+              SET status = 'REFUNDED',
+                  refund_status = 'SUCCESS',
+                  refund_transaction_id = ${successVerif.providerPayoutId},
+                  refunded_at = NOW(),
+                  updated_at = NOW()
+              WHERE id = (
+                SELECT r.verification_tx_id 
+                FROM store_bank_inbound_receipts r 
+                WHERE r.id = ${obligation.receipt_id}
+              )
+            `;
+          });
+          reconciled++;
+          continue;
+        }
+
+        const rejectionVerif = verifyPayosPayoutRejectionEvidence(detailData, criteria);
+        if (rejectionVerif.isVerified) {
+          await this.prisma.$executeRaw`
+            UPDATE store_bank_refund_obligations
+            SET refund_status = 'FAILED',
+                failure_reason = ${rejectionVerif.reason || 'REJECTED'},
+                updated_at = NOW()
+            WHERE id = ${obligation.id}
+          `;
+          reconciled++;
+          continue;
+        }
+
+        // Chưa terminal (đang PROCESSING tại cổng) -> Cập nhật next_reconcile_at chống nghẽn hàng đợi (Anti-HoL)
+        const backoffMs = [60000, 120000, 300000, 900000, 1800000, 3600000][
+          Math.min(Number(obligation.attempt_count || 0), 5)
+        ];
+        await this.prisma.$executeRaw`
+          UPDATE store_bank_refund_obligations
+          SET next_reconcile_at = NOW() + (${backoffMs}::int * interval '1 millisecond'),
+              updated_at = NOW()
+          WHERE id = ${obligation.id}
+        `;
+      } catch (err: any) {
+        this.logger.warn(`Lỗi đối soát store refund obligation #${obligation.id}: ${err.message}`);
+        const backoffMs = 60000;
+        await this.prisma.$executeRaw`
+          UPDATE store_bank_refund_obligations
+          SET next_reconcile_at = NOW() + (${backoffMs}::int * interval '1 millisecond'),
+              updated_at = NOW()
+          WHERE id = ${obligation.id}
+        `.catch(() => {});
+      }
+    }
+
+    return { reconciled };
   }
 
   private async verifyStoreOwnership(userId: bigint, storeId: bigint, userRole?: string) {
@@ -507,15 +1051,215 @@ export class BankVerificationService implements OnModuleInit {
       throw new NotFoundException('Cửa hàng không tồn tại');
     }
 
-    const isOwner = store.ownerUserId === userId;
-    const isAdmin = userRole === 'ADMIN';
-
-    if (!isOwner && !isAdmin) {
-      throw new ForbiddenException(
-        'Chỉ chủ cửa hàng (STORE_OWNER) hoặc Quản trị viên (ADMIN) mới có quyền quản lý tài khoản ngân hàng',
-      );
+    const isAdmin = ['ADMIN', 'SUPER_ADMIN', 'SYSTEM_ADMIN'].includes(userRole || '');
+    if (isAdmin) {
+      return store;
     }
 
-    return store;
+    const isDirectOwner = store.ownerUserId === userId;
+    if (isDirectOwner) {
+      return store;
+    }
+
+    // Check if user is an active STORE_OWNER staff of this store
+    const staffOwner = await this.prisma.storeStaff.findFirst({
+      where: {
+        storeId,
+        userId,
+        status: 'ACTIVE',
+        leftAt: null,
+        role: {
+          roleCode: {
+            in: ['STORE_OWNER', 'OWNER'],
+          },
+        },
+      },
+    });
+
+    if (staffOwner) {
+      return store;
+    }
+
+    throw new ForbiddenException(
+      'Chỉ chủ cửa hàng (STORE_OWNER) hoặc Quản trị viên (ADMIN) mới có quyền quản lý tài khoản ngân hàng',
+    );
+  }
+
+  formatVerificationTransaction(tx: any) {
+    let masked = '******';
+    if (tx.bankAccount?.accountNumberEncrypted) {
+      try {
+        const plain = CryptoVaultUtil.decryptAccountNumber(tx.bankAccount.accountNumberEncrypted);
+        masked = CryptoVaultUtil.maskAccountNumber(plain);
+      } catch {
+        masked = '******';
+      }
+    }
+
+    const recipientBankBin = process.env.PLATFORM_BANK_BIN || '970422';
+    const recipientBankName = process.env.PLATFORM_BANK_NAME || 'MBBank';
+    const recipientAccountNumber = process.env.PLATFORM_BANK_ACCOUNT_NUMBER || '0339898989';
+    const recipientAccountHolder = process.env.PLATFORM_BANK_ACCOUNT_HOLDER || 'CONG TY CP SMART ORDER';
+    const expectedAmount = Number(tx.expectedAmount);
+    const referenceCode = tx.referenceCode;
+    const qrCodeUrl = `https://img.vietqr.io/image/${recipientBankBin}-${recipientAccountNumber}-compact2.png?amount=${expectedAmount}&addInfo=${encodeURIComponent(referenceCode)}&accountName=${encodeURIComponent(recipientAccountHolder)}`;
+    const instructions = `Vui lòng chuyển chính xác ${expectedAmount.toLocaleString()} VND đến số tài khoản ${recipientAccountNumber} (${recipientBankName}) với nội dung "${referenceCode}" để xác minh chính chủ. Số tiền sẽ được hoàn trả tự động sau khi xác minh thành công.`;
+    const actualAmount = tx.receivedAmount ? Number(tx.receivedAmount) : (tx.actualAmount ? Number(tx.actualAmount) : null);
+    const checkoutUrl =
+      this.storeCheckoutUrls.get(tx.id?.toString()) ||
+      this.storeCheckoutUrls.get(tx.referenceCode) ||
+      undefined;
+
+    return {
+      id: tx.id.toString(),
+      verificationId: tx.id.toString(),
+      bankAccountId: tx.bankAccountId.toString(),
+      storeId: tx.bankAccount?.storeId?.toString() || '',
+      bankBin: tx.bankAccount?.bankBin || '',
+      bankCode: tx.bankAccount?.bankCode || null,
+      bankName: tx.bankAccount?.bankName || '',
+      accountNumberMasked: masked,
+      accountName: tx.bankAccount?.accountName || '',
+      referenceCode,
+      expectedAmount,
+      actualAmount,
+      receivedAmount: actualAmount,
+      status: tx.status,
+      refundStatus: tx.refundStatus,
+      failureReason: tx.failureReason || null,
+      recipientBankBin,
+      recipientBankName,
+      recipientAccountNumber,
+      recipientAccountHolder,
+      qrCodeUrl,
+      checkoutUrl,
+      instructions,
+      expiresAt: tx.expiresAt,
+      verifiedAt: tx.verifiedAt || null,
+      createdAt: tx.createdAt,
+      updatedAt: tx.updatedAt,
+    };
+  }
+
+  async getVerificationTransactionById(id: bigint | string, userId: bigint, userRole?: string) {
+    const rawId = BigInt(id);
+    let tx = await this.repository.findVerificationTransactionById(rawId);
+    if (!tx) {
+      throw new NotFoundException('Giao dịch xác minh không tồn tại');
+    }
+
+    if (tx.bankAccount?.storeId) {
+      await this.verifyStoreOwnership(userId, tx.bankAccount.storeId, userRole);
+    }
+
+    // Active Fallback Query: Nếu tx đang PENDING và có providerTransactionId (PayOS orderCode)
+    if (tx.status === 'PENDING' && tx.providerTransactionId) {
+      const clientId = process.env.PAYOS_CLIENT_ID?.trim();
+      const apiKey = process.env.PAYOS_API_KEY?.trim();
+      if (clientId && apiKey) {
+        try {
+          const controller = new AbortController();
+          const timeout = setTimeout(() => controller.abort(), 8000);
+          const res = await fetch(
+            `https://api-merchant.payos.vn/v2/payment-requests/${tx.providerTransactionId}`,
+            {
+              method: 'GET',
+              headers: {
+                'x-client-id': clientId,
+                'x-api-key': apiKey,
+                'Content-Type': 'application/json',
+              },
+              signal: controller.signal,
+            },
+          );
+          clearTimeout(timeout);
+          if (res.ok) {
+            const payosData: any = await res.json();
+            if (payosData?.code === '00' && payosData?.data?.status === 'PAID') {
+              const data = payosData.data;
+              const txList = Array.isArray(data.transactions) ? data.transactions : [];
+
+              // Point 2 Fix: Process each real transaction in transactions[] without synthesizing fake amount/time/ref.
+              for (const realTx of txList) {
+                if (
+                  !realTx.reference ||
+                  typeof realTx.amount !== 'number' ||
+                  !Number.isInteger(realTx.amount) ||
+                  realTx.amount <= 0 ||
+                  !realTx.transactionDateTime
+                ) {
+                  this.logger.warn(
+                    `[getVerificationTransactionById] Bỏ qua realTx thiếu trường bắt buộc trong polling PayOS: ref=${realTx.reference}, amount=${realTx.amount}, dt=${realTx.transactionDateTime}`,
+                  );
+                  continue;
+                }
+
+                const webhookDto: BankVerificationWebhookDto = {
+                  code: '00',
+                  desc: 'success',
+                  referenceCode: tx.referenceCode,
+                  amount: realTx.amount,
+                  providerTransactionId: String(realTx.reference),
+                  description: realTx.description || tx.referenceCode,
+                  destinationAccountNumber: realTx.accountNumber || data.accountNumber || process.env.PLATFORM_BANK_ACCOUNT_NUMBER,
+                  destinationBankBin: data.bin || process.env.PLATFORM_BANK_BIN,
+                  senderAccountNumber: realTx.counterAccountNumber || undefined,
+                  senderBankBin: realTx.counterAccountBankId || undefined,
+                  data: {
+                    orderCode: Number(tx.providerTransactionId),
+                    amount: realTx.amount,
+                    description: realTx.description || tx.referenceCode,
+                    accountNumber: realTx.accountNumber || data.accountNumber || process.env.PLATFORM_BANK_ACCOUNT_NUMBER,
+                    reference: String(realTx.reference),
+                    transactionDateTime: realTx.transactionDateTime,
+                    counterAccountBankId: realTx.counterAccountBankId || undefined,
+                    counterAccountNumber: realTx.counterAccountNumber || undefined,
+                    counterAccountName: realTx.counterAccountName || undefined,
+                    bin: data.bin || process.env.PLATFORM_BANK_BIN,
+                  },
+                };
+                await this.handleVerificationWebhook(webhookDto);
+              }
+
+              const reloadedTx = await this.repository.findVerificationTransactionById(rawId);
+              if (reloadedTx) {
+                tx = reloadedTx;
+              }
+            }
+          }
+        } catch (e: any) {
+          this.logger.warn(`[getVerificationTransactionById] Active query PayOS error for tx ${tx.id}: ${e.message}`);
+        }
+      }
+    }
+
+    return this.formatVerificationTransaction(tx);
+  }
+
+  async listStoreVerificationTransactions(
+    storeId: bigint | string,
+    query: { page?: number; pageSize?: number; status?: string },
+    userId: bigint,
+    userRole?: string,
+  ) {
+    const rawStoreId = BigInt(storeId);
+    await this.verifyStoreOwnership(userId, rawStoreId, userRole);
+
+    const page = Math.max(1, Number(query.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(query.pageSize) || 20));
+    const skip = (page - 1) * pageSize;
+
+    const { total, items } = await this.repository.listVerificationTransactionsByStore(rawStoreId, {
+      skip,
+      take: pageSize,
+      status: query.status,
+    });
+
+    return {
+      items: items.map((tx) => this.formatVerificationTransaction(tx)),
+      total,
+      page,
+      pageSize,
+    };
   }
 }

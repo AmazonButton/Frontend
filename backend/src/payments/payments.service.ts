@@ -12,7 +12,14 @@ import {
 import { PaymentsRepository } from './payments.repository';
 import { CreatePaymentLinkDto, PayosWebhookDto } from './dto/payment.dto';
 import { signPaymentRequest, verifyWebhookSignature } from './payos.helper';
-import { Optional, Inject } from '@nestjs/common';
+import { Optional, Inject, forwardRef } from '@nestjs/common';
+import { BillingChargesService } from '../billing-charges/billing-charges.service';
+import { CustomerBankPennyVerificationService } from '../customers/customer-bank-penny-verification.service';
+import { BankVerificationService } from '../bank-verification/bank-verification.service';
+import { storeCashEnabled } from '../store-cash/store-cash-settlement.transaction';
+
+import { NotificationsService } from '../notifications/notifications.service';
+import { ChangePaymentMethodDto } from './dto/change-payment-method.dto';
 
 @Injectable()
 export class PaymentsService {
@@ -21,6 +28,10 @@ export class PaymentsService {
   constructor(
     private readonly paymentsRepo: PaymentsRepository,
     @Optional() @Inject(EventsGateway) private readonly eventsGateway?: EventsGateway,
+    @Optional() @Inject(NotificationsService) private readonly notificationsService?: NotificationsService,
+    @Optional() @Inject(forwardRef(() => BillingChargesService)) private readonly billingChargesService?: BillingChargesService,
+    @Optional() @Inject(forwardRef(() => CustomerBankPennyVerificationService)) private readonly customerBankPennyService?: CustomerBankPennyVerificationService,
+    @Optional() @Inject(forwardRef(() => BankVerificationService)) private readonly bankVerificationService?: BankVerificationService,
   ) {}
 
   async createPayosPaymentLink(dto: CreatePaymentLinkDto, userOrUserId?: any) {
@@ -62,15 +73,12 @@ export class PaymentsService {
             message: 'Tài xế chỉ có thể tạo liên kết thanh toán khi đơn hàng đang trong quá trình giao (SHIPPING)',
           });
         }
-      } else {
-        const isGuestOrder = !(order as any).customerId;
-        if (!isCustomerOwner && !isStoreOwner && !isStoreStaff && !isAdmin && !isGuestOrder) {
-          throw new ForbiddenException({
-            success: false,
-            code: 'ORDER_ACCESS_DENIED',
-            message: 'Bạn không có quyền tạo liên kết thanh toán cho đơn hàng này',
-          });
-        }
+      } else if (!isCustomerOwner && !isStoreOwner && !isStoreStaff && !isAdmin) {
+        throw new ForbiddenException({
+          success: false,
+          code: 'ORDER_ACCESS_DENIED',
+          message: 'Bạn không có quyền tạo liên kết thanh toán cho đơn hàng này',
+        });
       }
     }
 
@@ -193,7 +201,7 @@ export class PaymentsService {
     );
 
         // Support local test mock
-    if (process.env.PAYOS_MOCK_PAYMENT === 'true' || clientId === 'mock_client_id') {
+    if (process.env.PAYOS_MOCK_PAYMENT === 'true' || clientId === 'mock_client_id' || clientId?.startsWith('ci_test_')) {
       const mockPaymentLinkId = `mock_link_${orderCode}`;
       const mockCheckoutUrl = `https://pay.payos.vn/web/mock-${orderCode}`;
       const mockQrCode = `00020101021238540010A000000727012600069704220112${orderCode}`;
@@ -221,19 +229,6 @@ export class PaymentsService {
     }
 
     try {
-      const payosPayload: Record<string, any> = {
-        orderCode,
-        amount: orderAmount,
-        description,
-        cancelUrl,
-        returnUrl,
-        signature,
-      };
-      if (dto.buyerName) payosPayload.buyerName = dto.buyerName;
-      if (dto.buyerPhone) payosPayload.buyerPhone = dto.buyerPhone;
-      if (dto.buyerEmail) payosPayload.buyerEmail = dto.buyerEmail;
-      if (dto.buyerAddress) payosPayload.buyerAddress = dto.buyerAddress;
-
       const response = await fetch('https://api-merchant.payos.vn/v2/payment-requests', {
         method: 'POST',
         headers: {
@@ -241,7 +236,14 @@ export class PaymentsService {
           'x-client-id': clientId,
           'x-api-key': apiKey,
         },
-        body: JSON.stringify(payosPayload),
+        body: JSON.stringify({
+          orderCode,
+          amount: orderAmount,
+          description,
+          cancelUrl,
+          returnUrl,
+          signature,
+        }),
       });
 
       const result = await response.json();
@@ -331,18 +333,33 @@ export class PaymentsService {
     } catch (err: any) {
       if (err instanceof BadRequestException) throw err;
       this.logger.error(`PayOS request failed: ${err.message}`);
-      await this.paymentsRepo.updateTransactionStatus(transaction.paymentTransactionId, 'FAILED');
-      throw new InternalServerErrorException('L?i k?t n?i t?i c?ng thanh to�n PayOS');
+      // NV-12: Do NOT unilaterally mark transaction as FAILED on network/timeout errors.
+      throw new InternalServerErrorException('Lỗi kết nối tới cổng thanh toán PayOS');
     }
   }
 
   async handlePayosWebhook(body: PayosWebhookDto) {
+    // 1. PayOS Webhook URL confirmation handshake (sent when updating webhook URL on PayOS dashboard)
+    if ((body?.webhookUrl || (body as any)?.webhook_url) && !body?.data && !body?.signature) {
+      const confirmedUrl = body.webhookUrl || (body as any).webhook_url;
+      this.logger.log(`[PayOS Webhook] Acknowledged confirmation ping for webhookUrl: ${confirmedUrl}`);
+      return {
+        code: '00',
+        desc: 'success',
+        data: {
+          webhookUrl: confirmedUrl,
+        },
+      };
+    }
+
+    const { code, data, signature } = body || {};
+
+
     if (body?.success !== true) {
       this.logger.warn(`[PayOS Webhook] Rejected: body.success must be true, received: ${body?.success}`);
       return { success: false, message: 'Invalid webhook: success must be true' };
     }
 
-    const { code, data, signature } = body || {};
     const checksumKey = process.env.PAYOS_CHECKSUM_KEY?.trim() || '';
 
     if (!verifyWebhookSignature(data, signature, checksumKey)) {
@@ -354,6 +371,107 @@ export class PaymentsService {
     const transaction = await this.paymentsRepo.findTransactionByCode(orderCodeStr);
 
     if (!transaction) {
+      if (this.billingChargesService) {
+        const charge = await this.billingChargesService.findChargeByOrderCode(orderCodeStr, data?.paymentLinkId);
+        if (charge) {
+          if (code === '00' && data?.code === '00') {
+            const receiptLedgerEnabled = ['RENTAL_INITIAL', 'RENTAL_EXTENSION'].includes(charge.purpose);
+            if (!data?.amount || isNaN(Number(data.amount))) {
+              this.logger.warn('[PayOS Webhook] Missing or invalid mandatory field amount for charge');
+              return { success: false, message: 'Missing amount' };
+            }
+            if (data.currency?.toUpperCase() !== 'VND') {
+              this.logger.warn(`[PayOS Webhook] Invalid currency: ${data.currency} for charge: ${orderCodeStr}`);
+              return { success: false, message: 'Invalid currency' };
+            }
+            if (Number(data.amount) !== Number(charge.totalAmount) && !receiptLedgerEnabled) {
+              this.logger.warn(`[PayOS Webhook] Amount mismatch: webhook=${data.amount}, charge=${charge.totalAmount} for orderCode: ${orderCodeStr}`);
+              return { success: false, message: 'Amount mismatch' };
+            }
+            if (charge.status === 'PAID' && !receiptLedgerEnabled) {
+              return { success: true, message: 'Already processed' };
+            }
+            const recordedLinkId = charge.paymentLinkId;
+            if (receiptLedgerEnabled && (!data.reference || !recordedLinkId || data.paymentLinkId !== recordedLinkId)) {
+              throw new BadRequestException('Verified transaction reference and payment link binding are required');
+            }
+            if (recordedLinkId && data.paymentLinkId && recordedLinkId !== data.paymentLinkId) {
+              this.logger.warn(`[PayOS Webhook] Payment link ID mismatch for charge ${orderCodeStr}: recorded="${recordedLinkId}", received="${data.paymentLinkId}"`);
+              return { success: false, message: 'Payment link ID mismatch' };
+            }
+
+            const settlement: any = await this.billingChargesService.settleCharge(
+              charge.chargeId,
+              {
+                provider: 'PAYOS',
+                providerTransactionCode: (data.reference || orderCodeStr).toString(),
+                amount: Number(data.amount),
+                currency: data.currency.toUpperCase(),
+                paidAt: new Date(data.transactionDateTime || Date.now()),
+                verified: true,
+                paymentLinkId: data.paymentLinkId,
+              },
+              {
+                role: 'SYSTEM',
+              },
+            );
+
+            return {
+              success: true,
+              message: settlement.overpayment ? 'Payment recorded for reconciliation'
+                : settlement.alreadySettled ? 'Already processed' : 'Billing charge settled successfully',
+            };
+          }
+        }
+      }
+
+      const webhookDesc = data?.description || (body as any)?.description || '';
+      let isStoreVerification = /VERIFY_[A-Z0-9]{4,10}/i.test(webhookDesc);
+
+      // Nếu description không chứa VERIFY_, kiểm tra thêm xem orderCode có thuộc về giao dịch Store Verification không
+      if (!isStoreVerification && orderCodeStr) {
+        isStoreVerification = await this.paymentsRepo.isStoreVerificationTransaction(orderCodeStr);
+      }
+
+      // 1. Ưu tiên định tuyến trực tiếp vào Store Bank Verification nếu thuộc về Store
+      if (isStoreVerification && this.bankVerificationService) {
+        try {
+          const storeResult = await this.bankVerificationService.handleVerificationWebhook(body as any);
+          if (storeResult && (storeResult.success || (storeResult as any).code === '00')) {
+            this.logger.log(`[PayOS Webhook] Routed to BankVerificationService for description: ${webhookDesc}, orderCode: ${orderCodeStr}`);
+            return storeResult;
+          }
+        } catch (storeErr: any) {
+          this.logger.warn(`[PayOS Webhook] BankVerificationService routing failed: ${storeErr.message}`);
+        }
+      }
+
+      // 2. Thử định tuyến vào Customer Bank Penny Verification
+      if (this.customerBankPennyService) {
+        try {
+          const pennyResult = await this.customerBankPennyService.processPayosVerificationWebhook(body as any);
+          if (pennyResult && (pennyResult.success || pennyResult.code === '00') && !(pennyResult as any).notHandled) {
+            this.logger.log(`[PayOS Webhook] Routed to CustomerBankPennyVerificationService for orderCode: ${orderCodeStr}`);
+            return pennyResult;
+          }
+        } catch (pennyErr: any) {
+          this.logger.warn(`[PayOS Webhook] CustomerBankPennyVerificationService routing failed: ${pennyErr.message}`);
+        }
+      }
+
+      // 3. Fallback sang Store Bank Verification nếu Customer không xử lý
+      if (!isStoreVerification && this.bankVerificationService) {
+        try {
+          const storeResult = await this.bankVerificationService.handleVerificationWebhook(body as any);
+          if (storeResult && (storeResult.success || (storeResult as any).code === '00')) {
+            this.logger.log(`[PayOS Webhook] Fallback routed to BankVerificationService for orderCode: ${orderCodeStr}`);
+            return storeResult;
+          }
+        } catch (storeErr: any) {
+          this.logger.warn(`[PayOS Webhook] BankVerificationService fallback routing failed: ${storeErr.message}`);
+        }
+      }
+
       this.logger.warn(`[PayOS Webhook] Transaction not found for orderCode: ${orderCodeStr}`);
       return { success: false, message: 'Transaction not found' };
     }
@@ -410,7 +528,7 @@ export class PaymentsService {
       );
       this.logger.log(`[PayOS Webhook] Payment confirmed and marked as PAID (Escrow hold) for Order #${transaction.orderId} (Transaction #${transaction.paymentTransactionId})`);
 
-      if (this.eventsGateway && transaction.order) {
+      if (transaction.order) {
         const storeId = transaction.order.storeId ? transaction.order.storeId.toString() : '';
         const orderId = transaction.orderId ? transaction.orderId.toString() : '';
         const eventPayload = {
@@ -419,14 +537,46 @@ export class PaymentsService {
           amount: Number(transaction.amount),
           paymentTransactionId: transaction.paymentTransactionId.toString(),
         };
-        this.eventsGateway.emitToStore(storeId, 'ORDER_PAYMENT_CONFIRMED', eventPayload);
-        const assignedDriverId = (transaction.order as any)?.assignedDriverId;
-        if (assignedDriverId) {
-          this.eventsGateway.emitToDriver(
-            assignedDriverId.toString(),
-            'ORDER_PAYMENT_CONFIRMED',
-            eventPayload,
-          );
+
+        if (this.eventsGateway) {
+          this.eventsGateway.emitToStore(storeId, 'ORDER_PAYMENT_CONFIRMED', eventPayload);
+          const assignedDriverId = (transaction.order as any)?.assignedDriverId;
+          if (assignedDriverId) {
+            this.eventsGateway.emitToDriver(
+              assignedDriverId.toString(),
+              'ORDER_PAYMENT_CONFIRMED',
+              eventPayload,
+            );
+          }
+        }
+
+        // Post-commit: send FCM push notification to customer & emit customer websocket
+        const fullOrder = await this.paymentsRepo.findOrderById(transaction.orderId);
+        if (fullOrder && fullOrder.customer) {
+          const customerUserId = fullOrder.customer.userId;
+          const customerId = fullOrder.customer.customerId?.toString();
+
+          if (this.eventsGateway && customerId) {
+            this.eventsGateway.emitToCustomer(customerId, 'ORDER_PAYMENT_CONFIRMED', eventPayload);
+          }
+
+          if (this.notificationsService && customerUserId) {
+            const notifTitle = 'Thanh toán đơn hàng thành công';
+            const notifBody = `Đơn hàng #${orderCodeStr} đã thanh toán thành công qua PayOS với số tiền ${Number(transaction.amount).toLocaleString('vi-VN')} VND.`;
+            this.notificationsService
+              .sendPushToUser(customerUserId, {
+                title: notifTitle,
+                body: notifBody,
+                data: {
+                  orderId,
+                  orderCode: orderCodeStr,
+                  type: 'PAYMENT_SUCCESS',
+                },
+              })
+              .catch((err) => {
+                this.logger.error(`[PayOS Webhook] Failed to dispatch FCM push: ${err.message}`);
+              });
+          }
         }
       }
       return { success: true, message: 'Payment confirmed successfully' };
@@ -435,6 +585,68 @@ export class PaymentsService {
       this.logger.log(`[PayOS Webhook] Payment failed for Order #${transaction.orderId}`);
       return { success: true, message: 'Payment failed recorded' };
     }
+  }
+
+  /**
+   * Đổi phương thức thanh toán cho đơn hàng
+   * - BOLA: Kiểm tra order thuộc quyền sở hữu của user
+   * - Chỉ cho đổi khi order còn PENDING và paymentStatus UNPAID
+   * - Hủy các transaction PENDING cũ và hủy link PayOS tương ứng nếu có
+   */
+  async changeOrderPaymentMethod(orderIdParam: string, dto: ChangePaymentMethodDto, user: any) {
+    if (!orderIdParam || !/^\d+$/.test(orderIdParam)) {
+      throw new BadRequestException('Mã đơn hàng không hợp lệ');
+    }
+    const orderId = BigInt(orderIdParam);
+
+    const existingOrder = await this.paymentsRepo.findOrderById(orderId);
+    if (!existingOrder) {
+      throw new NotFoundException('Không tìm thấy đơn hàng');
+    }
+
+    // Ownership check (Anti-BOLA/IDOR)
+    const isSuperAdmin = user.role === 'SUPER_ADMIN' || user.role === 'SYSTEM_ADMIN' || user.role === 'ADMIN';
+    const customerUserId = existingOrder.customer?.userId?.toString();
+    const requestUserId = (user.id || user.userId)?.toString();
+
+    if (!isSuperAdmin && (!customerUserId || customerUserId !== requestUserId)) {
+      throw new ForbiddenException('Bạn không có quyền thay đổi phương thức thanh toán của đơn hàng này');
+    }
+
+    if (existingOrder.paymentStatus === 'PAID') {
+      throw new BadRequestException('Không thể đổi phương thức thanh toán cho đơn hàng đã thanh toán');
+    }
+
+    const terminalStatuses = ['CONFIRMED', 'COMPLETED', 'CANCELLED', 'REJECTED'];
+    if (terminalStatuses.includes(existingOrder.orderStatus) || existingOrder.orderStatus !== 'PENDING') {
+      throw new BadRequestException(`Không thể đổi phương thức thanh toán khi đơn hàng đang ở trạng thái ${existingOrder.orderStatus}`);
+    }
+
+    // Hủy các pending payment transaction cũ nếu có
+    const pendingTransactions = await this.paymentsRepo.findTransactionsByOrderId(orderId);
+    for (const tx of pendingTransactions) {
+      if (tx.status === 'PENDING' && tx.paymentLinkId) {
+        try {
+          await this.cancelPaymentLink(tx.paymentLinkId, 'Người dùng thay đổi phương thức thanh toán');
+        } catch (err: any) {
+          this.logger.warn(`Failed to cancel remote PayOS link ${tx.paymentLinkId}: ${err.message}`);
+        }
+      }
+    }
+
+    const updated = await this.paymentsRepo.changePaymentMethodTx(orderId, dto.paymentMethod);
+
+    return {
+      success: true,
+      message: 'Cập nhật phương thức thanh toán thành công',
+      data: {
+        orderId: updated.orderId.toString(),
+        orderCode: updated.orderCode,
+        paymentMethod: updated.paymentMethod,
+        orderStatus: updated.orderStatus,
+        paymentStatus: updated.paymentStatus,
+      },
+    };
   }
 
   async getTransaction(id: string, user?: any) {
@@ -473,14 +685,45 @@ export class PaymentsService {
     };
   }
 
-  async getPaymentLinkInformation(orderCodeOrId: number | string) {
+    private async verifyPaymentRequestOwnership(orderCodeOrId: number | string, user: any) {
+    if (!user) {
+      return;
+    }
+    if (['SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN'].includes(user.role)) {
+      return;
+    }
+    const tx: any = await this.paymentsRepo.findTransactionByPaymentLinkIdOrOrder(String(orderCodeOrId));
+    if (tx) {
+      const isCustomerOwner = tx.order?.customer?.userId && BigInt(tx.order.customer.userId) === BigInt(user.userId || user.id);
+      const isStoreOwner = user.storeId && tx.order?.storeId && BigInt(tx.order.storeId) === BigInt(user.storeId);
+      if (!isCustomerOwner && !isStoreOwner) {
+        throw new ForbiddenException('Bạn không có quyền truy cập hoặc thao tác yêu cầu thanh toán này');
+      }
+      return;
+    }
+
+    if (this.billingChargesService) {
+      const charge = await this.billingChargesService.findChargeByOrderCode(String(orderCodeOrId));
+      if (charge) {
+        await this.billingChargesService.getChargeById(charge.chargeId, user);
+        return;
+      }
+    }
+
+    throw new NotFoundException('Không tìm thấy thông tin giao dịch hoặc yêu cầu thanh toán trong hệ thống');
+  }
+
+  async getPaymentLinkInformation(orderCodeOrId: number | string, user?: any) {
+    if (user) {
+      await this.verifyPaymentRequestOwnership(orderCodeOrId, user);
+    }
     const clientId = process.env.PAYOS_CLIENT_ID?.trim();
     const apiKey = process.env.PAYOS_API_KEY?.trim();
     if (!clientId || !apiKey) {
       throw new InternalServerErrorException('PAYOS_CLIENT_ID or PAYOS_API_KEY missing');
     }
 
-    if (process.env.PAYOS_MOCK_PAYMENT === 'true' || clientId === 'mock_client_id') {
+    if (process.env.PAYOS_MOCK_PAYMENT === 'true' || clientId === 'mock_client_id' || clientId?.startsWith('ci_test_')) {
       return {
         code: '00',
         desc: 'success',
@@ -512,14 +755,17 @@ export class PaymentsService {
     }
   }
 
-  async cancelPaymentLink(orderCodeOrId: number | string, cancellationReason?: string) {
+  async cancelPaymentLink(orderCodeOrId: number | string, cancellationReason?: string, user?: any) {
+    if (user) {
+      await this.verifyPaymentRequestOwnership(orderCodeOrId, user);
+    }
     const clientId = process.env.PAYOS_CLIENT_ID?.trim();
     const apiKey = process.env.PAYOS_API_KEY?.trim();
     if (!clientId || !apiKey) {
       throw new InternalServerErrorException('PAYOS_CLIENT_ID or PAYOS_API_KEY missing');
     }
 
-    if (process.env.PAYOS_MOCK_PAYMENT === 'true' || clientId === 'mock_client_id') {
+    if (process.env.PAYOS_MOCK_PAYMENT === 'true' || clientId === 'mock_client_id' || clientId?.startsWith('ci_test_')) {
       return {
         code: '00',
         desc: 'success',
@@ -542,10 +788,26 @@ export class PaymentsService {
         },
         body: JSON.stringify({ cancellationReason: cancellationReason || 'Cancelled by store/customer' }),
       });
-      return await response.json();
+      // Issue 6 Fix: Always check HTTP status and PayOS response code before reporting success.
+      if (!response.ok) {
+        const errText = await response.text().catch(() => '');
+        this.logger.error(`PayOS cancelPaymentLink HTTP ${response.status} for ${orderCodeOrId}: ${errText}`);
+        throw new BadRequestException(`Hủy link thanh toán thất bại (HTTP ${response.status})`);
+      }
+      const resData = await response.json() as any;
+      if (resData.code !== '00') {
+        this.logger.error(`PayOS cancelPaymentLink rejected (code ${resData.code}): ${resData.desc} for ${orderCodeOrId}`);
+        throw new BadRequestException({
+          success: false,
+          errorCode: resData.code || 'PAYOS_CANCEL_FAILED',
+          message: resData.desc || 'Hủy link thanh toán thất bại',
+        });
+      }
+      return resData;
     } catch (err: any) {
       this.logger.error(`PayOS cancelPaymentLink error: ${err.message}`);
       throw new InternalServerErrorException(`Không thể hủy link thanh toán: ${err.message}`);
     }
   }
 }
+

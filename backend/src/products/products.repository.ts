@@ -1,5 +1,7 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { Decimal } from '@prisma/client/runtime/library';
+import { runWithTransactionRetry } from '../common/utils/transaction-retry.util';
 
 export interface ProductImageInput {
   imageUrl: string;
@@ -12,15 +14,34 @@ export interface ProductImageInput {
 export class ProductsRepository {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  async findMany(storeId?: bigint, pagination?: { page?: number; pageSize?: number }) {
+  async findMany(
+    storeId?: bigint,
+    options?: { page?: number; pageSize?: number; search?: string; category?: string },
+  ) {
     const whereClause: any = {};
     if (storeId) {
       whereClause.storeId = storeId;
     }
-    const page = pagination?.page && pagination.page > 0 ? Number(pagination.page) : 1;
-    const pageSize = pagination?.pageSize && pagination.pageSize > 0 ? Number(pagination.pageSize) : undefined;
-    const skip = pageSize ? (page - 1) * pageSize : undefined;
-    const take = pageSize ? pageSize : undefined;
+    if (options?.category?.trim()) {
+      whereClause.category = {
+        categoryName: { contains: options.category.trim(), mode: 'insensitive' },
+      };
+    }
+    if (options?.search?.trim()) {
+      const s = options.search.trim();
+      whereClause.OR = [
+        { productName: { contains: s, mode: 'insensitive' } },
+        { productCode: { contains: s, mode: 'insensitive' } },
+        { description: { contains: s, mode: 'insensitive' } },
+      ];
+    }
+
+    const rawPage = Number(options?.page);
+    const rawPageSize = Number(options?.pageSize);
+    const page = Number.isSafeInteger(rawPage) && rawPage >= 1 ? Math.min(500, rawPage) : 1;
+    const pageSize = Number.isSafeInteger(rawPageSize) && rawPageSize >= 1 ? Math.min(100, rawPageSize) : 20;
+    const skip = (page - 1) * pageSize;
+    const take = pageSize;
 
     const [items, total] = await Promise.all([
       this.prisma.product.findMany({
@@ -32,14 +53,14 @@ export class ProductsRepository {
             orderBy: { displayOrder: 'asc' },
           },
         },
-        orderBy: { createdAt: 'desc' },
-        ...(skip !== undefined ? { skip } : {}),
-        ...(take !== undefined ? { take } : {}),
+        orderBy: [{ createdAt: 'desc' }, { productId: 'desc' }],
+        skip,
+        take,
       }),
       this.prisma.product.count({ where: whereClause }),
     ]);
 
-    return { items, total, page, pageSize: pageSize || total };
+    return { items, total, page, pageSize };
   }
 
   async findById(productId: bigint) {
@@ -58,7 +79,16 @@ export class ProductsRepository {
   async findStoreIdOnly(productId: bigint) {
     return this.prisma.product.findUnique({
       where: { productId },
-      select: { storeId: true, basePrice: true },
+      select: { storeId: true, basePrice: true, status: true },
+    });
+  }
+
+  async findCategoryById(categoryId: bigint, storeId: bigint) {
+    return this.prisma.category.findFirst({
+      where: {
+        categoryId,
+        storeId,
+      },
     });
   }
 
@@ -124,35 +154,86 @@ export class ProductsRepository {
     });
   }
 
-  async update(productId: bigint, data: any, images?: ProductImageInput[]) {
-    return this.prisma.$transaction(async (tx) => {
+  async updateProductAtomicTx(params: {
+    productId: bigint;
+    storeId: bigint;
+    data: any;
+    images?: ProductImageInput[];
+    priceHistory?: {
+      oldPrice?: number;
+      newPrice: number;
+      changedByUserId?: bigint;
+    };
+    stock?: number;
+  }) {
+    return runWithTransactionRetry(async () => {
+      return this.prisma.$transaction(async (tx) => {
+        // 1. Lock the product row with SELECT FOR UPDATE and read current committed base_price
+        const lockedRows = await tx.$queryRaw<Array<{ product_id: bigint; base_price: any }>>`
+          SELECT product_id, base_price FROM product WHERE product_id = ${params.productId} FOR UPDATE
+        `;
+        if (!lockedRows || lockedRows.length === 0) {
+          throw new NotFoundException(`Product #${params.productId} không tồn tại`);
+        }
+        const currentLockedBasePrice = new Decimal(lockedRows[0].base_price);
+
+        // 2. Insert price history using the freshly locked base_price
+        if (params.priceHistory) {
+          await tx.productPriceHistory.create({
+            data: {
+              productId: params.productId,
+              oldPrice: currentLockedBasePrice,
+              newPrice: new Decimal(params.priceHistory.newPrice),
+              ...(params.priceHistory.changedByUserId
+                ? { changedByUserId: params.priceHistory.changedByUserId }
+                : {}),
+            },
+          });
+        }
+
+      // 3. Update inventory stock atomically
+      if (params.stock !== undefined && !isNaN(params.stock)) {
+        await tx.inventory.upsert({
+          where: { productId: params.productId },
+          update: { quantityOnHand: params.stock },
+          create: {
+            storeId: params.storeId,
+            productId: params.productId,
+            quantityOnHand: params.stock,
+            reservedQuantity: 0,
+            minStockAlert: 5,
+          },
+        });
+      }
+
+      // 4. Update product entity
       const product = await tx.product.update({
-        where: { productId },
-        data,
+        where: { productId: params.productId },
+        data: params.data,
         include: {
           inventory: true,
           category: true,
         },
       });
 
-      if (images !== undefined) {
-        // Clear previous images and insert updated list
-        await tx.productImage.deleteMany({ where: { productId } });
-        if (images.length > 0) {
+      // 5. Update images if specified
+      if (params.images !== undefined) {
+        await tx.productImage.deleteMany({ where: { productId: params.productId } });
+        if (params.images.length > 0) {
           await tx.productImage.createMany({
-          data: images.map((img, idx) => ({
-            productId,
-            imageUrl: img.imageUrl,
-            cloudinaryPublicId: img.cloudinaryPublicId || null,
-            isThumbnail: img.isThumbnail !== undefined ? img.isThumbnail : idx === 0,
-            displayOrder: img.displayOrder !== undefined ? img.displayOrder : idx,
+            data: params.images.map((img, idx) => ({
+              productId: params.productId,
+              imageUrl: img.imageUrl,
+              cloudinaryPublicId: img.cloudinaryPublicId || null,
+              isThumbnail: img.isThumbnail !== undefined ? img.isThumbnail : idx === 0,
+              displayOrder: img.displayOrder !== undefined ? img.displayOrder : idx,
             })),
           });
         }
       }
 
       const currentImages = await tx.productImage.findMany({
-        where: { productId },
+        where: { productId: params.productId },
         orderBy: { displayOrder: 'asc' },
       });
 
@@ -160,6 +241,16 @@ export class ProductsRepository {
         ...product,
         images: currentImages,
       };
+    });
+    });
+  }
+
+  async update(productId: bigint, data: any, images?: ProductImageInput[]) {
+    return this.updateProductAtomicTx({
+      productId,
+      storeId: BigInt(0),
+      data,
+      images,
     });
   }
 
@@ -274,4 +365,120 @@ export class ProductsRepository {
       take: 100,
     });
   }
+
+  async hasActiveOrders(productId: bigint): Promise<boolean> {
+    const activeItem = await this.prisma.orderItem.findFirst({
+      where: {
+        productId,
+        order: {
+          orderStatus: {
+            in: ['PENDING', 'CONFIRMED', 'PREPARING', 'PROCESSING', 'READY_FOR_DELIVERY', 'SHIPPING'],
+          },
+        },
+      },
+    });
+    return !!activeItem;
+  }
+
+  async findPriceHistory(productId: bigint, pagination?: { page?: number; pageSize?: number }) {
+    const page = pagination?.page && pagination.page > 0 ? Number(pagination.page) : 1;
+    const pageSize = pagination?.pageSize && pagination.pageSize > 0 ? Math.min(100, Number(pagination.pageSize)) : 20;
+    const skip = (page - 1) * pageSize;
+
+    const [items, total] = await Promise.all([
+      this.prisma.productPriceHistory.findMany({
+        where: { productId },
+        include: {
+          changedByUser: {
+            select: {
+              userId: true,
+              fullName: true,
+              email: true,
+            },
+          },
+        },
+        orderBy: { changedAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.productPriceHistory.count({ where: { productId } }),
+    ]);
+
+    return { items, total, page, pageSize };
+  }
+
+  async findStoreInventory(
+    storeId: bigint,
+    options?: { page?: number; pageSize?: number; lowStockOnly?: boolean },
+  ) {
+    const page = options?.page && options.page > 0 ? Number(options.page) : 1;
+    const pageSize = options?.pageSize && options.pageSize > 0 ? Math.min(100, Number(options.pageSize)) : 20;
+    const skip = (page - 1) * pageSize;
+
+    if (options?.lowStockOnly) {
+      const totalRes: any[] = await this.prisma.$queryRaw`
+        SELECT COUNT(*)::int as total
+        FROM inventory
+        WHERE store_id = ${storeId}
+          AND quantity_on_hand <= min_stock_alert
+      `;
+      const total = Number(totalRes[0]?.total || 0);
+
+      const items: any[] = await this.prisma.$queryRaw`
+        SELECT 
+          i.inventory_id as "inventoryId",
+          i.store_id as "storeId",
+          i.product_id as "productId",
+          p.product_name as "productName",
+          p.product_code as "productCode",
+          i.quantity_on_hand as "quantityOnHand",
+          i.reserved_quantity as "reservedQuantity",
+          i.min_stock_alert as "minStockAlert",
+          i.updated_at as "updatedAt"
+        FROM inventory i
+        JOIN product p ON p.product_id = i.product_id
+        WHERE i.store_id = ${storeId}
+          AND i.quantity_on_hand <= i.min_stock_alert
+        ORDER BY i.quantity_on_hand ASC, i.updated_at DESC
+        LIMIT ${pageSize} OFFSET ${skip}
+      `;
+
+      return { items, total, page, pageSize };
+    }
+
+    const where = { storeId };
+    const [rawItems, total] = await Promise.all([
+      this.prisma.inventory.findMany({
+        where,
+        include: {
+          product: {
+            select: {
+              productId: true,
+              productName: true,
+              productCode: true,
+            },
+          },
+        },
+        orderBy: { updatedAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.inventory.count({ where }),
+    ]);
+
+    const items = rawItems.map((inv) => ({
+      inventoryId: inv.inventoryId,
+      storeId: inv.storeId,
+      productId: inv.productId,
+      productName: inv.product?.productName || '',
+      productCode: inv.product?.productCode || '',
+      quantityOnHand: inv.quantityOnHand,
+      reservedQuantity: inv.reservedQuantity,
+      minStockAlert: inv.minStockAlert,
+      updatedAt: inv.updatedAt,
+    }));
+
+    return { items, total, page, pageSize };
+  }
 }
+

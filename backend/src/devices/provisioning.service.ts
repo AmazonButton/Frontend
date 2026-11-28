@@ -20,6 +20,7 @@ import * as crypto from 'crypto';
 @Injectable()
 export class ProvisioningService {
   private readonly logger = new Logger(ProvisioningService.name);
+  private static readonly MAX_FAILED_ATTEMPTS = 500;
   // usedNonces migrated to PostgreSQL device_nonces
   private failedAttempts: Array<{
     type: string;
@@ -28,6 +29,19 @@ export class ProvisioningService {
     reason: string;
     timestamp: Date;
   }> = [];
+
+  private recordFailedAttempt(attempt: {
+    type: string;
+    deviceId: string;
+    ip?: string;
+    reason: string;
+    timestamp: Date;
+  }) {
+    if (this.failedAttempts.length >= ProvisioningService.MAX_FAILED_ATTEMPTS) {
+      this.failedAttempts.shift();
+    }
+    this.failedAttempts.push(attempt);
+  }
 
   constructor(
     @Inject(ProvisioningRepository) private readonly provRepo: ProvisioningRepository,
@@ -109,7 +123,7 @@ export class ProvisioningService {
         sessionData.expiresAt,
       );
     } catch (err: any) {
-      this.failedAttempts.push({
+      this.recordFailedAttempt({
         type: 'INVALID_PAIRING_TOKEN',
         deviceId: button.deviceId,
         reason: 'Mã token ghép nối không hợp lệ, đã hết hạn hoặc đã qua sử dụng',
@@ -155,6 +169,7 @@ export class ProvisioningService {
         deviceId: dto.deviceId,
         buttonName: dto.buttonName,
         productId: dto.productId,
+        addressId: dto.addressId,
       });
 
       this.eventsGateway.emitToStore(result.storeId, 'DEVICE_PROVISIONED', {
@@ -184,24 +199,14 @@ export class ProvisioningService {
   }
 
   async bootstrap(headers: any, body: any) {
-    const deviceId = headers['x-device-id'] || headers['x-deviceid'] || body?.deviceId;
+    const deviceId = headers['x-device-id'] || headers['x-deviceid'];
     const signature = headers['x-signature'];
     const timestamp = headers['x-timestamp'];
     const nonce = headers['x-nonce'];
 
-    // Khắc phục tính tương thích cho Web Mock Bootstrap
-    if (!signature || !timestamp || !nonce) {
-      if (deviceId) {
-        const existingBtn = await this.provRepo.findButtonByIdentifier(deviceId);
-        if (existingBtn) {
-          return {
-            success: true,
-            message: 'Bootstrap thiết bị thành công (Web Provisioning)',
-            data: { serverTime: Date.now() },
-          };
-        }
-      }
-      throw new UnauthorizedException('Yêu cầu bắt buộc phải có chữ ký HMAC-SHA256');
+    // Enforce HMAC authentication for physical ESP32 bootstrap
+    if (!deviceId || !signature || !timestamp || !nonce) {
+      throw new UnauthorizedException('Yêu cầu bắt buộc phải có chữ ký HMAC-SHA256 (x-device-id, x-signature, x-timestamp, x-nonce)');
     }
 
     // Must find device in DB first via Repository - NEVER bootstrap unregistered devices!
@@ -239,7 +244,7 @@ export class ProvisioningService {
     // 4. Consume Nonce ONLY AFTER signature is verified (Atomic PostgreSQL insert with 5-minute TTL)
     const nonceConsumed = await this.provRepo.consumeDeviceNonce(deviceId, nonce);
     if (!nonceConsumed) {
-      this.failedAttempts.push({
+      this.recordFailedAttempt({
         type: 'REPLAY_ATTACK',
         deviceId,
         reason: 'Phát hiện Replay Attack: Nonce đã được sử dụng',

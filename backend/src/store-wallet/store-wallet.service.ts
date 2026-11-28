@@ -2,55 +2,63 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ConflictException,
   ForbiddenException,
+  BadGatewayException,
+  InternalServerErrorException,
   Inject,
   Optional,
   Logger,
 } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
-import { UpdateBankAccountDto } from './dto/wallet.dto';
+import { UpdateBankAccountDto, TransactionQueryDto, WithdrawalQueryDto } from './dto/wallet.dto';
 import { RequestWithdrawalDto } from './dto/withdrawal.dto';
 import { PayOSPayoutService } from '../payments/payos-payout.service';
 import { CryptoVaultUtil } from '../common/utils/crypto-vault.util';
+import {
+  verifyPayosPayoutEvidence,
+  verifyPayosPayoutRejectionEvidence,
+  PayosPayoutExpectedCriteria,
+} from '../payments/payos-payout-verifier';
+import { WalletMapper } from './mappers/wallet.mapper';
+import { runWithTransactionRetry } from '../common/utils/transaction-retry.util';
+import { StoreWalletRepository } from './store-wallet.repository';
+import { DashboardCacheService } from '../common/cache/dashboard-cache.service';
 
 @Injectable()
 export class StoreWalletService {
   private readonly logger = new Logger(StoreWalletService.name);
+  private readonly repo: StoreWalletRepository;
 
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Optional() @Inject(PayOSPayoutService) private readonly payosPayoutService?: PayOSPayoutService,
-  ) {}
+    @Optional() @Inject(StoreWalletRepository) walletRepo?: StoreWalletRepository,
+    @Optional() private readonly cacheService?: DashboardCacheService,
+  ) {
+    this.repo = walletRepo || new StoreWalletRepository(this.prisma);
+  }
+
+  private async invalidateWalletCaches(storeId?: string | number | bigint) {
+    if (!this.cacheService || typeof this.cacheService.invalidatePrefix !== 'function') return;
+    try {
+      const promises: Promise<void>[] = [
+        this.cacheService.invalidatePrefix('admin:dashboard:'),
+        this.cacheService.invalidatePrefix('admin:operations'),
+        this.cacheService.invalidatePrefix('admin:revenue:'),
+      ];
+      if (storeId) {
+        promises.push(this.cacheService.invalidatePrefix(`dash:store:${storeId.toString()}:`));
+      }
+      await Promise.all(promises);
+    } catch (error) {
+      this.logger.warn(`Failed to invalidate wallet cache: ${error instanceof Error ? error.message : 'unknown error'}`);
+    }
+  }
 
   async getOrCreateStoreWallet(storeId: string | number | bigint) {
     const rawStoreId = BigInt(storeId);
-    let wallet = await this.prisma.storeWallet.findUnique({
-      where: { storeId: rawStoreId },
-    });
-
-    if (!wallet) {
-      wallet = await this.prisma.storeWallet.create({
-        data: {
-          storeId: rawStoreId,
-          balance: 0,
-          frozenBalance: 0,
-        },
-      });
-    }
-
-    return wallet;
-  }
-
-  async getWallet(storeId: string | number | bigint) {
-    const wallet = await this.getOrCreateStoreWallet(storeId);
-    // Do not expose Prisma records directly: they contain BigInt values that
-    // JSON.stringify cannot serialize and would turn a successful request into
-    // an HTTP 500 in Nest/Express.
-    const defaultBankAccount = await this.prisma.storeBankAccount.findFirst({
-      where: { storeId: wallet.storeId, isDefault: true },
-      select: { bankBin: true },
-    });
-    return this.toWalletDto(wallet, defaultBankAccount?.bankBin || '');
+    return this.repo.getOrCreateStoreWallet(rawStoreId);
   }
 
   async updateBankAccount(storeId: string | number | bigint, dto: UpdateBankAccountDto) {
@@ -61,48 +69,16 @@ export class StoreWalletService {
     const accHash = CryptoVaultUtil.hashAccountNumber(cleanAcc);
     const accEncrypted = CryptoVaultUtil.encryptAccountNumber(cleanAcc);
 
-    // Bỏ isDefault ở các tài khoản cũ
-    await this.prisma.storeBankAccount.updateMany({
-      where: { storeId: rawStoreId },
-      data: { isDefault: false },
+    const updated = await this.repo.updateBankAccountAtomicTx({
+      storeId: rawStoreId,
+      bankName: dto.bankName,
+      bankAccountHolder: dto.bankAccountHolder,
+      accountNumberHash: accHash,
+      accountNumberEncrypted: accEncrypted,
+      cleanAcc,
     });
 
-    // Tạo / cập nhật tài khoản mới với trạng thái PENDING (bắt buộc xác minh lại)
-    await this.prisma.storeBankAccount.upsert({
-      where: {
-        uq_store_bank_account_store_acc_hash: {
-          storeId: rawStoreId,
-          accountNumberHash: accHash,
-        },
-      },
-      create: {
-        storeId: rawStoreId,
-        bankBin: dto.bankBin || '970422',
-        bankName: dto.bankName,
-        accountNumberEncrypted: accEncrypted,
-        accountNumberHash: accHash,
-        accountName: dto.bankAccountHolder,
-        verificationStatus: 'PENDING',
-        isDefault: true,
-      },
-      update: {
-        bankBin: dto.bankBin || undefined,
-        bankName: dto.bankName,
-        accountName: dto.bankAccountHolder,
-        accountNumberEncrypted: accEncrypted,
-        isDefault: true,
-      },
-    });
-
-    await this.prisma.storeWallet.update({
-      where: { storeId: rawStoreId },
-      data: {
-        bankName: dto.bankName,
-        bankAccountNumber: dto.bankAccountNumber,
-        bankAccountHolder: dto.bankAccountHolder,
-      },
-    });
-    return this.getWallet(rawStoreId);
+    return WalletMapper.toWalletDto(updated);
   }
 
   async creditOrderRevenue(
@@ -159,26 +135,40 @@ export class StoreWalletService {
     });
   }
 
-  async listTransactions(storeId: string | number | bigint) {
+  async listTransactions(storeId: string | number | bigint, query?: TransactionQueryDto) {
     const rawStoreId = BigInt(storeId);
     const wallet = await this.getOrCreateStoreWallet(rawStoreId);
 
-    const transactions = await this.prisma.walletTransaction.findMany({
-      where: { walletId: wallet.walletId },
-      orderBy: { createdAt: 'desc' },
-    });
+    const where: any = { walletId: wallet.walletId };
+    if (query?.type) {
+      where.type = query.type;
+    }
+    if (query?.fromDate || query?.toDate) {
+      where.createdAt = {};
+      if (query.fromDate) where.createdAt.gte = new Date(query.fromDate);
+      if (query.toDate) where.createdAt.lte = new Date(query.toDate);
+    }
 
-    return transactions.map((transaction) => ({
-      id: transaction.transactionId.toString(),
-      amount: Number(transaction.amount),
-      type: transaction.type,
-      status: 'SUCCESS',
-      balanceBefore: Number(transaction.balanceBefore),
-      balanceAfter: Number(transaction.balanceAfter),
-      referenceId: transaction.referenceId,
-      description: transaction.description,
-      createdAt: transaction.createdAt.toISOString(),
-    }));
+    const page = Math.max(1, Number(query?.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(query?.pageSize) || Number(query?.limit) || 20));
+    const skip = (page - 1) * pageSize;
+
+    const [items, total] = await Promise.all([
+      this.prisma.walletTransaction.findMany({
+        where,
+        orderBy: { createdAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.walletTransaction.count({ where }),
+    ]);
+
+    return {
+      items: WalletMapper.toTransactionDtoList(items),
+      total,
+      page,
+      pageSize,
+    };
   }
 
   /**
@@ -210,68 +200,71 @@ export class StoreWalletService {
     }
 
     // Invariant (Section 8): Chỉ cho phép rút tiền vào tài khoản ngân hàng đã xác minh chính chủ (OWNERSHIP_VERIFIED)
-    let verifiedAccount = await this.prisma.storeBankAccount.findFirst({
-      where: {
-        storeId: rawStoreId,
-        verificationStatus: 'OWNERSHIP_VERIFIED',
-      },
-      orderBy: { updatedAt: 'desc' },
-    });
-
-    const isStrict =
-      process.env.BANK_VERIFICATION_STRICT === 'true' ||
-      (process.env.NODE_ENV === 'production' && process.env.BANK_VERIFICATION_STRICT !== 'false');
-
-    if (!verifiedAccount) {
-      if (isStrict) {
+    let verifiedAccount = null;
+    if (dto.bankAccountId) {
+      verifiedAccount = await this.prisma.storeBankAccount.findFirst({
+        where: {
+          id: BigInt(dto.bankAccountId),
+          storeId: rawStoreId,
+          verificationStatus: 'OWNERSHIP_VERIFIED',
+        },
+      });
+      if (!verifiedAccount) {
         throw new BadRequestException({
           success: false,
-          message: 'Tài khoản ngân hàng chưa được xác minh chính chủ bằng giao dịch 2.000 VND',
-          errorCode: 'BANK_ACCOUNT_NOT_VERIFIED',
+          message: 'Tài khoản ngân hàng chỉ định không hợp lệ hoặc chưa được xác minh chính chủ',
+          errorCode: 'INVALID_BANK_ACCOUNT',
         });
       }
-
-      // Legacy test environment compatibility: auto-provision verified bank record
-      const walletRow = await this.prisma.storeWallet.findUnique({
-        where: { storeId: rawStoreId },
-      });
-      const accNum = dto.bankAccountNumber || walletRow?.bankAccountNumber || '970422123456789';
-      const enc = CryptoVaultUtil.encryptAccountNumber(accNum);
-      const hash = CryptoVaultUtil.hashAccountNumber(accNum);
-      verifiedAccount = await this.prisma.storeBankAccount.upsert({
+    } else {
+      verifiedAccount = await this.prisma.storeBankAccount.findFirst({
         where: {
-          uq_store_bank_account_store_acc_hash: {
-            storeId: rawStoreId,
-            accountNumberHash: hash,
-          },
-        },
-        create: {
           storeId: rawStoreId,
-          bankBin: dto.bankCode || '970422',
-          bankName: dto.bankName || walletRow?.bankName || 'MBBANK',
-          accountNumberEncrypted: enc,
-          accountNumberHash: hash,
-          accountName: dto.bankAccountHolder || walletRow?.bankAccountHolder || 'STORE OWNER',
-          verificationStatus: 'OWNERSHIP_VERIFIED',
-          verifiedAt: new Date(),
-          lastVerifiedAt: new Date(),
-        },
-        update: {
           verificationStatus: 'OWNERSHIP_VERIFIED',
         },
+        orderBy: [{ isDefault: 'desc' }, { updatedAt: 'desc' }],
       });
+    }
+
+    if (!verifiedAccount) {
+      throw new BadRequestException({
+        success: false,
+        message: 'Tài khoản ngân hàng chưa được xác minh chính chủ bằng giao dịch 2.000 VND',
+        errorCode: 'BANK_ACCOUNT_NOT_VERIFIED',
+      });
+    }
+
+    // Fail-closed verification & decryption of target account
+    if (!verifiedAccount.accountNumberEncrypted || !verifiedAccount.accountNumberHash || !verifiedAccount.bankBin) {
+      throw new InternalServerErrorException('Tài khoản ngân hàng thiếu dữ liệu mã hóa hoặc mã BIN (Fail-Closed)');
     }
 
     let verifiedPlainAcc = '';
     try {
-      verifiedPlainAcc = CryptoVaultUtil.decryptAccountNumber(verifiedAccount.accountNumberEncrypted);
-    } catch {
-      verifiedPlainAcc = verifiedAccount.bankBin;
+      verifiedPlainAcc = CryptoVaultUtil.decryptAccountNumber(verifiedAccount.accountNumberEncrypted).trim();
+    } catch (err: any) {
+      this.logger.error(`Lỗi giải mã tài khoản ngân hàng store ${rawStoreId}: ${err?.message}`);
+      throw new InternalServerErrorException('Lỗi giải mã thông tin tài khoản ngân hàng (Fail-Closed)');
+    }
+
+    if (!verifiedPlainAcc) {
+      throw new InternalServerErrorException('Số tài khoản ngân hàng sau giải mã rỗng (Fail-Closed)');
+    }
+
+    // Đối chiếu hash để bảo đảm tính toàn vẹn tuyệt đối
+    const computedHash = CryptoVaultUtil.hashAccountNumber(verifiedPlainAcc);
+    if (computedHash !== verifiedAccount.accountNumberHash) {
+      this.logger.error(`Hash số tài khoản không khớp cho store ${rawStoreId}`);
+      throw new InternalServerErrorException('Tính toàn vẹn của tài khoản ngân hàng bị vi phạm (Hash Mismatch)');
     }
 
     const wallet = await this.getOrCreateStoreWallet(rawStoreId);
-    const fee = Number(dto.fee || 0);
+    // Phí rút tiền do Server quyết định 100% (server-controlled, 0 <= fee < amount, integer VND)
+    const fee = 0;
     const netAmount = amount - fee;
+    if (!Number.isInteger(amount) || amount <= 0 || !Number.isInteger(fee) || fee < 0 || fee >= amount) {
+      throw new BadRequestException('Số tiền hoặc phí rút tiền không hợp lệ');
+    }
     const withdrawalCode = `WDR-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
 
     // Phase 1: DB Transaction - Lock balance with FOR UPDATE & snapshot bank info
@@ -290,11 +283,12 @@ export class StoreWalletService {
         const [lockedWallet] = await tx.$queryRaw<Array<{
           wallet_id: bigint;
           balance: any;
+          frozen_balance: any;
           bank_name: string | null;
           bank_account_number: string | null;
           bank_account_holder: string | null;
         }>>`
-          SELECT wallet_id, balance, bank_name, bank_account_number, bank_account_holder
+          SELECT wallet_id, balance, frozen_balance, bank_name, bank_account_number, bank_account_holder
           FROM store_wallets
           WHERE wallet_id = ${wallet.walletId}
           FOR UPDATE
@@ -303,6 +297,7 @@ export class StoreWalletService {
         if (!lockedWallet) throw new NotFoundException('Ví không tồn tại');
 
         const currentBalance = Number(lockedWallet.balance);
+        const currentFrozen = Number(lockedWallet.frozen_balance || 0);
         if (currentBalance < amount) {
           throw new BadRequestException(
             `Số dư không đủ. Số dư khả dụng hiện tại: ${currentBalance.toLocaleString()} VND`,
@@ -310,9 +305,13 @@ export class StoreWalletService {
         }
 
         const balanceAfter = currentBalance - amount;
+        const frozenAfter = currentFrozen + amount;
         await tx.storeWallet.update({
           where: { walletId: wallet.walletId },
-          data: { balance: balanceAfter },
+          data: {
+            balance: balanceAfter,
+            frozenBalance: frozenAfter,
+          },
         });
 
         const newWithdrawal = await tx.storeWithdrawal.create({
@@ -324,10 +323,17 @@ export class StoreWalletService {
             amount,
             fee,
             netAmount,
+            bankAccountId: verifiedAccount.id,
             bankCode: verifiedAccount.bankCode || dto.bankCode || '970422',
             bankName: verifiedAccount.bankName,
-            bankAccountNumber: verifiedPlainAcc,
+            bankAccountNumber: null, // Zero plaintext in DB!
             bankAccountHolder: verifiedAccount.accountName,
+            bankAccountEncrypted: verifiedAccount.accountNumberEncrypted,
+            bankAccountHash: verifiedAccount.accountNumberHash,
+            bankAccountMasked: CryptoVaultUtil.maskAccountNumber(verifiedPlainAcc),
+            bankAccountNameSnapshot: verifiedAccount.accountName,
+            bankBinSnapshot: verifiedAccount.bankBin,
+            bankNameSnapshot: verifiedAccount.bankName,
             status: 'PENDING',
             provider: 'PAYOS',
             providerReferenceId: withdrawalCode,
@@ -342,7 +348,7 @@ export class StoreWalletService {
             balanceBefore: currentBalance,
             balanceAfter,
             referenceId: withdrawalCode,
-            description: `Yêu cầu rút tiền về ${dto.bankName || lockedWallet.bank_name || 'Ngân hàng'} - ${dto.bankAccountNumber || lockedWallet.bank_account_number || ''}`,
+            description: `Yêu cầu rút tiền #${withdrawalCode} về ${verifiedAccount.bankName} (${CryptoVaultUtil.maskAccountNumber(verifiedPlainAcc)})`,
           },
         });
 
@@ -357,6 +363,8 @@ export class StoreWalletService {
       }
       throw err;
     }
+
+    await this.invalidateWalletCaches(rawStoreId);
 
     const shouldAutoPayout = dto.autoPayout ?? options?.autoPayout ?? false;
     if (shouldAutoPayout && this.payosPayoutService) {
@@ -398,42 +406,77 @@ export class StoreWalletService {
       throw new BadRequestException('Dịch vụ PayOS Payout chưa được kích hoạt trong hệ thống');
     }
 
+    if (!withdrawal.bankAccountEncrypted || !withdrawal.bankAccountHash || !withdrawal.bankBinSnapshot) {
+      throw new BadRequestException('Thiếu snapshot tài khoản ngân hàng đã mã hóa hoặc mã BIN (Fail-Closed)');
+    }
+
+    let toAccountNumber = '';
+    try {
+      toAccountNumber = CryptoVaultUtil.decryptAccountNumber(withdrawal.bankAccountEncrypted).trim();
+    } catch (err: any) {
+      this.logger.error(`Lỗi giải mã tài khoản cho withdrawal #${rawId}: ${err?.message}`);
+      throw new BadRequestException('Lỗi giải mã tài khoản nhận tiền (Fail-Closed)');
+    }
+
+    if (!toAccountNumber) {
+      throw new BadRequestException('Số tài khoản nhận tiền sau giải mã rỗng (Fail-Closed)');
+    }
+
+    const computedHash = CryptoVaultUtil.hashAccountNumber(toAccountNumber);
+    const deterministicHash = CryptoVaultUtil.computeDeterministicAccountHash(toAccountNumber);
+    if (computedHash !== withdrawal.bankAccountHash && deterministicHash !== withdrawal.bankAccountHash) {
+      throw new BadRequestException('Tính toàn vẹn của tài khoản nhận tiền bị vi phạm (Hash Mismatch)');
+    }
+
+    const payoutAmount = withdrawal.netAmount !== null && withdrawal.netAmount !== undefined
+      ? Math.round(Number(withdrawal.netAmount))
+      : Math.round(Number(withdrawal.amount) - Number(withdrawal.fee || 0));
+    if (!Number.isInteger(payoutAmount) || payoutAmount <= 0) {
+      throw new BadRequestException('Số tiền chi hộ thực chuyển (netAmount) không hợp lệ');
+    }
+
+    const providerReferenceId = withdrawal.providerReferenceId || withdrawal.withdrawalCode;
+
     try {
       const payoutResult = await this.payosPayoutService.createPayout({
-        referenceId: withdrawal.withdrawalCode,
-        amount: Number(withdrawal.netAmount || withdrawal.amount),
+        referenceId: providerReferenceId,
+        amount: payoutAmount,
         description: `Rut tien ${withdrawal.withdrawalCode}`.slice(0, 25),
-        toBin: withdrawal.bankCode || '970422',
-        toAccountNumber: withdrawal.bankAccountNumber,
+        toBin: withdrawal.bankBinSnapshot.trim(),
+        toAccountNumber,
         category: ['withdrawal'],
       });
 
-      const providerPayoutId = payoutResult.data?.id || `payout_${withdrawal.withdrawalCode}`;
+      const providerPayoutId = payoutResult?.data?.id ? String(payoutResult.data.id).trim() : null;
 
-      return await this.prisma.storeWithdrawal.update({
-        where: { withdrawalId: rawId },
-        data: {
-          status: 'PROCESSING',
-          providerPayoutId,
-        },
-      });
+      await this.prisma.$executeRaw`
+        UPDATE store_withdrawals
+        SET provider_payout_id = COALESCE(${providerPayoutId}, provider_payout_id),
+            provider_reference_id = ${providerReferenceId},
+            processed_at = COALESCE(processed_at, NOW()),
+            updated_at = NOW()
+        WHERE withdrawal_id = ${rawId}
+          AND (provider_reference_id = ${providerReferenceId} OR provider_reference_id IS NULL)
+          AND status IN ('PENDING', 'PROCESSING')
+      `;
+
+      await this.invalidateWalletCaches(withdrawal.storeId ?? undefined);
+      return await this.prisma.storeWithdrawal.findUnique({ where: { withdrawalId: rawId } });
     } catch (err: any) {
       this.logger.error(`PayOS Payout failed for withdrawal #${withdrawal.withdrawalCode}: ${err.message}`);
 
-      // Ghi nhận FAILED
-      await this.prisma.storeWithdrawal.update({
-        where: { withdrawalId: rawId },
-        data: {
-          status: 'FAILED',
-          failureReason: err.message || 'Lỗi gọi cổng PayOS Payout',
-          processedAt: new Date(),
-        },
-      });
-
-      // DB Transaction 2: Auto-Refund số dư về ví (Section 25)
-      await this.refundFailedWithdrawal(rawId, err.message || 'PayOS Payout API Error');
-
-      throw new BadRequestException(`Tạo chi tiền PayOS thất bại: ${err.message || 'Lỗi cổng PayOS'}`);
+      // Invariant PAY-01: Sau timeout/lỗi mạng, ưu tiên đối soát. Giữ PENDING_RECONCILIATION, không tự ý hoàn tiền.
+      await this.prisma.$executeRaw`
+        UPDATE store_withdrawals
+        SET status = 'PENDING_RECONCILIATION',
+            failure_reason = ${`PENDING_RECONCILIATION: Lỗi kết nối tới cổng (${err.message}). Chờ đối soát.`.slice(0, 255)},
+            updated_at = NOW()
+        WHERE withdrawal_id = ${rawId} AND status IN ('PENDING', 'PROCESSING')
+      `;
+      await this.invalidateWalletCaches(withdrawal.storeId ?? undefined);
+      throw new BadGatewayException(
+        `Kết nối tới cổng chi tiền gián đoạn (${err.message}). Yêu cầu được giữ ở trạng thái chờ đối soát (PENDING_RECONCILIATION). Không hoàn tiền tự động ngay để tránh chi kép.`,
+      );
     }
   }
 
@@ -442,7 +485,8 @@ export class StoreWalletService {
    */
   async refundFailedWithdrawal(withdrawalId: string | number | bigint, reason: string) {
     const rawId = BigInt(withdrawalId);
-    return this.prisma.$transaction(async (tx) => {
+    const result = await runWithTransactionRetry(async () => {
+      return this.prisma.$transaction(async (tx) => {
       // 1. Lock withdrawal row exclusively with SELECT ... FOR UPDATE (Anti-Double Refund)
       const [lockedWithdrawal] = await tx.$queryRaw<Array<{
         withdrawal_id: bigint;
@@ -459,8 +503,8 @@ export class StoreWalletService {
 
       if (!lockedWithdrawal) throw new NotFoundException('Yêu cầu rút tiền không tồn tại');
 
-      // 2. Only refund if status is PENDING or PROCESSING (Prevent double-refund if already FAILED/SUCCEEDED)
-      if (!['PENDING', 'PROCESSING'].includes(lockedWithdrawal.status)) {
+      // 2. Monotonic terminal guard: never refund a withdrawal that already SUCCEEDED
+      if (lockedWithdrawal.status === 'SUCCEEDED') {
         return tx.storeWithdrawal.findUnique({
           where: { withdrawalId: rawId },
         });
@@ -484,8 +528,9 @@ export class StoreWalletService {
       const [lockedWallet] = await tx.$queryRaw<Array<{
         wallet_id: bigint;
         balance: any;
+        frozen_balance: any;
       }>>`
-        SELECT wallet_id, balance
+        SELECT wallet_id, balance, frozen_balance
         FROM store_wallets
         WHERE wallet_id = ${lockedWithdrawal.wallet_id}
         FOR UPDATE
@@ -496,11 +541,25 @@ export class StoreWalletService {
       const refundAmount = Number(lockedWithdrawal.amount);
       const balanceBefore = Number(lockedWallet.balance);
       const balanceAfter = balanceBefore + refundAmount;
+      const currentFrozen = Number(lockedWallet.frozen_balance || 0);
+      if (currentFrozen < refundAmount) {
+        throw new ConflictException(
+          `ACCOUNTING_INCONSISTENCY: Wallet #${lockedWithdrawal.wallet_id} frozenBalance (${currentFrozen}) is less than refund amount (${refundAmount})`,
+        );
+      }
+      const frozenAfter = currentFrozen - refundAmount;
 
       await tx.storeWallet.update({
         where: { walletId: lockedWithdrawal.wallet_id },
-        data: { balance: balanceAfter },
+        data: {
+          balance: balanceAfter,
+          frozenBalance: frozenAfter,
+        },
       });
+
+      const sanitizedReason = (reason || 'PayOS Payout API Error')
+        .replace(/[^\p{L}\p{N}\s_.,:-]/gu, '')
+        .slice(0, 255);
 
       await tx.walletTransaction.create({
         data: {
@@ -510,7 +569,7 @@ export class StoreWalletService {
           balanceBefore,
           balanceAfter,
           referenceId: lockedWithdrawal.withdrawal_code,
-          description: `Hoàn tiền yêu cầu rút #${lockedWithdrawal.withdrawal_code}: ${reason}`,
+          description: `Hoàn tiền yêu cầu rút #${lockedWithdrawal.withdrawal_code}: ${sanitizedReason}`,
         },
       });
 
@@ -518,15 +577,114 @@ export class StoreWalletService {
         where: { withdrawalId: rawId },
         data: {
           status: 'FAILED',
-          failureReason: reason,
+          failureReason: sanitizedReason,
           processedAt: new Date(),
         },
       });
     });
+    });
+
+    await this._invalidateWalletForWithdrawal(rawId);
+
+    return result;
+  }
+
+  private async _invalidateWalletForWithdrawal(withdrawalId: bigint) {
+    try {
+      const w = await this.prisma.storeWithdrawal.findUnique({
+        where: { withdrawalId },
+        include: { wallet: true },
+      });
+      if (w?.wallet?.storeId) {
+        await this.invalidateWalletCaches(w.wallet.storeId);
+      } else {
+        await this.invalidateWalletCaches();
+      }
+    } catch {
+      this.logger.warn(`Could not resolve storeId for wallet cache invalidation on withdrawal ${withdrawalId}`);
+      await this.invalidateWalletCaches();
+    }
   }
 
   /**
-   * Ki?m tra & d?ng b? tr?ng th�i Payout t? PayOS (Section 22, 23, 24)
+   * Process PayOS Payout Webhook atomically via StoreWalletRepository
+   */
+  async processPayoutWebhook(data: any, desc?: string): Promise<{ success: boolean; message: string }> {
+    const referenceId = data?.referenceId;
+    if (!referenceId) {
+      this.logger.warn('Webhook PayOS Payout thiếu referenceId');
+      return { success: true, message: 'Đã nhận webhook (thiếu referenceId)' };
+    }
+
+    const withdrawal = await this.repo.findWithdrawalByCodeOrRef(referenceId);
+    if (!withdrawal) {
+      this.logger.warn(`Không tìm thấy yêu cầu rút tiền với ref: ${referenceId}`);
+      return { success: true, message: 'Không tìm thấy yêu cầu rút tiền tương ứng' };
+    }
+
+    if (withdrawal.status === 'SUCCEEDED') {
+      return { success: true, message: 'Yêu cầu rút tiền đã ở trạng thái hoàn thành trước đó' };
+    }
+    if (withdrawal.status === 'FAILED' || withdrawal.status === 'FAILED_CONFIRMED' || withdrawal.status === 'CANCELLED') {
+      return { success: true, message: 'Yêu cầu rút tiền đã được xử lý hoàn tiền hoặc hủy trước đó' };
+    }
+
+    let detailPayout: any = data;
+    const dataHasDirectTx =
+      (data?.referenceId || data?.reference) &&
+      (data?.toBin || data?.bin) &&
+      data?.amount !== undefined;
+
+    if (!dataHasDirectTx && (!Array.isArray(detailPayout?.transactions) || detailPayout.transactions.length === 0)) {
+      if (this.payosPayoutService && data.id) {
+        try {
+          const detailRes = await this.payosPayoutService.getPayout(data.id);
+          if (detailRes?.data) {
+            detailPayout = detailRes.data;
+          }
+        } catch (err: any) {
+          this.logger.warn(`Webhook: không thể lấy chi tiết payout ${data.id}: ${err.message}`);
+        }
+      }
+    }
+
+    const netAmount = withdrawal.netAmount !== null && withdrawal.netAmount !== undefined
+      ? Math.round(Number(withdrawal.netAmount))
+      : Math.round(Number(withdrawal.amount) - Number(withdrawal.fee || 0));
+
+    const criteria: PayosPayoutExpectedCriteria = {
+      amount: netAmount,
+      payoutReference: withdrawal.providerReferenceId || withdrawal.withdrawalCode,
+      targetBankBin: withdrawal.bankBinSnapshot || withdrawal.bankCode,
+      targetAccountHash: withdrawal.bankAccountHash,
+      expectedPayoutId: data.id ? String(data.id) : (withdrawal.providerPayoutId || undefined),
+    };
+
+    const successVerif = verifyPayosPayoutEvidence(detailPayout, criteria);
+    if (successVerif.isVerified) {
+      await this.repo.finalizePayoutSuccessTx(withdrawal.withdrawalId, successVerif.providerPayoutId);
+      this.logger.log(`Hoàn tất chi tiền thành công cho yêu cầu #${withdrawal.withdrawalCode}`);
+      await this.invalidateWalletCaches(withdrawal.wallet?.storeId ?? undefined);
+      return { success: true, message: 'Đã hoàn tất chi tiền thành công' };
+    }
+
+    const rejectionVerif = verifyPayosPayoutRejectionEvidence(detailPayout, criteria);
+    if (rejectionVerif.isVerified) {
+      const failReason = desc || rejectionVerif.reason || 'PayOS Payout thông báo thất bại';
+      await this.refundFailedWithdrawal(withdrawal.withdrawalId, failReason);
+      this.logger.log(`Đã hoàn tiền tự động cho yêu cầu rút thất bại #${withdrawal.withdrawalCode}`);
+      await this.invalidateWalletCaches(withdrawal.wallet?.storeId ?? undefined);
+      return { success: true, message: 'Đã hoàn tiền yêu cầu rút thất bại' };
+    }
+
+    this.logger.warn(
+      `Webhook payout chưa đủ bằng chứng terminal cho #${withdrawal.withdrawalCode}, lý do: ${successVerif.reason || rejectionVerif.reason}, giữ chờ đối soát`,
+    );
+    return { success: true, message: 'Webhook đã được ghi nhận, chờ đối soát' };
+  }
+
+    /**
+   * Kiểm tra & đồng bộ trạng thái Payout từ PayOS (Unified with Admin & Fail-Closed)
    */
   async syncWithdrawalPayoutStatus(
     withdrawalId: string | number | bigint,
@@ -539,18 +697,18 @@ export class StoreWalletService {
     });
 
     if (!withdrawal) {
-      throw new NotFoundException('Kh�ng t�m th?y y�u c?u r�t ti?n');
+      throw new NotFoundException('Không tìm thấy yêu cầu rút tiền');
     }
 
     if (requestStoreId && withdrawal.wallet.storeId !== BigInt(requestStoreId)) {
       throw new ForbiddenException({
         success: false,
         code: 'ACCESS_DENIED',
-        message: 'B?n kh�ng c� quy?n thao t�c tr�n y�u c?u r�t ti?n c?a c?a h�ng kh�c.',
+        message: 'Bạn không có quyền thao tác trên yêu cầu rút tiền của cửa hàng khác.',
       });
     }
 
-    if (withdrawal.status !== 'PROCESSING') {
+    if (withdrawal.status !== 'PROCESSING' && withdrawal.status !== 'PENDING_RECONCILIATION') {
       return withdrawal;
     }
 
@@ -558,122 +716,109 @@ export class StoreWalletService {
       return withdrawal;
     }
 
-    const payoutInfo = await this.payosPayoutService.getPayout(
-      withdrawal.providerPayoutId || withdrawal.withdrawalCode,
-    );
+    let targetPayout: any = null;
+    let expectedPayoutId: string | null = withdrawal.providerPayoutId ? String(withdrawal.providerPayoutId).trim() : null;
 
-    const approvalState = payoutInfo?.data?.approvalState;
-    const txState = payoutInfo?.data?.transactions?.[0]?.state;
-
-    if (approvalState === 'SUCCEEDED' || txState === 'SUCCEEDED' || approvalState === 'COMPLETED') {
-      return this.prisma.storeWithdrawal.update({
-        where: { withdrawalId: rawId },
-        data: {
-          status: 'SUCCEEDED',
-          processedAt: new Date(),
-        },
-      });
+    if (withdrawal.providerPayoutId) {
+      try {
+        const statusData = await this.payosPayoutService.getPayout(withdrawal.providerPayoutId);
+        targetPayout = statusData?.data;
+      } catch (err: any) {
+        this.logger.warn(`Lỗi khi lấy chi tiết payout ${withdrawal.providerPayoutId}: ${err.message}`);
+        return withdrawal;
+      }
+    } else if (withdrawal.providerReferenceId || withdrawal.withdrawalCode) {
+      const searchRef = withdrawal.providerReferenceId || withdrawal.withdrawalCode;
+      try {
+        const listData = await this.payosPayoutService.getPayouts({ referenceId: searchRef });
+        const rawList = listData?.data?.payouts || listData?.data || [];
+        const payoutsList = Array.isArray(rawList) ? rawList : [];
+        const matched = payoutsList.filter(
+          (p: any) => p.referenceId === searchRef || p.referenceId === withdrawal.withdrawalCode || p.id === searchRef,
+        );
+        if (matched.length === 1 && matched[0].id) {
+          expectedPayoutId = String(matched[0].id).trim();
+          const detailRes = await this.payosPayoutService.getPayout(matched[0].id);
+          targetPayout = detailRes?.data;
+        } else {
+          return withdrawal;
+        }
+      } catch (err: any) {
+        this.logger.warn(`Lỗi khi tra cứu danh sách payouts cho ref ${searchRef}: ${err.message}`);
+        return withdrawal;
+      }
     }
 
-    if (approvalState === 'FAILED' || txState === 'FAILED' || approvalState === 'REJECTED') {
-      return this.refundFailedWithdrawal(rawId, 'PayOS Payout x�c nh?n th?t b?i');
+    if (!targetPayout) {
+      return withdrawal;
     }
 
-    // N?u v?n dang PROCESSING -> Gi? nguy�n tr?ng th�i, tuy?t d?i kh�ng refund (Section 24)
+    const netAmount = withdrawal.netAmount !== null && withdrawal.netAmount !== undefined
+      ? Math.round(Number(withdrawal.netAmount))
+      : Math.round(Number(withdrawal.amount) - Number(withdrawal.fee || 0));
+
+    const criteria: PayosPayoutExpectedCriteria = {
+      amount: netAmount,
+      payoutReference: withdrawal.providerReferenceId || withdrawal.withdrawalCode,
+      targetBankBin: withdrawal.bankBinSnapshot || withdrawal.bankCode,
+      targetAccountHash: withdrawal.bankAccountHash,
+      expectedPayoutId: expectedPayoutId || undefined,
+    };
+
+    const successVerif = verifyPayosPayoutEvidence(targetPayout, criteria);
+    if (successVerif.isVerified) {
+      await this.repo.finalizePayoutSuccessTx(rawId, successVerif.providerPayoutId);
+      await this.invalidateWalletCaches(withdrawal.wallet?.storeId ?? undefined);
+      return await this.prisma.storeWithdrawal.findUnique({ where: { withdrawalId: rawId } });
+    }
+
+    const rejectionVerif = verifyPayosPayoutRejectionEvidence(targetPayout, criteria);
+    if (rejectionVerif.isVerified) {
+      const refundedResult = await this.refundFailedWithdrawal(rawId, `PayOS Payout xác nhận thất bại: ${rejectionVerif.reason || 'REJECTED'}`);
+      await this.invalidateWalletCaches(withdrawal.wallet?.storeId ?? undefined);
+      return refundedResult;
+    }
+
     return withdrawal;
   }
 
-  async listWithdrawals(storeId: string | number | bigint) {
+  async listWithdrawals(storeId: string | number | bigint, query?: WithdrawalQueryDto) {
     const rawStoreId = BigInt(storeId);
     const wallet = await this.getOrCreateStoreWallet(rawStoreId);
 
-    const withdrawals = await this.prisma.storeWithdrawal.findMany({
-      where: { walletId: wallet.walletId },
-      orderBy: { requestedAt: 'desc' },
-    });
+    const where: any = { walletId: wallet.walletId };
+    if (query?.status) {
+      where.status = query.status;
+    }
+    if (query?.fromDate || query?.toDate) {
+      where.requestedAt = {};
+      if (query.fromDate) where.requestedAt.gte = new Date(query.fromDate);
+      if (query.toDate) where.requestedAt.lte = new Date(query.toDate);
+    }
 
-    return withdrawals.map((withdrawal) => ({
-      id: withdrawal.withdrawalId.toString(),
-      withdrawalCode: withdrawal.withdrawalCode,
-      amount: Number(withdrawal.amount),
-      fee: Number(withdrawal.fee),
-      netAmount: withdrawal.netAmount === null ? null : Number(withdrawal.netAmount),
-      status: withdrawal.status,
-      bankCode: withdrawal.bankCode,
-      bankName: withdrawal.bankName,
-      accountNumber: withdrawal.bankAccountNumber,
-      accountHolderName: withdrawal.bankAccountHolder,
-      payoutId: withdrawal.providerPayoutId,
-      referenceId: withdrawal.providerReferenceId,
-      failureReason: withdrawal.failureReason,
-      createdAt: withdrawal.createdAt.toISOString(),
-      requestedAt: withdrawal.requestedAt.toISOString(),
-      processedAt: withdrawal.processedAt?.toISOString(),
-    }));
-  }
+    const page = Math.max(1, Number(query?.page) || 1);
+    const pageSize = Math.min(100, Math.max(1, Number(query?.pageSize) || Number(query?.limit) || 20));
+    const skip = (page - 1) * pageSize;
 
-  private toWalletDto(wallet: {
-    walletId: bigint;
-    storeId: bigint;
-    balance: unknown;
-    frozenBalance: unknown;
-    bankName: string | null;
-    bankAccountNumber: string | null;
-    bankAccountHolder: string | null;
-    createdAt: Date;
-    updatedAt: Date;
-  }, bankBin: string) {
-    const balance = Number(wallet.balance);
-    const frozenBalance = Number(wallet.frozenBalance);
-    const hasBankAccount = Boolean(
-      wallet.bankName && wallet.bankAccountNumber && wallet.bankAccountHolder,
-    );
+    const [items, total] = await Promise.all([
+      this.prisma.storeWithdrawal.findMany({
+        where,
+        orderBy: { requestedAt: 'desc' },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.storeWithdrawal.count({ where }),
+    ]);
 
     return {
-      id: wallet.walletId.toString(),
-      storeId: wallet.storeId.toString(),
-      balance,
-      availableBalance: Math.max(0, balance - frozenBalance),
-      pendingBalance: frozenBalance,
-      bankAccount: hasBankAccount
-        ? {
-            bankName: wallet.bankName!,
-            bankBin,
-            accountNumber: wallet.bankAccountNumber!,
-            accountHolderName: wallet.bankAccountHolder!,
-          }
-        : null,
-      // Kept for existing internal API consumers during the response-contract migration.
-      bankName: wallet.bankName,
-      bankAccountNumber: wallet.bankAccountNumber,
-      bankAccountHolder: wallet.bankAccountHolder,
-      createdAt: wallet.createdAt.toISOString(),
-      updatedAt: wallet.updatedAt.toISOString(),
+      items: WalletMapper.toWithdrawalDtoList(items),
+      total,
+      page,
+      pageSize,
     };
   }
 
-  serializeWithdrawal(withdrawal: any) {
-    return {
-      id: withdrawal.withdrawalId.toString(),
-      withdrawalCode: withdrawal.withdrawalCode,
-      amount: Number(withdrawal.amount),
-      fee: Number(withdrawal.fee),
-      netAmount: withdrawal.netAmount === null ? null : Number(withdrawal.netAmount),
-      status: withdrawal.status,
-      bankCode: withdrawal.bankCode,
-      bankName: withdrawal.bankName,
-      accountNumber: withdrawal.bankAccountNumber,
-      accountHolderName: withdrawal.bankAccountHolder,
-      payoutId: withdrawal.providerPayoutId,
-      referenceId: withdrawal.providerReferenceId,
-      failureReason: withdrawal.failureReason,
-      createdAt: withdrawal.createdAt?.toISOString(),
-      requestedAt: withdrawal.requestedAt?.toISOString(),
-      processedAt: withdrawal.processedAt?.toISOString(),
-    };
-  }
-
-  async getWithdrawal(withdrawalId: string | number | bigint) {
+  async getWithdrawal(withdrawalId: string | number | bigint, storeId?: string | number | bigint) {
     const rawId = BigInt(withdrawalId);
     const withdrawal = await this.prisma.storeWithdrawal.findUnique({
       where: { withdrawalId: rawId },
@@ -681,9 +826,21 @@ export class StoreWalletService {
     });
 
     if (!withdrawal) {
-      throw new NotFoundException('Kh�ng t�m th?y th�ng tin r�t ti?n');
+      throw new NotFoundException('Không tìm thấy thông tin rút tiền');
     }
 
-    return withdrawal;
+    if (storeId) {
+      const rawStoreId = BigInt(storeId);
+      const effectiveStoreId = withdrawal.storeId ?? withdrawal.wallet?.storeId;
+      if (effectiveStoreId && effectiveStoreId !== rawStoreId) {
+        throw new ForbiddenException({
+          success: false,
+          code: 'ACCESS_DENIED',
+          message: 'Bạn không có quyền xem thông tin rút tiền của cửa hàng khác.',
+        });
+      }
+    }
+
+    return WalletMapper.toWithdrawalDto(withdrawal);
   }
 }

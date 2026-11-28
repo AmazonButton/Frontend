@@ -68,42 +68,31 @@ export class CreatePaymentLinkDto {
   @IsUrl({ require_tld: false }, { message: 'cancelUrl phải là URL hợp lệ' })
   @Validate(IsAllowedPaymentRedirectUrlConstraint)
   cancelUrl?: string;
-
-  @IsOptional()
-  @IsString()
-  buyerName?: string;
-
-  @IsOptional()
-  @IsString()
-  buyerPhone?: string;
-
-  @IsOptional()
-  @IsString()
-  buyerEmail?: string;
-
-  @IsOptional()
-  @IsString()
-  buyerAddress?: string;
-
-  @IsOptional()
-  items?: any[];
 }
 
 export class PayosWebhookDto {
+  @IsOptional()
   @IsString()
-  code: string;
+  webhookUrl?: string;
 
-  @IsNotEmpty()
-  desc: string;
+  @IsOptional()
+  @IsString()
+  code?: string;
 
+  @IsOptional()
+  @IsString()
+  desc?: string;
+
+  @IsOptional()
   @IsBoolean({ message: 'Trường success bắt buộc phải là boolean' })
-  success: boolean;
+  success?: boolean;
 
-  @IsNotEmpty()
-  data: any;
+  @IsOptional()
+  data?: any;
 
-  @IsNotEmpty()
-  signature: string;
+  @IsOptional()
+  @IsString()
+  signature?: string;
 }
 
 export class CancelPaymentLinkDto {

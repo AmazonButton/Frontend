@@ -1,14 +1,72 @@
-﻿import { Injectable, NotFoundException } from '@nestjs/common';
+import { Injectable, NotFoundException, ForbiddenException, BadRequestException, Optional } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
+import { StoresRepository } from './stores.repository';
+import { UpdateStoreMeDto } from './dto/update-store-me.dto';
+import { StoreMeResponseDto } from './dto/store-me-response.dto';
+import { DashboardCacheService } from '../common/cache/dashboard-cache.service';
 
 @Injectable()
 export class StoresService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly storesRepo: StoresRepository,
+    @Optional() private readonly cacheService?: DashboardCacheService,
+  ) {}
 
-  async listActiveStores(query: { search?: string; page?: number; limit?: number }) {
+  async resolveStoreId(user: any): Promise<bigint> {
+    if (user?.storeId) {
+      return BigInt(user.storeId);
+    }
+    if (user?.userId || user?.id) {
+      const userId = BigInt(user.userId || user.id);
+      const store = await this.storesRepo.findStoreByOwnerUserId(userId);
+      if (store) {
+        return store.storeId;
+      }
+    }
+    throw new ForbiddenException('Tài khoản không thuộc hoặc sở hữu cửa hàng nào');
+  }
+
+  async getStoreMe(user: any): Promise<StoreMeResponseDto> {
+    const storeId = await this.resolveStoreId(user);
+    const store = await this.storesRepo.findStoreForMe(storeId);
+    if (!store) {
+      throw new NotFoundException('Cửa hàng không tồn tại');
+    }
+    return StoreMeResponseDto.fromEntity(store, user?.role);
+  }
+
+  async updateStoreMe(user: any, dto: UpdateStoreMeDto): Promise<StoreMeResponseDto> {
+    const storeId = await this.resolveStoreId(user);
+    await this.storesRepo.updateStore(storeId, dto);
+    const updated = await this.storesRepo.findStoreForMe(storeId);
+    if (this.cacheService) {
+      try {
+        await this.cacheService.invalidateKey('stores:active_page1_20');
+      } catch {
+        // Best effort cache invalidation
+      }
+    }
+    return StoreMeResponseDto.fromEntity(updated, user?.role);
+  }
+
+  async listActiveStores(query: { search?: string; page?: number; pageSize?: number; limit?: number }) {
     const page = Math.max(1, Number(query.page) || 1);
-    const limit = Math.max(1, Math.min(100, Number(query.limit) || 20));
-    const skip = (page - 1) * limit;
+    const rawPageSize = query.pageSize !== undefined ? query.pageSize : query.limit;
+    const pageSize = Math.max(1, Math.min(100, Number(rawPageSize) || 20));
+    const skip = (page - 1) * pageSize;
+
+    const isDefaultQuery = !query.search && page === 1 && pageSize === 20;
+    const cacheKey = 'stores:active_page1_20';
+
+    if (isDefaultQuery && this.cacheService) {
+      try {
+        const cached = await this.cacheService.get(cacheKey);
+        if (cached) return cached;
+      } catch {
+        // Fallback to database
+      }
+    }
 
     const where: any = {
       status: 'ACTIVE',
@@ -27,7 +85,7 @@ export class StoresService {
       this.prisma.store.findMany({
         where,
         skip,
-        take: limit,
+        take: pageSize,
         orderBy: { createdAt: 'desc' },
         include: {
           _count: {
@@ -37,7 +95,7 @@ export class StoresService {
       }),
     ]);
 
-    return {
+    const result = {
       items: stores.map((s) => ({
         storeId: s.storeId.toString(),
         name: s.name,
@@ -52,9 +110,19 @@ export class StoresService {
       })),
       total,
       page,
-      limit,
-      totalPages: Math.ceil(total / limit),
+      pageSize,
+      totalPages: Math.ceil(total / pageSize),
     };
+
+    if (isDefaultQuery && this.cacheService) {
+      try {
+        await this.cacheService.set(cacheKey, result, 30); // 30s TTL
+      } catch {
+        // Best effort
+      }
+    }
+
+    return result;
   }
 
   async getStoreById(id: string | number | bigint) {

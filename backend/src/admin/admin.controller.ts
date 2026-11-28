@@ -1,29 +1,69 @@
-import { Controller, Get, Post, Put, Param, Body, UseGuards, Request, Inject, Query } from '@nestjs/common';
+import { Controller, Get, Post, Put, Patch, Param, Body, UseGuards, Request, Inject, Query, BadRequestException, ValidationPipe } from '@nestjs/common';
 import { AdminService } from './admin.service';
 import { UpdateUserRoleDto } from './dto/update-user-role.dto';
+import { UpdateAdminStoreDto } from './dto/update-admin-store.dto';
 import { CreateSubscriptionPlanDto, UpdateSubscriptionPlanDto } from './dto/plans.dto';
 import { CreateRentalPackageDto, UpdateRentalPackageDto } from './dto/rental-packages.dto';
 import { CreatePayosBatchPayoutDto, EstimatePayoutCreditDto, ListPayosPayoutsQueryDto } from './dto/payos-payout.dto';
+import {
+  AdminDashboardQueryDto,
+  AdminTimeseriesAnalyticsQueryDto,
+  AdminStoresLeaderboardQueryDto,
+} from './dto/admin-analytics-query.dto';
+import {
+  AdminStoresQueryDto,
+  AdminUsersQueryDto,
+  AdminWithdrawalQueryDto,
+} from './dto/admin-list-query.dto';
+import { PaginationQueryDto } from '../common/dto/pagination-query.dto';
+import { buildPaginatedResponse } from '../common/utils/pagination.helper';
+import { WalletMapper } from '../store-wallet/mappers/wallet.mapper';
 import { JwtAuthGuard } from '../common/guards/jwt-auth.guard';
 import { RolesGuard } from '../common/guards/roles.guard';
 import { Roles } from '../common/decorators/roles.decorator';
 
 @UseGuards(JwtAuthGuard, RolesGuard)
-@Roles('SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN')
+@Roles('SUPER_ADMIN')
 @Controller('admin')
 export class AdminController {
   constructor(@Inject(AdminService) private readonly adminService: AdminService) {}
 
   @Get('stores/pending')
-  async listPendingStores() {
-    const data = await this.adminService.listPendingStores();
-    return { success: true, data };
+  async listPendingStores(
+    @Query(new ValidationPipe({ transform: true, whitelist: true })) query: PaginationQueryDto,
+  ) {
+    const result = await this.adminService.listPendingStores(query);
+    return buildPaginatedResponse(
+      result.items,
+      result.total,
+      result.page,
+      result.pageSize,
+      'Lấy danh sách cửa hàng chờ duyệt thành công',
+    );
   }
 
   @Get('stores')
-  async listStores() {
-    const data = await this.adminService.listAllStores();
-    return { success: true, data };
+  async listStores(
+    @Query(new ValidationPipe({ transform: true, whitelist: true })) query: AdminStoresQueryDto,
+  ) {
+    const result = await this.adminService.listAllStores(query);
+    return buildPaginatedResponse(
+      result.items,
+      result.total,
+      result.page,
+      result.pageSize,
+      'Lấy danh sách cửa hàng thành công',
+    );
+  }
+
+  @Patch('stores/:id')
+  async updateStore(
+    @Param('id') id: string,
+    @Body() dto: UpdateAdminStoreDto,
+    @Request() req: any,
+  ) {
+    const data = await this.adminService.updateStoreById(id, dto, req.user);
+    return { success: true, message: 'Cập nhật thông tin cửa hàng thành công', data };
   }
 
   @Post('stores/:id/approve')
@@ -51,9 +91,17 @@ export class AdminController {
   }
 
   @Get('users')
-  async listUsers() {
-    const data = await this.adminService.listUsers();
-    return { success: true, data };
+  async listUsers(
+    @Query(new ValidationPipe({ transform: true, whitelist: true })) query: AdminUsersQueryDto,
+  ) {
+    const result = await this.adminService.listUsers(query);
+    return buildPaginatedResponse(
+      result.items,
+      result.total,
+      result.page,
+      result.pageSize,
+      'Lấy danh sách người dùng thành công',
+    );
   }
 
   @Post('users/:id/toggle-status')
@@ -107,20 +155,43 @@ export class AdminController {
   }
 
   // Withdrawals
+  @Roles('SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN')
   @Get('withdrawals')
-  async listAllWithdrawals() {
-    const data = await this.adminService.listAllWithdrawals();
-    return { success: true, data };
+  async listAllWithdrawals(
+    @Query(new ValidationPipe({ transform: true, whitelist: true })) query: AdminWithdrawalQueryDto,
+  ) {
+    const result = await this.adminService.listAllWithdrawals(query);
+    return buildPaginatedResponse(
+      result.items,
+      result.total,
+      result.page,
+      result.pageSize,
+      'Lấy danh sách yêu cầu rút tiền thành công',
+    );
   }
 
+  @Roles('SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN')
+  @Get('withdrawals/:id')
+  async getWithdrawalById(@Param('id') id: string) {
+    const data = await this.adminService.getWithdrawalById(id);
+    return { success: true, message: 'Lấy chi tiết yêu cầu rút tiền thành công', data: WalletMapper.toWithdrawalDto(data) };
+  }
+
+  /**
+   * @deprecated Endpoint này đã bị vô hiệu hóa để bảo đảm tính toàn vẹn tài chính. Mọi khoản rút tiền phải qua PayOS Payout (/withdrawals/:id/payout).
+   */
   @Post('withdrawals/:id/transfer')
   async confirmTransfer(
     @Param('id') id: string,
     @Body('transferEvidenceUrl') transferEvidenceUrl: string,
     @Request() req: any
   ) {
-    const data = await this.adminService.confirmWithdrawalTransfer(id, transferEvidenceUrl, req.user);
-    return { success: true, message: 'Xác nhận chuyển tiền thành công!', data };
+    throw new BadRequestException({
+      success: false,
+      errorCode: 'MANUAL_TRANSFER_DEPRECATED',
+      message:
+        'Phương thức chuyển khoản thủ công đã bị vô hiệu hóa. Trạng thái rút tiền chỉ được xử lý qua PayOS Payout (POST /api/v1/admin/withdrawals/:id/payout).',
+    });
   }
 
   @Post('withdrawals/:id/reject')
@@ -130,7 +201,7 @@ export class AdminController {
     @Request() req: any
   ) {
     const data = await this.adminService.rejectWithdrawal(id, reason, req.user);
-    return { success: true, message: 'Đã từ chối và hoàn tiền vào ví cửa hàng!', data };
+    return { success: true, message: 'Đã từ chối và hoàn tiền vào ví cửa hàng!', data: WalletMapper.toWithdrawalDto(data) };
   }
   // PayOS Payout Admin Controls
   @Get('payos/payout-balance')
@@ -142,13 +213,20 @@ export class AdminController {
   @Post('withdrawals/:id/payout')
   async payoutViaPayOS(@Param('id') id: string, @Request() req: any) {
     const data = await this.adminService.payoutViaPayOS(id, req.user);
-    return { success: true, message: '�� g?i l?nh chi ti?n PayOS th�nh c�ng!', data };
+    return { success: true, message: 'Đã gửi lệnh chi tiền PayOS thành công!', data: WalletMapper.toWithdrawalDto(data) };
   }
 
-    @Post('withdrawals/:id/sync-payout')
+  @Post('withdrawals/:id/sync-payout')
   async syncPayoutStatus(@Param('id') id: string) {
     const data = await this.adminService.syncPayoutStatus(id);
-    return { success: true, message: 'Đã đồng bộ trạng thái chi tiền PayOS!', data };
+    return {
+      success: true,
+      message: data.message || 'Đã đồng bộ trạng thái chi tiền PayOS!',
+      data: {
+        withdrawal: data.withdrawal,
+        reconciliation: data.reconciliation,
+      },
+    };
   }
 
   @Post('payos/payouts/batch')
@@ -167,5 +245,45 @@ export class AdminController {
   async listPayosPayouts(@Query() query: ListPayosPayoutsQueryDto) {
     const res = await this.adminService.listPayosPayouts(query);
     return { success: true, data: res?.data || res };
+  }
+
+  @Roles('SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN')
+  @Get('dashboard')
+  async getDashboard(@Query() query: AdminDashboardQueryDto) {
+    const data = await this.adminService.getDashboard(query);
+    return { success: true, message: 'Lấy dữ liệu dashboard quản trị thành công', data };
+  }
+
+  @Roles('SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN')
+  @Get('analytics/revenue')
+  async getRevenueAnalytics(@Query() query: AdminTimeseriesAnalyticsQueryDto) {
+    const data = await this.adminService.getRevenueAnalytics(query);
+    return { success: true, message: 'Lấy dữ liệu phân tích doanh thu thành công', data };
+  }
+
+  @Roles('SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN')
+  @Get('analytics/growth')
+  async getGrowthAnalytics(@Query() query: AdminTimeseriesAnalyticsQueryDto) {
+    const data = await this.adminService.getGrowthAnalytics(query);
+    return { success: true, message: 'Lấy dữ liệu phân tích tăng trưởng thành công', data };
+  }
+
+  @Roles('SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN')
+  @Get('analytics/operations')
+  async getOperationsAnalytics() {
+    const data = await this.adminService.getOperationsAnalytics();
+    return { success: true, message: 'Lấy dữ liệu vận hành hệ thống thành công', data };
+  }
+
+  @Roles('SUPER_ADMIN', 'SYSTEM_ADMIN', 'ADMIN')
+  @Get('analytics/stores')
+  async getStoresLeaderboard(@Query() query: AdminStoresLeaderboardQueryDto) {
+    const result = await this.adminService.getStoresLeaderboard(query);
+    return {
+      success: true,
+      message: 'Lấy bảng xếp hạng cửa hàng thành công',
+      data: result.stores,
+      pagination: result.pagination,
+    };
   }
 }

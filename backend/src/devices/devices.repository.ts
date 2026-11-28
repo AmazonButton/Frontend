@@ -1,4 +1,4 @@
-import { Injectable, Inject } from '@nestjs/common';
+import { Injectable, Inject, NotFoundException, BadRequestException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
@@ -9,24 +9,43 @@ export class DevicesRepository {
     return this.prisma.ioTButton.count({ where: whereClause });
   }
 
-  async findStoreById(storeId: bigint) {
-    return this.prisma.store.findUnique({
-      where: { storeId },
-    });
-  }
+  async findMany(whereClause: any, pagination?: { page?: number; pageSize?: number }) {
+    const rawPage = Number(pagination?.page);
+    const rawPageSize = Number(pagination?.pageSize);
+    const page = Number.isSafeInteger(rawPage) && rawPage >= 1 ? Math.min(500, rawPage) : 1;
+    const pageSize = Number.isSafeInteger(rawPageSize) && rawPageSize >= 1 ? Math.min(100, rawPageSize) : 20;
+    const skip = (page - 1) * pageSize;
+    const take = pageSize;
 
-  async findMany(whereClause: any) {
-    return this.prisma.ioTButton.findMany({
-      where: whereClause,
-      include: {
-        store: true,
-        customer: { include: { user: true } },
-        address: true,
-        buttonProducts: { include: { product: true } },
-        deployedTemplate: true,
-      },
-      orderBy: { createdAt: 'desc' },
-    });
+    const [items, total] = await Promise.all([
+      this.prisma.ioTButton.findMany({
+        where: whereClause,
+        include: {
+          store: true,
+          customer: { include: { user: true } },
+          address: true,
+          buttonProducts: { include: { product: true } },
+          deployedTemplate: true,
+          rental: {
+            select: {
+              rentalId: true,
+              rentalCode: true,
+              status: true,
+              startDate: true,
+              endDate: true,
+              paidThrough: true,
+              effectiveExpiresAt: true,
+            },
+          },
+        },
+        orderBy: [{ createdAt: 'desc' }, { buttonId: 'desc' }],
+        skip,
+        take,
+      }),
+      this.prisma.ioTButton.count({ where: whereClause }),
+    ]);
+
+    return { items, total, page, pageSize };
   }
 
   async findById(buttonId: bigint) {
@@ -38,6 +57,17 @@ export class DevicesRepository {
         address: true,
         buttonProducts: { include: { product: true } },
         deployedTemplate: true,
+        rental: {
+          select: {
+            rentalId: true,
+            rentalCode: true,
+            status: true,
+            startDate: true,
+            endDate: true,
+            paidThrough: true,
+            effectiveExpiresAt: true,
+          },
+        },
       },
     });
   }
@@ -51,6 +81,17 @@ export class DevicesRepository {
         address: true,
         buttonProducts: { include: { product: true } },
         deployedTemplate: true,
+        rental: {
+          select: {
+            rentalId: true,
+            rentalCode: true,
+            status: true,
+            startDate: true,
+            endDate: true,
+            paidThrough: true,
+            effectiveExpiresAt: true,
+          },
+        },
       },
     });
   }
@@ -71,6 +112,17 @@ export class DevicesRepository {
         address: true,
         buttonProducts: { include: { product: true } },
         deployedTemplate: true,
+        rental: {
+          select: {
+            rentalId: true,
+            rentalCode: true,
+            status: true,
+            startDate: true,
+            endDate: true,
+            paidThrough: true,
+            effectiveExpiresAt: true,
+          },
+        },
       },
     });
   }
@@ -84,11 +136,45 @@ export class DevicesRepository {
         address: true,
         buttonProducts: { include: { product: true } },
         deployedTemplate: true,
+        rental: {
+          select: {
+            rentalId: true,
+            rentalCode: true,
+            status: true,
+            startDate: true,
+            endDate: true,
+            paidThrough: true,
+            effectiveExpiresAt: true,
+          },
+        },
       },
     });
   }
 
   async update(buttonId: bigint, data: any) {
+    if (data.status === 'ACTIVE') {
+      // A manual enable clears the operational stop, not the rental/payment boundary.
+      return this.prisma.$transaction(async tx => {
+        const rows = await tx.$queryRawUnsafe<any[]>('SELECT * FROM iot_button WHERE button_id = $1 FOR UPDATE', buttonId);
+        const button = rows[0];
+        if (!button) throw new NotFoundException('Không tìm thấy thiết bị IoT Button');
+        let update = data;
+        if (button.rental_id != null) {
+          const rentals = await tx.$queryRawUnsafe<any[]>('SELECT * FROM button_rentals WHERE rental_id = $1 FOR UPDATE', button.rental_id);
+          const rental = rentals[0];
+          const returning = await tx.rentalReturn.count({ where: { rentalId: button.rental_id, buttonId,
+            status: { in: ['PENDING_RECEIPT', 'RECEIVED'] } } });
+          const allowed = rental?.status === 'ACTIVE' && rental.customer_id === button.customer_id &&
+            rental.effective_expires_at != null && new Date(rental.effective_expires_at) > new Date() &&
+            button.inventory_state === 'IN_CUSTOMER_CUSTODY' && returning === 0;
+          update = { ...data, canOrder: allowed };
+        }
+        return tx.ioTButton.update({ where: { buttonId }, data: update, include: {
+          store: true, customer: { include: { user: true } }, address: true,
+          buttonProducts: { include: { product: true } }, deployedTemplate: true,
+        } });
+      });
+    }
     return this.prisma.ioTButton.update({
       where: { buttonId },
       data,
@@ -98,6 +184,17 @@ export class DevicesRepository {
         address: true,
         buttonProducts: { include: { product: true } },
         deployedTemplate: true,
+        rental: {
+          select: {
+            rentalId: true,
+            rentalCode: true,
+            status: true,
+            startDate: true,
+            endDate: true,
+            paidThrough: true,
+            effectiveExpiresAt: true,
+          },
+        },
       },
     });
   }
@@ -111,6 +208,31 @@ export class DevicesRepository {
 
   async setButtonProducts(buttonId: bigint, products: { productId: bigint; quantity: number }[]) {
     return this.prisma.$transaction(async (tx) => {
+      // 1. Lock button row exclusively FIRST to serialize against concurrent store remapping
+      const [button] = await tx.$queryRaw<Array<{ button_id: bigint; store_id: bigint }>>`
+        SELECT button_id, store_id FROM iot_button
+        WHERE button_id = ${buttonId}
+        FOR UPDATE
+      `;
+      if (!button) {
+        throw new NotFoundException('Không tìm thấy thiết bị IoT Button');
+      }
+
+      if (products.length > 0) {
+        const productIds = products.map((p) => p.productId);
+        const validProducts = await tx.product.findMany({
+          where: {
+            productId: { in: productIds },
+            storeId: button.store_id,
+          },
+          select: { productId: true },
+        });
+
+        if (validProducts.length !== productIds.length) {
+          throw new BadRequestException('Một hoặc nhiều sản phẩm không thuộc cửa hàng sở hữu nút bấm này.');
+        }
+      }
+
       await tx.buttonProduct.deleteMany({ where: { buttonId } });
       if (products.length > 0) {
         await tx.buttonProduct.createMany({
@@ -126,7 +248,6 @@ export class DevicesRepository {
         include: {
           store: true,
           customer: { include: { user: true } },
-          address: true,
           buttonProducts: { include: { product: true } },
           deployedTemplate: true,
         },
@@ -180,11 +301,6 @@ export class DevicesRepository {
   async findTemplates(whereClause: any) {
     return this.prisma.deviceTemplate.findMany({
       where: whereClause,
-      include: {
-        _count: {
-          select: { deployedButtons: true },
-        },
-      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -228,7 +344,17 @@ export class DevicesRepository {
 
   async remapStore(buttonId: bigint, newStoreId: bigint, customerId?: bigint) {
     return this.prisma.$transaction(async (tx) => {
-      // 1. Clear old button products
+      // 1. Lock button row exclusively FIRST using identical lock order (button -> mappings)
+      const [button] = await tx.$queryRaw<Array<{ button_id: bigint; store_id: bigint }>>`
+        SELECT button_id, store_id FROM iot_button
+        WHERE button_id = ${buttonId}
+        FOR UPDATE
+      `;
+      if (!button) {
+        throw new NotFoundException('Không tìm thấy thiết bị IoT Button để remap');
+      }
+
+      // 2. Clear old button products
       await tx.buttonProduct.deleteMany({ where: { buttonId } });
 
       // 2. Update button store
@@ -299,12 +425,13 @@ export class DevicesRepository {
   async deployTemplateAtomicTx(buttonId: bigint, template: {
     singlePressAction?: string | null;
     doublePressAction?: string | null;
+    longPressAction?: string | null;
     defaultQuantity?: number | null;
     cancelWindowSeconds?: number | null;
     doubleClickWindowMs?: number | null;
     templateId?: bigint | null;
     deployedTemplateId?: bigint | null;
-    productId?: bigint | null;
+    defaultProductId?: bigint | null;
   }) {
     return this.prisma.$transaction(async (tx) => {
       // 1. Lock button row for update
@@ -330,6 +457,7 @@ export class DevicesRepository {
         clickBehavior,
         singlePressAction: template.singlePressAction !== undefined ? template.singlePressAction : undefined,
         doublePressAction: template.doublePressAction !== undefined ? template.doublePressAction : undefined,
+        longPressAction: template.longPressAction !== undefined ? template.longPressAction : undefined,
         cancelWindowSeconds: template.cancelWindowSeconds !== undefined ? template.cancelWindowSeconds : undefined,
       };
       if (targetTemplateId !== undefined) {
@@ -348,16 +476,27 @@ export class DevicesRepository {
           address: true,
           buttonProducts: { include: { product: true } },
           deployedTemplate: true,
+          rental: {
+            select: {
+              rentalId: true,
+              rentalCode: true,
+              status: true,
+              startDate: true,
+              endDate: true,
+              paidThrough: true,
+              effectiveExpiresAt: true,
+            },
+          },
         },
       });
 
-      // 3. Atomically update button product
-      if (template.productId) {
+      // 3. Atomically map default product and default quantity if specified
+      if (template.defaultProductId) {
         await tx.buttonProduct.deleteMany({ where: { buttonId } });
         await tx.buttonProduct.create({
           data: {
             buttonId,
-            productId: template.productId,
+            productId: template.defaultProductId,
             quantity: template.defaultQuantity && template.defaultQuantity > 0 ? template.defaultQuantity : 1,
           },
         });
@@ -372,4 +511,103 @@ export class DevicesRepository {
     });
   }
 
+  async allocateDevicesToStoreTx(targetStoreId: bigint, deviceIds: string[]) {
+    return this.prisma.$transaction(async (tx) => {
+      const store = await tx.store.findUnique({
+        where: { storeId: targetStoreId },
+        include: { owner: true },
+      });
+      if (!store) {
+        throw new NotFoundException('Cửa hàng đích không tồn tại');
+      }
+      if (store.status !== 'ACTIVE') {
+        throw new BadRequestException('Cửa hàng đích không hoạt động');
+      }
+
+      // Khóa các thiết bị bằng SELECT ... FOR UPDATE (Select đầy đủ trường trạng thái)
+      const lockedButtons = await tx.$queryRawUnsafe<any[]>(
+        'SELECT button_id, device_id, store_id, custody_store_id, inventory_state, rental_id, customer_id, status FROM iot_button WHERE device_id = ANY($1::text[]) FOR UPDATE',
+        deviceIds,
+      );
+
+      const foundMap = new Map<string, any>();
+      lockedButtons.forEach((b) => foundMap.set(b.device_id, b));
+
+      const missingIds = deviceIds.filter((id) => !foundMap.has(id));
+      if (missingIds.length > 0) {
+        throw new NotFoundException(`Các thiết bị không tồn tại: ${missingIds.join(', ')}`);
+      }
+
+      for (const b of lockedButtons) {
+        if (b.rental_id || b.customer_id) {
+          throw new BadRequestException(`Thiết bị ${b.device_id} đang được khách hàng thuê/sở hữu, không thể phân bổ vào kho`);
+        }
+        if (b.inventory_state === 'RETURN_IN_TRANSIT') {
+          throw new BadRequestException(`Thiết bị ${b.device_id} đang trong quá trình luân chuyển trả hàng`);
+        }
+        if (b.custody_store_id && BigInt(b.custody_store_id) !== targetStoreId) {
+          throw new BadRequestException(`Thiết bị ${b.device_id} đã được giữ bởi kho cửa hàng khác`);
+        }
+      }
+
+      // CẬP NHẬT: Chỉ cập nhật custodyStoreId và inventoryState, KHÔNG ghi đè storeId (Store routing đặt hàng)
+      await tx.ioTButton.updateMany({
+        where: { deviceId: { in: deviceIds } },
+        data: {
+          custodyStoreId: targetStoreId,
+          inventoryState: 'ALLOCATED_TO_STORE',
+          status: 'ACTIVE',
+        },
+      });
+
+      // Record device movements từ nguồn thực tế (từ custody hiện tại hoặc kho sàn)
+      for (const b of lockedButtons) {
+        const sourceStoreId = b.custody_store_id ? BigInt(b.custody_store_id) : null;
+        await tx.deviceMovement.create({
+          data: {
+            buttonId: BigInt(b.button_id),
+            sourceType: sourceStoreId ? 'STORE' : 'PLATFORM_WAREHOUSE',
+            sourceStoreId,
+            destType: 'STORE',
+            destStoreId: targetStoreId,
+            reason: 'Phân bổ nút từ kho sàn về kho cửa hàng',
+          },
+        });
+      }
+
+      return {
+        store,
+        targetStoreId,
+        ownerUserId: store.ownerUserId ? store.ownerUserId.toString() : (store.owner?.userId ? store.owner.userId.toString() : null),
+        deviceIds,
+        inventoryState: 'ALLOCATED_TO_STORE',
+        custodyStoreId: targetStoreId,
+      };
+    });
+  }
+
+  async getStoreDeviceInventory(storeId: bigint) {
+    const [inStockInStore, deployedOnStoreCatalog, rentedByCustomers, totalCustody] = await Promise.all([
+      this.prisma.ioTButton.count({
+        where: { custodyStoreId: storeId, inventoryState: 'ALLOCATED_TO_STORE', customerId: null },
+      }),
+      this.prisma.ioTButton.count({
+        where: { storeId, buttonProducts: { some: {} } },
+      }),
+      this.prisma.ioTButton.count({
+        where: { custodyStoreId: storeId, inventoryState: 'IN_CUSTOMER_CUSTODY' },
+      }),
+      this.prisma.ioTButton.count({
+        where: { custodyStoreId: storeId },
+      }),
+    ]);
+
+    return {
+      storeId: storeId.toString(),
+      inStockInStore,
+      deployedOnStoreCatalog,
+      rentedByCustomers,
+      totalCustody,
+    };
+  }
 }

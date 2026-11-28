@@ -6,6 +6,7 @@ import { createDeviceTelemetry, deviceRuntime } from '../../services/device-runt
 import { api, apiSessionMarker } from '../../services/api';
 import { createDevicePageLoader, assertDeviceScope, upsertScopedDevice, normalizeDevice, readDeviceCache, saveDeviceCache, hasBleReceipt } from '../../services/device-connection';
 import { toast } from '../../context/ToastContext';
+import { rentalsService } from '../../services/rentals.service';
 import { useAuth } from '../../context/AuthContext';
 import { deviceDashboardMetrics, formatMetric } from '../../services/dashboard-metrics';
 import { useDashboardRefresh } from '../../hooks/useDashboardRefresh';
@@ -65,6 +66,7 @@ import {
   MousePointerClick,
   Timer,
   ShieldAlert,
+  Banknote,
 } from 'lucide-react';
 import { Link } from 'react-router-dom';
 const WhiteDeviceAirPodsModal = React.lazy(() => import('../../components/devices/WhiteDeviceAirPodsModal').then(m => ({ default: m.WhiteDeviceAirPodsModal })));
@@ -420,6 +422,19 @@ const StoreDevicesWorkspace: React.FC = () => {
   const [deletingDevice, setDeletingDevice] = useState<Device | null>(null);
   const [deleteLoading, setDeleteLoading] = useState(false);
 
+  // 8.2 Store Cash Collection & Handover Wizard State
+  const [cashModalOpen, setCashModalOpen] = useState(false);
+  const [cashStep, setCashStep] = useState<1 | 2 | 3>(1);
+  const [cashRentalId, setCashRentalId] = useState('');
+  const [cashChargeId, setCashChargeId] = useState('');
+  const [cashVoucherToken, setCashVoucherToken] = useState('');
+  const [cashPreview, setCashPreview] = useState<any | null>(null);
+  const [cashPreviewLoading, setCashPreviewLoading] = useState(false);
+  const [cashHandoverMode, setCashHandoverMode] = useState<'IMMEDIATE' | 'DEFERRED'>('IMMEDIATE');
+  const [cashSelectedButtonIds, setCashSelectedButtonIds] = useState<string[]>([]);
+  const [cashSubmitting, setCashSubmitting] = useState(false);
+  const [cashReceipt, setCashReceipt] = useState<any | null>(null);
+
   // SmartSupply Behavior Designer Modal State
   const [behaviorDevice, setBehaviorDevice] = useState<Device | null>(null);
   const [behaviorSaving, setBehaviorSaving] = useState(false);
@@ -442,7 +457,8 @@ const StoreDevicesWorkspace: React.FC = () => {
     editingDevice ||
     deletingDevice ||
     simulationResult ||
-    behaviorDevice
+    behaviorDevice ||
+    cashModalOpen
   );
   useBodyScrollLock(isAnyModalOpen);
 
@@ -587,7 +603,11 @@ const StoreDevicesWorkspace: React.FC = () => {
         await fetchData();
       }
     } catch (err: any) {
-      alert(err.response?.data?.message || 'Không thể xóa thiết bị');
+      if (err.response?.status === 409 || err.response?.data?.error === 'DEVICE_ACTIVE_CONTRACT_CONFLICT' || err.response?.data?.code === 'CONFLICT') {
+        alert(err.response?.data?.message || 'Không thể xóa thiết bị: Thiết bị đang gắn hợp đồng thuê còn hiệu lực hoặc đang được khách hàng sử dụng (HTTP 409 Conflict).');
+      } else {
+        alert(err.response?.data?.message || 'Không thể xóa thiết bị');
+      }
     } finally {
       setDeleteLoading(false);
     }
@@ -1122,6 +1142,22 @@ const StoreDevicesWorkspace: React.FC = () => {
                     <button
                       type="button"
                       onClick={() => {
+                        setCashModalOpen(true);
+                        setCashStep(1);
+                        setCashPreview(null);
+                        setCashReceipt(null);
+                        setCashSelectedButtonIds([]);
+                        setShowToolsDropdown(false);
+                      }}
+                      className="w-full px-3 py-1.5 text-left hover:bg-emerald-50 dark:hover:bg-emerald-950/30 text-emerald-700 dark:text-emerald-300 flex items-center gap-2 transition-colors font-semibold"
+                    >
+                      <Banknote className="w-3.5 h-3.5 text-emerald-600" strokeWidth={1.5} />
+                      <span>Thu tiền thuê & Giao nút tại quầy</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
                         setShowWizard(true);
                         setWizardStep(1);
                         setWizardError(null);
@@ -1402,6 +1438,13 @@ const StoreDevicesWorkspace: React.FC = () => {
                           {runtime.label}
                         </span>
                       </div>
+                      {(device as any).customerChildLock && (
+                        <div className="mt-1">
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 text-amber-700 border border-amber-200 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900" title="Khách hàng đang bật Khóa trẻ em (customerChildLock)">
+                            👶 Khách bật khóa trẻ em
+                          </span>
+                        </div>
+                      )}
                       {runtime.hint && <p className="mt-1 max-w-[220px] whitespace-normal text-[11px] leading-4 text-zinc-500">{runtime.hint}</p>}
                       {deviceErrors[device.deviceId] && <p role="alert" className="mt-1 max-w-[220px] whitespace-normal text-[11px] leading-4 text-amber-700 dark:text-amber-300">{deviceErrors[device.deviceId]}</p>}
                     </td>
@@ -3514,6 +3557,215 @@ const StoreDevicesWorkspace: React.FC = () => {
         availableProducts={products}
         onDeviceBound={saved => { deviceRevision.current++; setDevices(previous => { const next = upsertScopedDevice(previous, saved, user); try { saveDeviceCache(sessionStorage, user, next); } catch {} return next; }); setDevicesReady(true); void fetchData(); }}
       /></Suspense>}
+
+      {/* 8.2 Modal Thu tiền mặt & Bàn giao Nút tại Quầy (Store Cash Collection & Handover Wizard) */}
+      {cashModalOpen && createPortal(
+        <div className="fixed inset-0 z-[120] flex items-center justify-center p-4 bg-slate-950/60 backdrop-blur-sm">
+          <div className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 p-6 shadow-2xl space-y-4 text-xs">
+            <div className="flex items-center justify-between border-b border-zinc-100 dark:border-zinc-800 pb-3">
+              <div className="flex items-center gap-2">
+                <Banknote className="w-5 h-5 text-emerald-600" />
+                <div>
+                  <h3 className="text-sm font-bold text-zinc-900 dark:text-white">Thu tiền thuê & Bàn giao nút tại quầy</h3>
+                  <p className="text-[11px] text-zinc-500">Bước {cashStep}/3 · Đối soát Cash Voucher và cấn trừ ví cửa hàng</p>
+                </div>
+              </div>
+              <button type="button" onClick={() => setCashModalOpen(false)} className="text-zinc-400 hover:text-zinc-600">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {cashStep === 1 && (
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  const storeId = String((user as any)?.storeId || (user as any)?.store?.storeId || (user as any)?.store?.id || '');
+                  if (!storeId) {
+                    toast.error('Không xác định được cửa hàng hiện tại.');
+                    return;
+                  }
+                  setCashPreviewLoading(true);
+                  try {
+                    const preview = await rentalsService.getHandoverPreview(storeId, cashRentalId.trim());
+                    setCashPreview(preview);
+                    setCashStep(2);
+                  } catch (err: any) {
+                    toast.error(err?.response?.data?.message || 'Không tra cứu được hợp đồng hoặc kho nút bàn giao.');
+                  } finally {
+                    setCashPreviewLoading(false);
+                  }
+                }}
+                className="space-y-3"
+              >
+                <p className="text-zinc-600 dark:text-zinc-300">
+                  Nhập thông tin từ QR Cash Voucher của khách hàng để kiểm tra hợp đồng và danh sách nút khả dụng trong kho.
+                </p>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <label className="block font-semibold text-zinc-700 dark:text-zinc-300">
+                    Mã hợp đồng (rentalId) *
+                    <input
+                      required
+                      value={cashRentalId}
+                      onChange={(e) => setCashRentalId(e.target.value)}
+                      placeholder="VD: 125"
+                      className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs"
+                    />
+                  </label>
+                  <label className="block font-semibold text-zinc-700 dark:text-zinc-300">
+                    Mã khoản thu (chargeId) *
+                    <input
+                      required
+                      value={cashChargeId}
+                      onChange={(e) => setCashChargeId(e.target.value)}
+                      placeholder="VD: 45"
+                      className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs"
+                    />
+                  </label>
+                </div>
+                <label className="block font-semibold text-zinc-700 dark:text-zinc-300">
+                  Mã QR Token (64 ký tự hex) *
+                  <input
+                    required
+                    value={cashVoucherToken}
+                    onChange={(e) => setCashVoucherToken(e.target.value)}
+                    placeholder="Dán chuỗi voucherToken từ khách hàng (hoặc JSON QR)..."
+                    className="mt-1 w-full rounded-lg border border-zinc-200 dark:border-zinc-700 bg-zinc-50 dark:bg-zinc-950 px-3 py-2 text-xs font-mono"
+                  />
+                </label>
+                <div className="flex justify-end gap-2 pt-2">
+                  <button type="button" onClick={() => setCashModalOpen(false)} className="px-3.5 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 font-semibold">
+                    Hủy
+                  </button>
+                  <button type="submit" disabled={cashPreviewLoading} className="px-4 py-2 rounded-lg bg-[#287DA8] hover:bg-[#206588] disabled:opacity-50 text-white font-semibold flex items-center gap-1.5">
+                    {cashPreviewLoading && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    <span>Kiểm tra hợp đồng & kho nút</span>
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {cashStep === 2 && cashPreview && (
+              <div className="space-y-4">
+                <div className="rounded-xl bg-zinc-50 dark:bg-zinc-800/60 p-3.5 space-y-1">
+                  <p>Hợp đồng: <strong>#{cashPreview.rentalId}</strong> · Trạng thái: <strong>{cashPreview.status}</strong></p>
+                  <p>Số lượng nút cần giao: <strong>{cashPreview.buttonQuantity} nút</strong></p>
+                  <p>Tiền cọc / thuê thu tại quầy: <strong className="text-emerald-600">{Number(cashPreview.depositAmount || cashPreview.totalRentAmount || 0).toLocaleString('vi-VN')} ₫</strong></p>
+                </div>
+
+                <div className="space-y-2">
+                  <span className="font-semibold block text-zinc-700 dark:text-zinc-300">Hình thức bàn giao thiết bị:</span>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setCashHandoverMode('IMMEDIATE')}
+                      className={`p-2.5 rounded-xl border text-left ${cashHandoverMode === 'IMMEDIATE' ? 'border-[#287DA8] bg-sky-50/60 dark:bg-sky-950/30 font-semibold' : 'border-zinc-200 dark:border-zinc-700'}`}
+                    >
+                      <span className="block">Giao nút ngay (IMMEDIATE)</span>
+                      <span className="text-[10px] text-zinc-500 font-normal">Đưa nút tận tay khách tại quầy</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setCashHandoverMode('DEFERRED')}
+                      className={`p-2.5 rounded-xl border text-left ${cashHandoverMode === 'DEFERRED' ? 'border-[#287DA8] bg-sky-50/60 dark:bg-sky-950/30 font-semibold' : 'border-zinc-200 dark:border-zinc-700'}`}
+                    >
+                      <span className="block">Chỉ thu tiền (DEFERRED)</span>
+                      <span className="text-[10px] text-zinc-500 font-normal">Bàn giao thiết bị sau</span>
+                    </button>
+                  </div>
+                </div>
+
+                {cashHandoverMode === 'IMMEDIATE' && (
+                  <div className="space-y-1.5">
+                    <span className="font-semibold block text-zinc-700 dark:text-zinc-300">
+                      Chọn đúng {cashPreview.buttonQuantity} nút khả dụng trong kho ({cashPreview.availableStoreButtons?.length || 0}):
+                    </span>
+                    <div className="max-h-40 overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-700 p-2 space-y-1">
+                      {(cashPreview.availableStoreButtons || []).map((b: any) => {
+                        const bid = String(b.buttonId);
+                        const checked = cashSelectedButtonIds.includes(bid);
+                        return (
+                          <label key={bid} className="flex items-center gap-2 p-1 hover:bg-zinc-50 dark:hover:bg-zinc-800 rounded cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={() => setCashSelectedButtonIds((prev) => checked ? prev.filter((x) => x !== bid) : [...prev, bid])}
+                              className="accent-[#287DA8]"
+                            />
+                            <span className="font-mono font-semibold">{b.deviceId}</span>
+                            <span className="text-zinc-400">({b.buttonCode || `#${bid}`})</span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                <div className="flex justify-end gap-2 pt-2">
+                  <button type="button" onClick={() => setCashStep(1)} className="px-3.5 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 font-semibold">
+                    Quay lại
+                  </button>
+                  <button
+                    type="button"
+                    disabled={cashSubmitting || (cashHandoverMode === 'IMMEDIATE' && cashSelectedButtonIds.length !== Number(cashPreview.buttonQuantity || 1))}
+                    onClick={async () => {
+                      const storeId = String((user as any)?.storeId || (user as any)?.store?.storeId || (user as any)?.store?.id || '');
+                      let parsedToken = cashVoucherToken.trim();
+                      try {
+                        const maybeJson = JSON.parse(parsedToken);
+                        if (maybeJson?.voucherToken) parsedToken = String(maybeJson.voucherToken);
+                      } catch {}
+                      setCashSubmitting(true);
+                      try {
+                        const payload = cashHandoverMode === 'IMMEDIATE'
+                          ? { chargeId: cashChargeId.trim(), voucherToken: parsedToken, handover: 'IMMEDIATE' as const, buttonIds: cashSelectedButtonIds }
+                          : { chargeId: cashChargeId.trim(), voucherToken: parsedToken, handover: 'DEFERRED' as const };
+                        const collected = await rentalsService.confirmCashCollection(storeId, cashRentalId.trim(), payload);
+                        const receiptDetail = collected?.receiptId
+                          ? await rentalsService.getCashReceipt(storeId, collected.receiptId).catch(() => collected)
+                          : collected;
+                        setCashReceipt(receiptDetail);
+                        setCashStep(3);
+                        toast.success('Đã thu tiền mặt & cập nhật ví thành công!');
+                        void fetchData();
+                      } catch (err: any) {
+                        toast.error(err?.response?.data?.message || 'Không thể xác nhận thu tiền mặt.');
+                      } finally {
+                        setCashSubmitting(false);
+                      }
+                    }}
+                    className="px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-semibold flex items-center gap-1.5"
+                  >
+                    {cashSubmitting && <RefreshCw className="w-3.5 h-3.5 animate-spin" />}
+                    <span>Xác nhận đã thu đủ tiền mặt</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {cashStep === 3 && cashReceipt && (
+              <div className="space-y-4">
+                <div className="rounded-xl border border-emerald-200 bg-emerald-50 dark:border-emerald-900/50 dark:bg-emerald-950/30 p-4 space-y-1.5 text-emerald-900 dark:text-emerald-200">
+                  <div className="flex items-center gap-2 font-bold text-sm">
+                    <CheckCircle2 className="w-5 h-5 text-emerald-600" />
+                    <span>Biên lai thu tiền mặt #{cashReceipt.receiptId}</span>
+                  </div>
+                  <p>Số tiền đã thu & cấn trừ ví: <strong>{Number(cashReceipt.amount || 0).toLocaleString('vi-VN')} ₫</strong></p>
+                  <p>Mã khoản thu (Charge): <strong>#{cashReceipt.chargeId}</strong></p>
+                  <p>Thời gian ghi nhận: <strong>{cashReceipt.createdAt ? new Date(cashReceipt.createdAt).toLocaleString('vi-VN') : 'Vừa xong'}</strong></p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCashModalOpen(false)}
+                  className="w-full py-2.5 rounded-xl bg-[#287DA8] text-white font-semibold"
+                >
+                  Hoàn tất & Đóng
+                </button>
+              </div>
+            )}
+          </div>
+        </div>,
+        document.body
+      )}
     </div>
   );
 };

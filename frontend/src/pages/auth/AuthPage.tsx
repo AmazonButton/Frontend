@@ -6,6 +6,7 @@ import axios from 'axios';
 import { useGoogleLogin, useGoogleOAuth } from '@react-oauth/google';
 import { getGoogleLoginError, getGooglePopupError } from '../../services/google-auth-errors';
 import { useAuth } from '../../context/AuthContext';
+import { resolvePostLoginRedirect } from '../../utils/authority';
 import { useFooterMotion } from '../../components/common/useFooterMotion';
 import { toast } from '../../context/ToastContext';
 import { api } from '../../services/api';
@@ -52,7 +53,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
   const footerRef = useFooterMotion();
   const location = useLocation();
   const navigate = useNavigate();
-  const locationState = location.state as { email?: string; message?: string } | undefined;
+  const locationState = location.state as { email?: string; message?: string; from?: { pathname?: string; search?: string; hash?: string } } | undefined;
   const { login } = useAuth();
 
   // Mode state: 'login' | 'register'
@@ -148,13 +149,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
         const user = res.data.user || res.data.data?.user;
 
         login(token, user, refreshToken);
-        const targetHome = (() => {
-          if (['STORE_OWNER'].includes(user.role)) return '/store/dashboard';
-          if (user.role === 'SYSTEM_STAFF') return '/system-staff/devices';
-          if (user.role === 'CUSTOMER') return '/shop';
-          if (['SUPER_ADMIN', 'ADMIN', 'SYSTEM_ADMIN'].includes(user.role)) return '/admin/dashboard';
-          return '/';
-        })();
+        const targetHome = resolvePostLoginRedirect(user.role, locationState?.from);
         navigate(targetHome, { replace: true });
       }
     } catch (err: any) {
@@ -199,6 +194,9 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
   const [registerError, setRegisterError] = useState<string | null>(null);
   const [registrationSuccess, setRegistrationSuccess] = useState(false);
   const [registeredEmail, setRegisteredEmail] = useState('');
+  const [pendingVerifyEmail, setPendingVerifyEmail] = useState<string>(() => {
+    try { return sessionStorage.getItem('sob_pending_verify_email') || ''; } catch { return ''; }
+  });
   const [isEnteringDashboard, setIsEnteringDashboard] = useState(false);
 
   const usernameTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -267,15 +265,7 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
                 : 'Đăng nhập Google thành công!')
           );
 
-          if (['SUPER_ADMIN', 'ADMIN', 'SYSTEM_ADMIN'].includes(user?.role)) {
-            navigate('/admin/dashboard');
-          } else if (user?.role === 'SYSTEM_STAFF') {
-            navigate('/system-staff/devices');
-          } else if (user?.role === 'STORE_OWNER') {
-            navigate('/store/dashboard');
-          } else {
-            navigate(user?.role === 'CUSTOMER' ? '/shop' : '/');
-          }
+          navigate(resolvePostLoginRedirect(user?.role, locationState?.from), { replace: true });
           return;
         }
       }
@@ -467,7 +457,12 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
       });
 
       if (res.data?.success || res.status === 201) {
-        setRegisteredEmail(registerEmail.trim().toLowerCase());
+        const regEmailNorm = registerEmail.trim().toLowerCase();
+        setRegisteredEmail(regEmailNorm);
+        try {
+          sessionStorage.setItem('sob_pending_verify_email', regEmailNorm);
+          setPendingVerifyEmail(regEmailNorm);
+        } catch {}
         setRegisteredData(res.data);
 
         // Pre-fill login credentials
@@ -1105,6 +1100,39 @@ export const AuthPage: React.FC<AuthPageProps> = ({ initialMode }) => {
                             <span>Khách Hàng</span>
                           </button>
                         </div>
+
+                        {/* Pending OTP Verification Recovery Banner (1.2) */}
+                        {pendingVerifyEmail && (
+                          <div className="p-3.5 rounded-xl bg-sky-50 border border-sky-200 text-sky-900 text-xs space-y-2">
+                            <div className="flex items-start gap-2">
+                              <Mail className="w-4 h-4 shrink-0 mt-0.5 text-[#0284c7]" />
+                              <div>
+                                <p className="font-semibold">Bạn đang có email chờ xác minh OTP</p>
+                                <p className="text-[11px] text-sky-700 mt-0.5">
+                                  Email <span className="font-mono font-semibold">{pendingVerifyEmail}</span> đã được gửi mã xác thực trước đó.
+                                </p>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap gap-2 pl-6">
+                              <Link
+                                to={`/verify-email?email=${encodeURIComponent(pendingVerifyEmail)}`}
+                                className="px-3 py-1.5 rounded-lg bg-[#0284c7] hover:bg-[#0369a1] text-white font-semibold text-[11px] transition-colors"
+                              >
+                                Tiếp tục nhập mã OTP
+                              </Link>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  try { sessionStorage.removeItem('sob_pending_verify_email'); } catch {}
+                                  setPendingVerifyEmail('');
+                                }}
+                                className="px-3 py-1.5 rounded-lg bg-white border border-sky-200 hover:bg-sky-100 text-sky-800 font-medium text-[11px] transition-colors cursor-pointer"
+                              >
+                                Đăng ký bằng email khác
+                              </button>
+                            </div>
+                          </div>
+                        )}
 
                         {/* Error Alert */}
                         {registerError && (

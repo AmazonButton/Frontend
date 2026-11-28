@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ShieldCheck, AlertTriangle, RefreshCw, Lock, CheckCircle2, XCircle, Plus, Wrench, BellRing, BatteryWarning } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ShieldCheck, AlertTriangle, RefreshCw, Lock, CheckCircle2, XCircle, Plus, Wrench, BellRing, BatteryWarning, ArrowRight } from 'lucide-react';
 import { api } from '../../services/api';
 import { getSocket } from '../../services/socket';
 import { toast } from '../../context/ToastContext';
@@ -608,6 +609,9 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
                   <option key={g.id} value={g.id}>{g.shortLabel}</option>
                 ))}
               </select>
+              <p className="mt-1 text-[11px] text-zinc-500 dark:text-zinc-400">
+                Gợi ý: {activeGroup.customerPolicy}
+              </p>
             </div>
             <div>
               <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">Mã lỗi chi tiết *</label>
@@ -620,6 +624,11 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
                   <option key={f.code} value={f.code}>{f.label}</option>
                 ))}
               </select>
+              {activeGroup.faults.find((f) => f.code === faultCode)?.description && (
+                <p className="mt-1 text-[11px] text-sky-700 dark:text-sky-300">
+                  Triệu chứng: {activeGroup.faults.find((f) => f.code === faultCode)?.description}
+                </p>
+              )}
             </div>
             <div>
               <label className="block font-medium text-zinc-700 dark:text-zinc-300 mb-1">Tiền cọc gốc (VNĐ)</label>
@@ -820,10 +829,44 @@ export const WarrantyPanel: React.FC<WarrantyPanelProps> = ({
                         </div>
                       )}
                     </td>
-                    <td className="py-2.5 px-3">
-                      <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${st.cls}`}>
-                        {st.label}
-                      </span>
+                    <td className="py-2.5 px-3 space-y-1.5">
+                      <div>
+                        <span className="text-[10px] font-semibold text-zinc-400 uppercase block mb-0.5">Kỹ thuật</span>
+                        <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${st.cls}`}>
+                          {ticket.status === 'RESOLVED' && ticket.faultGroup === 'GROUP_D'
+                            ? 'Đã khóa thiết bị'
+                            : ticket.status === 'APPROVED_SWAP'
+                              ? 'Đã duyệt đổi nút 1-1'
+                              : st.label}
+                        </span>
+                      </div>
+                      {(ticket.faultGroup === 'GROUP_C' || ticket.faultGroup === 'GROUP_D' || ticket.refundAmount > 0) && ticket.status !== 'PENDING' && ticket.status !== 'REJECTED' && (
+                        <div>
+                          <span className="text-[10px] font-semibold text-zinc-400 uppercase block mb-0.5">Hoàn cọc</span>
+                          <span className={`px-2 py-0.5 rounded-full text-[10px] font-medium border ${
+                            String((ticket as any).depositRefundStatus || '').toUpperCase() === 'REFUNDED'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200 dark:bg-emerald-950/40 dark:text-emerald-300'
+                              : String((ticket as any).depositRefundStatus || '').toUpperCase() === 'PENDING_PAYOUT'
+                                ? 'bg-sky-50 text-[#0E6BA8] border-sky-200 dark:bg-sky-950/40 dark:text-sky-300'
+                                : 'bg-amber-50 text-amber-700 border-amber-200 dark:bg-amber-950/40 dark:text-amber-300'
+                          }`}>
+                            {String((ticket as any).depositRefundStatus || '').toUpperCase() === 'REFUNDED'
+                              ? 'Đã hoàn cọc'
+                              : String((ticket as any).depositRefundStatus || '').toUpperCase() === 'PENDING_PAYOUT'
+                                ? 'Chờ chi trả Payout'
+                                : 'Chờ Admin duyệt (PENDING_APPROVAL)'}
+                          </span>
+                          {mode === 'admin' && (
+                            <Link
+                              to="/admin/refunds?tab=DEPOSIT_REFUNDS"
+                              className="mt-1 inline-flex items-center gap-1 text-[10px] font-semibold text-[#0E6BA8] hover:underline"
+                            >
+                              <span>Mở Tab Hoàn cọc</span>
+                              <ArrowRight className="w-2.5 h-2.5" />
+                            </Link>
+                          )}
+                        </div>
+                      )}
                       {ticket.adminNote && (
                         <div className="mt-1 text-[10px] text-zinc-500 max-w-[180px] truncate" title={ticket.adminNote}>{ticket.adminNote}</div>
                       )}

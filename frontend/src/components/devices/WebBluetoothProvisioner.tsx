@@ -249,14 +249,6 @@ export const WebBluetoothProvisioner: React.FC<WebBluetoothProvisionerProps> = (
 
       setSuccessMsg(`🎉 Đã truyền cấu hình Wi-Fi "${ssid}" thành công qua Bluetooth!\nNút bấm đang tự khởi động lại và kết nối vào mạng nhà bạn.`);
       setErrorMsg(null);
-      
-      // Notify backend
-      try {
-        await api.post(`/devices/${detectedDeviceId}/change-wifi`, {
-          ssid: ssid.trim(),
-          password,
-        });
-      } catch (_) {}
 
       confetti({
         particleCount: 80,

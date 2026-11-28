@@ -102,8 +102,9 @@ export class PaymentsRepository {
         return this.findTransactionByIdTx(tx, paymentTransactionId);
       }
 
-      // Only transition from PENDING to PAID
-      if (payment.status !== 'PENDING') {
+      // NV-11: If payment was CANCELLED or FAILED, but PayOS webhook arrives with verified payment,
+      // allow transitioning to PAID and route order to REFUND_PENDING so customer money is not lost!
+      if (!['PENDING', 'FAILED', 'CANCELLED'].includes(payment.status)) {
         throw new BadRequestException(`Không thể xác nhận giao dịch đang ở trạng thái ${payment.status}`);
       }
 
@@ -117,6 +118,46 @@ export class PaymentsRepository {
       }
       const order = lockedOrders[0];
 
+      // Item E Fix: Check if an active sibling payment transaction already occupies uq_payment_active_per_order
+      const activeSibling = await tx.paymentTransaction.findFirst({
+        where: {
+          orderId: payment.order_id,
+          status: { in: ['PENDING', 'PAID'] },
+          paymentTransactionId: { not: paymentTransactionId },
+        },
+      });
+
+      if (activeSibling) {
+        // Colliding with active replacement payment on the same order.
+        // To preserve uq_payment_active_per_order, transition this obsolete transaction to REFUND_PENDING
+        // instead of PAID, record the funds received, and route to financial refund reconciliation!
+        await tx.paymentTransaction.update({
+          where: { paymentTransactionId },
+          data: {
+            status: 'REFUND_PENDING',
+            paidAt: new Date(),
+          },
+        });
+
+        await tx.order.update({
+          where: { orderId: payment.order_id },
+          data: {
+            paymentStatus: 'REFUND_PENDING',
+          },
+        });
+
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId: payment.order_id,
+            oldStatus: order.order_status,
+            newStatus: order.order_status,
+            reason: 'Nhận khoản thanh toán từ liên kết cũ đã hủy khi đã có liên kết thanh toán mới; chuyển trạng thái thanh toán sang REFUND_PENDING để hoàn tiền cho khách',
+          },
+        });
+
+        return this.findTransactionByIdTx(tx, paymentTransactionId);
+      }
+
       // Update payment transaction to PAID
       await tx.paymentTransaction.update({
         where: { paymentTransactionId },
@@ -126,9 +167,9 @@ export class PaymentsRepository {
         },
       });
 
-      // Only update order to CONFIRMED if order is in PENDING status!
-      // If order was already CANCELLED, REJECTED, or COMPLETED, do NOT overwrite orderStatus!
-      const canConfirmOrder = order.order_status === 'PENDING';
+      // Only update order to CONFIRMED if order is in PENDING status AND payment_method is PAYOS!
+      // If order was already CANCELLED, REJECTED, COMPLETED, or switched to COD, do NOT overwrite orderStatus!
+      const canConfirmOrder = order.order_status === 'PENDING' && order.payment_method === 'PAYOS';
       if (canConfirmOrder) {
         await tx.order.update({
           where: { orderId: payment.order_id },
@@ -147,32 +188,103 @@ export class PaymentsRepository {
           },
         });
       } else {
-        // If order was already CANCELLED or REJECTED, mark paymentStatus as REFUND_PENDING for financial reconciliation
-        const isCancelledOrRejected = order.order_status === 'CANCELLED' || order.order_status === 'REJECTED';
-        const finalPaymentStatus = isCancelledOrRejected ? 'REFUND_PENDING' : 'PAID';
-
+        // If order was already CANCELLED, REJECTED, or payment_method was switched to COD,
+        // mark paymentStatus as REFUND_PENDING for financial reconciliation
         await tx.order.update({
           where: { orderId: payment.order_id },
           data: {
-            paymentStatus: finalPaymentStatus,
+            paymentStatus: 'REFUND_PENDING',
           },
         });
 
-        if (isCancelledOrRejected) {
-          await tx.orderStatusHistory.create({
-            data: {
-              orderId: payment.order_id,
-              oldStatus: order.order_status,
-              newStatus: order.order_status,
-              reason: `PayOS webhook nhận tiền sau khi đơn hàng đã ${order.order_status}. Đánh dấu paymentStatus: REFUND_PENDING để đối soát hoàn tiền.`,
-            },
-          });
-        }
+        await tx.orderStatusHistory.create({
+          data: {
+            orderId: payment.order_id,
+            oldStatus: order.order_status,
+            newStatus: order.order_status,
+            reason: `PayOS webhook nhận tiền sau khi đơn hàng đã ${order.order_status} (hoặc đổi phương thức thanh toán sang ${order.payment_method}). Đánh dấu paymentStatus: REFUND_PENDING để đối soát hoàn tiền.`,
+          },
+        });
+      }
+
+      // 3. Atomically create customer notification with unique idempotency key
+      const custRows: any[] = await tx.$queryRawUnsafe(
+        `SELECT user_id FROM customer_profile WHERE customer_id = $1`,
+        order.customer_id,
+      );
+      if (custRows && custRows.length > 0 && custRows[0].user_id) {
+        const customerUserId = custRows[0].user_id;
+        const idempotencyKey = `payment:${paymentTransactionId.toString()}:paid`;
+        const notifData = JSON.stringify({
+          orderId: order.order_id.toString(),
+          orderCode: order.order_code,
+          amount: Number(payment.amount),
+          paymentTransactionId: paymentTransactionId.toString(),
+        });
+        await tx.$executeRawUnsafe(
+          `INSERT INTO notifications (user_id, type, title, body, data, idempotency_key, created_at)
+           VALUES ($1, $2, $3, $4, $5::jsonb, $6, NOW())
+           ON CONFLICT (idempotency_key) DO NOTHING;`,
+          customerUserId,
+          'PAYMENT_SUCCESS',
+          'Thanh toán đơn hàng thành công',
+          `Đơn hàng #${order.order_code} đã thanh toán thành công qua PayOS với số tiền ${Number(payment.amount).toLocaleString('vi-VN')} VND.`,
+          notifData,
+          idempotencyKey,
+        );
       }
 
       return this.findTransactionByIdTx(tx, paymentTransactionId);
     });
   }
+
+  async changePaymentMethodTx(orderId: bigint, newPaymentMethod: string) {
+    return this.prisma.$transaction(async (tx) => {
+      // 1. Pessimistic lock order
+      const lockedOrders = await tx.$queryRawUnsafe<any[]>(
+        `SELECT order_id, order_status, payment_status, customer_id, store_id FROM orders WHERE order_id = $1 FOR UPDATE`,
+        orderId,
+      );
+      if (!lockedOrders || lockedOrders.length === 0) {
+        throw new NotFoundException('Không tìm thấy đơn hàng');
+      }
+      const order = lockedOrders[0];
+
+      if (order.payment_status === 'PAID') {
+        throw new BadRequestException('Không thể đổi phương thức thanh toán cho đơn hàng đã thanh toán');
+      }
+
+      const terminalStatuses = ['CONFIRMED', 'COMPLETED', 'CANCELLED', 'REJECTED'];
+      if (terminalStatuses.includes(order.order_status) || order.order_status !== 'PENDING') {
+        throw new BadRequestException(`Không thể đổi phương thức thanh toán khi đơn hàng đang ở trạng thái ${order.order_status}`);
+      }
+
+      // 2. Cancel any pending payment transactions
+      await tx.paymentTransaction.updateMany({
+        where: {
+          orderId,
+          status: 'PENDING',
+        },
+        data: {
+          status: 'CANCELLED',
+        },
+      });
+
+      // 3. Update order payment method
+      return tx.order.update({
+        where: { orderId },
+        data: {
+          paymentMethod: newPaymentMethod,
+          updatedAt: new Date(),
+        },
+        include: {
+          customer: true,
+          store: true,
+        },
+      });
+    });
+  }
+
 
   private async findTransactionByIdTx(tx: any, paymentTransactionId: bigint) {
     return tx.paymentTransaction.findUnique({
@@ -195,6 +307,42 @@ export class PaymentsRepository {
         ...(qrCode ? { qrCode } : {}),
       },
     });
+  }
+
+  async findTransactionByPaymentLinkIdOrOrder(orderCodeOrId: string) {
+    const numId = !isNaN(Number(orderCodeOrId)) ? Number(orderCodeOrId) : undefined;
+    return this.prisma.paymentTransaction.findFirst({
+      where: {
+        OR: [
+          { paymentLinkId: orderCodeOrId },
+          { transactionCode: orderCodeOrId },
+          ...(numId ? [{ order: { orderCode: orderCodeOrId } }] : []),
+        ],
+      },
+      include: {
+        order: {
+          include: { customer: true },
+        },
+      },
+    });
+  }
+
+  async isStoreVerificationTransaction(orderCodeOrRef: string): Promise<boolean> {
+    if (!orderCodeOrRef) return false;
+    try {
+      const tx = await (this.prisma as any).bankAccountVerificationTransaction.findFirst({
+        where: {
+          OR: [
+            { providerTransactionId: orderCodeOrRef },
+            { referenceCode: orderCodeOrRef },
+          ],
+        },
+        select: { id: true },
+      });
+      return !!tx;
+    } catch {
+      return false;
+    }
   }
 
 }

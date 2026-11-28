@@ -294,4 +294,93 @@ export const rentalsService = {
     const res = await api.put(`/admin/rentals/packages/${id}`, body);
     return res.data;
   },
+
+  // ========================================================
+  // CỤM 8: CASH VOUCHER, GIA HẠN, PHÂN CÔNG, BÀN GIAO & HOÀN CỌC
+  // ========================================================
+
+  async getRentalDetail(id: string | number): Promise<any> {
+    const res = await api.get(`/rentals/${encodeURIComponent(String(id))}`);
+    return res.data?.data || res.data;
+  },
+
+  async issueCashVoucher(rentalId: string | number, payload: { chargeId: string; collectingStoreId: string }): Promise<any> {
+    const res = await api.post(`/rentals/${encodeURIComponent(String(rentalId))}/cash-vouchers`, payload);
+    return res.data?.data || res.data;
+  },
+
+  async getHandoverPreview(storeId: string | number, rentalId: string | number): Promise<any> {
+    const res = await api.get(`/stores/${encodeURIComponent(String(storeId))}/rentals/${encodeURIComponent(String(rentalId))}/handover-preview`);
+    return res.data?.data || res.data;
+  },
+
+  async confirmCashCollection(
+    storeId: string | number,
+    rentalId: string | number,
+    payload: { chargeId: string; voucherToken: string; handover: 'IMMEDIATE'; buttonIds: string[] } | { chargeId: string; voucherToken: string; handover: 'DEFERRED' },
+  ): Promise<any> {
+    const idempotencyKey = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `cash-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const res = await api.post(
+      `/stores/${encodeURIComponent(String(storeId))}/rentals/${encodeURIComponent(String(rentalId))}/confirm-cash-collection`,
+      payload,
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+    return res.data?.data || res.data;
+  },
+
+  async getCashReceipt(storeId: string | number, receiptId: string | number): Promise<any> {
+    const res = await api.get(`/stores/${encodeURIComponent(String(storeId))}/cash-receipts/${encodeURIComponent(String(receiptId))}`);
+    return res.data?.data || res.data;
+  },
+
+  async extendRental(rentalId: string | number, additionalMonths: number): Promise<any> {
+    const idempotencyKey = typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+      ? crypto.randomUUID()
+      : `ext-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    const res = await api.post(
+      `/rentals/${encodeURIComponent(String(rentalId))}/extensions`,
+      { additionalMonths: Number(additionalMonths) },
+      { headers: { 'Idempotency-Key': idempotencyKey } },
+    );
+    return res.data?.data || res.data;
+  },
+
+  async adminListRentals(query: { page?: number; pageSize?: number; status?: string; pricingReviewRequired?: boolean } = {}): Promise<{ items: any[]; total: number; page: number; pageSize: number }> {
+    const res = await api.get('/admin/rentals', { params: query });
+    const body = res.data;
+    const items = Array.isArray(body?.data) ? body.data : Array.isArray(body?.items) ? body.items : [];
+    const total = Number(body?.pagination?.totalItems ?? body?.pagination?.total ?? body?.total ?? items.length);
+    const page = Number(body?.pagination?.page ?? body?.page ?? 1);
+    const pageSize = Number(body?.pagination?.pageSize ?? body?.pageSize ?? 20);
+    return { items, total, page, pageSize };
+  },
+
+  async adminAssignFulfillment(rentalId: string | number, payload: { fulfillmentStoreId: string; buttonIds: string[]; notes?: string }): Promise<any> {
+    const res = await api.post(`/admin/rentals/${encodeURIComponent(String(rentalId))}/assign-fulfillment`, payload);
+    return res.data?.data || res.data;
+  },
+
+  async adminHandoverRental(rentalId: string | number): Promise<any> {
+    const res = await api.post(`/admin/rentals/${encodeURIComponent(String(rentalId))}/handover`);
+    return res.data?.data || res.data;
+  },
+
+  async adminAdjustDuration(rentalId: string | number, payload: { additionalDays: number; reason: string }): Promise<any> {
+    const res = await api.post(`/admin/rentals/${encodeURIComponent(String(rentalId))}/adjust-duration`, payload);
+    return res.data?.data || res.data;
+  },
+
+  async approveDepositRefund(refundId: string | number): Promise<any> {
+    const res = await api.post(`/rentals/refunds/${encodeURIComponent(String(refundId))}/approve`);
+    return res.data?.data || res.data;
+  },
+
+  async adminConfirmDepositRefundPayout(refundId: string | number, providerReferenceId?: string): Promise<any> {
+    const res = await api.post(`/admin/rentals/refunds/${encodeURIComponent(String(refundId))}/confirm-payout`, {
+      ...(providerReferenceId?.trim() ? { providerReferenceId: providerReferenceId.trim() } : {}),
+    });
+    return res.data?.data || res.data;
+  },
 };

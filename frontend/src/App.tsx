@@ -26,10 +26,12 @@ const StoreDashboard = React.lazy(() => import('./pages/store/StoreDashboard').t
 const StoreDevicesPage = React.lazy(() => import('./pages/store/StoreDevicesPage').then((module) => ({ default: module.StoreDevicesPage })));
 const StoreDeviceTemplatesPage = React.lazy(() => import('./pages/store/StoreDeviceTemplatesPage').then((module) => ({ default: module.StoreDeviceTemplatesPage })));
 const StoreProductsPage = React.lazy(() => import('./pages/store/StoreProductsPage').then((module) => ({ default: module.StoreProductsPage })));
+const StoreCustomersPage = React.lazy(() => import('./pages/store/StoreCustomersPage').then((module) => ({ default: module.StoreCustomersPage })));
 const StoreRevenuePage = React.lazy(() => import('./pages/store/StoreRevenuePage').then((module) => ({ default: module.StoreRevenuePage })));
 const CustomerHomePage = React.lazy(() => import('./pages/customer/CustomerHomePage').then((module) => ({ default: module.CustomerHomePage })));
 const CustomerOrdersPage = React.lazy(() => import('./pages/customer/CustomerOrdersPage').then((module) => ({ default: module.CustomerOrdersPage })));
 const CustomerRentalsPage = React.lazy(() => import('./pages/customer/CustomerRentalsPage').then((module) => ({ default: module.CustomerRentalsPage })));
+const CustomerDeviceDetailPage = React.lazy(() => import('./pages/customer/CustomerDeviceDetailPage').then((module) => ({ default: module.CustomerDeviceDetailPage })));
 const ShopPage = React.lazy(() => import('./pages/customer/ShopPage').then((module) => ({ default: module.ShopPage })));
 const AdminDashboard = React.lazy(() => import('./pages/admin/AdminDashboard').then((module) => ({ default: module.AdminDashboard })));
 const QuickSetupPage = React.lazy(() => import('./pages/QuickSetupPage').then((module) => ({ default: module.QuickSetupPage })));
@@ -41,6 +43,7 @@ const StoreFinancePage = React.lazy(() => import('./pages/store/StoreFinancePage
 const StoreServicePlansPage = React.lazy(() => import('./pages/store/StoreServicePlansPage').then(module => ({ default: module.StoreServicePlansPage })));
 const AdminPayoutsPage = React.lazy(() => import('./pages/admin/AdminPayoutsPage').then((module) => ({ default: module.AdminPayoutsPage })));
 const AdminRefundsPage = React.lazy(() => import('./pages/admin/AdminRefundsPage').then((module) => ({ default: module.AdminRefundsPage })));
+const AdminIdentityPage = React.lazy(() => import('./pages/admin/AdminIdentityPage').then((module) => ({ default: module.AdminIdentityPage })));
 const AdminRentalActivationPage = React.lazy(() => import('./pages/admin/AdminRentalActivationPanel').then(module => ({ default: module.AdminRentalActivationPage })));
 const SystemStaffWorkspace = React.lazy(() => import('./pages/system-staff/SystemStaffWorkspace').then(module => ({ default: module.SystemStaffWorkspace })));
 const DriverDeliveryPage = React.lazy(() => import('./pages/operations/DriverDeliveryPage').then(module => ({ default: module.DriverDeliveryPage })));
@@ -188,6 +191,7 @@ export const App: React.FC = () => {
             <Route path="/store/service-plans" element={<StoreServicePlansPage />} />
             <Route path="/store/device-templates" element={<StoreDeviceTemplatesPage />} />
             <Route path="/store/products" element={<StoreProductsPage />} />
+            <Route path="/store/customers" element={<StoreCustomersPage />} />
             <Route path="/store/profile" element={<ProfilePage />} />
             <Route path="/store/analytics" element={<StoreRevenuePage />} />
             <Route path="/store/wallet" element={<Navigate to={storeWalletRedirect(location.search)} replace />} />
@@ -233,6 +237,7 @@ export const App: React.FC = () => {
             <Route path="/customer/home" element={<CustomerHomePage />} />
             <Route path="/customer/pair-device" element={<DevicePairingPage />} />
             <Route path="/customer/rentals" element={<CustomerRentalsPage />} />
+            <Route path="/customer/devices/:id" element={<CustomerDeviceDetailPage />} />
             <Route path="/customer/orders" element={<CustomerOrdersPage />} />
             <Route path="/customer/verification" element={<CustomerVerificationPage />} />
             <Route path="/customer/banking" element={<CustomerBankingPage />} />
@@ -251,7 +256,7 @@ export const App: React.FC = () => {
             <Route path="/admin/dashboard" element={<AdminDashboard />} />
             <Route path="/admin/payouts" element={<AdminPayoutsPage />} />
             <Route path="/admin/refunds" element={<AdminRefundsPage />} />
-            <Route path="/admin/identity" element={<Navigate to="/admin/dashboard" replace />} />
+            <Route path="/admin/identity" element={<AdminIdentityPage />} />
             <Route path="/admin/rental-activation" element={<AdminRentalActivationPage />} />
             <Route path="/admin/profile" element={<ProfilePage />} />
           </Route>

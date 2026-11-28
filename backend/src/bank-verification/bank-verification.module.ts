@@ -1,22 +1,25 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PaymentsModule } from '../payments/payments.module';
 import { BanksController } from './banks.controller';
 import { StoreBankAccountsController } from './store-bank-accounts.controller';
 import { BankVerificationWebhookController } from './bank-verification-webhook.controller';
+import { BankVerificationPollingController } from './bank-verification-polling.controller';
 import { BankVerificationService } from './bank-verification.service';
 import { BankVerificationRepository } from './bank-verification.repository';
 import { BankVerificationWebhookGuard } from './guards/bank-verification-webhook.guard';
 import { BankLookupRateLimitGuard } from './guards/bank-lookup-rate-limit.guard';
 import { PayOSBankVerificationProvider } from './providers/payos-bank-verification.provider';
 import { BANK_VERIFICATION_PROVIDER_TOKEN } from './providers/bank-verification.provider.interface';
+import { StoreBankRefundWorker } from './store-bank-refund.worker';
 
 @Module({
-  imports: [PrismaModule, PaymentsModule],
+  imports: [PrismaModule, forwardRef(() => PaymentsModule)],
   controllers: [
     BanksController,
     StoreBankAccountsController,
     BankVerificationWebhookController,
+    BankVerificationPollingController,
   ],
   providers: [
     BankVerificationService,
@@ -24,6 +27,7 @@ import { BANK_VERIFICATION_PROVIDER_TOKEN } from './providers/bank-verification.
     BankVerificationWebhookGuard,
     BankLookupRateLimitGuard,
     PayOSBankVerificationProvider,
+    StoreBankRefundWorker,
     {
       provide: BANK_VERIFICATION_PROVIDER_TOKEN,
       useClass: PayOSBankVerificationProvider,
